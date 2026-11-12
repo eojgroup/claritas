@@ -8,7 +8,7 @@ after(() => pool.end());
 test("feed evidence keeps quality, assessment freshness, shared stories, social expiry and critical diversity ranking", async (t) => {
   const client = await pool.connect();
   await client.query("BEGIN");
-  const connection = { query: client.query.bind(client), release() {} };
+  const connection = { query: (...args: any[]) => (client.query as any)(...args), release() {} };
   t.mock.method(pool, "connect", async () => connection as never);
   try {
     const sourceId = (await client.query("INSERT INTO source(name,api_base_url) VALUES($1,'https://example.org') RETURNING id", [`feed-ranking-${randomUUID()}`])).rows[0].id;
@@ -67,6 +67,24 @@ test("feed evidence keeps quality, assessment freshness, shared stories, social 
     assert.ok(Math.abs(feed.find((event) => event.id === critical)!.priority_score - (.55 * .9 + .2 * .1 + .15 * .1 + .1 * (1 - 1 / 72))) < .000001);
     for (const hidden of [blocked, expiredOrigin, expiredEvidence, empty]) assert.equal(feed.some((event) => event.id === hidden), false);
     assert.deepEqual((await listIntelligenceEvents({ eventType, limit: 2, offset: 1 })).map((event) => event.id), [critical, first]);
+    await client.query(`INSERT INTO intelligence_feed_snapshot(singleton,schema_version,generated_at,events)
+      VALUES(true,1,now(),$1::jsonb) ON CONFLICT(singleton) DO UPDATE SET schema_version=1,generated_at=now(),events=EXCLUDED.events`, [JSON.stringify(feed)]);
+    const statements: string[] = [];
+    const originalQuery = client.query.bind(client);
+    t.mock.method(client, "query", ((text: any, ...args: any[]) => {
+      statements.push(typeof text === "string" ? text : text.text);
+      return (originalQuery as any)(text, ...args);
+    }) as any);
+    assert.deepEqual((await listIntelligenceEvents({ limit: 100 })).map(event => event.id), feed.map(event => event.id));
+    assert.ok(statements.some(sql => sql.includes("FROM intelligence_feed_snapshot")));
+    assert.ok(!statements.some(sql => sql.includes("WITH eligible AS")), "a prepared global page must not rerank the full live history");
+    await client.query("UPDATE item SET payload=jsonb_build_object('quality_status','rejected') WHERE id=$1", [accepted]);
+    assert.deepEqual((await listIntelligenceEvents({ limit: 100 })).map(event => event.id), [staleAssessment, independent, contextual, malformed],
+      "publisher rejection is enforced immediately, before the next background refresh");
+    await client.query("UPDATE intelligence_event SET end_time=now()-interval '1 second' WHERE id=$1", [contextual]);
+    await client.query("DELETE FROM intelligence_event_evidence WHERE event_id=$1 AND domain='weather'", [independent]);
+    assert.deepEqual((await listIntelligenceEvents({ limit: 100 })).map(event => event.id), [staleAssessment, malformed],
+      "expiry and removed independent evidence are enforced on the saved page");
   } finally {
     t.mock.restoreAll();
     await client.query("ROLLBACK");

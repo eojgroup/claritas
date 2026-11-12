@@ -46,9 +46,20 @@ jobs:
             -project Claritas.xcodeproj \
             -scheme Claritas \
             -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/claritas-derived" \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      - name: Capture native map on iPhone and iPad
+        run: bash apps/mobile/ios/capture_map_snapshots.sh "$RUNNER_TEMP/claritas-derived/Build/Products/Debug-iphonesimulator/Claritas.app" "$RUNNER_TEMP/claritas-map-snapshots"
+
+      - name: Upload native map review
+        uses: actions/upload-artifact@v6
+        with:
+          name: native-map-review
+          path: ${{ runner.temp }}/claritas-map-snapshots/*.png
+          if-no-files-found: error
 
       - name: Compile watchOS application
         working-directory: apps/mobile/ios/Claritas

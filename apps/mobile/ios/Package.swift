@@ -17,7 +17,8 @@ let package = Package(
         .testTarget(
             name: "ClaritasAppleModelsTests",
             dependencies: ["ClaritasAppleModels"],
-            path: "Tests"
+            path: "Tests",
+            exclude: ["Fixtures"]
         )
     ]
 )

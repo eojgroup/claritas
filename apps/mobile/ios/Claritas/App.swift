@@ -7,8 +7,16 @@ struct ClaritasApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") {
+                SignalMapSnapshotReview()
+            } else {
+                RootView().environmentObject(appModel)
+            }
+            #else
             RootView()
                 .environmentObject(appModel)
+            #endif
         }
     }
 }

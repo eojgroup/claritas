@@ -1,7 +1,8 @@
+import { readPreparedIntelligenceFeed } from "./feed-snapshot";
 import { listNewsImages } from "../image-analysis/news-image-store";
 import { getEventContextImages } from "./context-images";
 import { isTimelyEventMedia } from "./event-media";
-import { loadTranslationContext, translateEventPresentation, translateEvidencePresentation, normalizeIntelligenceDisplayLanguage } from "./translation-presentation";
+import { headlineTranslationFields, loadTranslationContext, translateEventPresentation, translateEvidencePresentation, normalizeIntelligenceDisplayLanguage, type HeadlineTranslationPresentation } from "./translation-presentation";
 import { sourceRecordBigintSql, canonicalSocialSignalBigintSql } from "./source-record";
 import { getRegionalContext } from "./regional-context";
 import { activeSocialEvidenceSql, buildSignalCoverage, eventOriginDomainSql, eventSignalDomainsSql, eventNewsPrioritySql, eventPriorityScoreSql, eventPriorityReasons } from "./event-priority";
@@ -293,7 +294,7 @@ function intelligenceEventHasDisplayableEvidenceSql(eventAlias = "event") {
   )`;
 }
 
-export async function listIntelligenceEvents(options: {
+export type IntelligenceEventListOptions = {
   limit?: number;
   offset?: number;
   status?: string;
@@ -304,7 +305,34 @@ export async function listIntelligenceEvents(options: {
   since?: Date;
   includeExpired?: boolean;
   displayLanguage?: string;
-} = {}) {
+};
+
+export type IntelligenceFeedEvent = ReturnType<typeof eventToApi> & Partial<HeadlineTranslationPresentation>;
+
+export async function listIntelligenceEvents(options: IntelligenceEventListOptions = {}) {
+  const language = normalizeIntelligenceDisplayLanguage(options.displayLanguage ?? "en");
+  const prepared = await readPreparedIntelligenceFeed(options);
+  if (!prepared) return rankIntelligenceEvents(options);
+  const ids = prepared.events.map((event) => event.id);
+  if (!ids.length) return [];
+  const valid = await query<{ id: string }>(`SELECT event.id FROM intelligence_event event
+    WHERE event.id=ANY($1::uuid[]) AND event.status IN ('emerging','active','monitoring')
+      AND ${intelligenceEventExpiresAtSql("event")}>now()
+      AND ${intelligenceEventHasDisplayableEvidenceSql("event")}
+      AND NOT (COALESCE(event.metadata->>'canonical_evidence_key','') LIKE 'news:global_event:%'
+        AND event.domain_count<=1 AND event.source_diversity<=1 AND event.relevance_score<0.65)`, [ids]);
+  const visible = new Set(valid.rows.map((row) => row.id));
+  const rows = prepared.events.filter((event) => visible.has(event.id));
+  if (language === "en") return rows;
+  const translations = await loadTranslationContext(rows.map((row) => row.id), [], language);
+  return rows.map((row) => {
+    const original = { ...row, title: row.original_title ?? row.title, summary: row.original_summary ?? row.summary };
+    for (const key of Object.keys(headlineTranslationFields(row))) delete (original as Record<string, unknown>)[key];
+    return translateEventPresentation(original, translations);
+  });
+}
+
+export async function rankIntelligenceEvents(options: IntelligenceEventListOptions = {}, read: typeof query = query) {
   const displayLanguage = normalizeIntelligenceDisplayLanguage(options.displayLanguage ?? "en");
   const params: unknown[] = [];
   const where: string[] = [
@@ -340,7 +368,7 @@ export async function listIntelligenceEvents(options: {
   const offset = Math.max(0, Math.trunc(options.offset ?? 0));
   const limitRef = add(limit);
   const offsetRef = add(offset);
-  const { rows } = await query<EventRow>(
+  const { rows } = await read<EventRow>(
     `WITH eligible AS MATERIALIZED (
        -- Rank lightweight rows. Full metadata, summaries and geometry can be
        -- large; carrying them through every CTE spills even a small live feed
@@ -354,15 +382,8 @@ export async function listIntelligenceEvents(options: {
               ) AS metadata
        FROM intelligence_event_feed event
        WHERE ${where.join(" AND ")}
-     ), candidates AS MATERIALIZED (
-       SELECT event.*,
-              ${eventOriginDomainSql()} AS origin_domain,
-              COALESCE(feed_evidence.news_priority,0) AS news_priority
-       FROM eligible event
-       CROSS JOIN LATERAL (
-         -- One indexed evidence pass supplies both quality eligibility and
-         -- publisher priority. Keep it correlated to the narrow live set.
-         SELECT bool_or(${activeSocialEvidenceSql()} AND (
+     ), feed_evidence AS MATERIALIZED (
+         SELECT evidence.event_id,bool_or(${activeSocialEvidenceSql()} AND (
                   evidence.source_record_type<>'item' OR
                   CASE WHEN lower(COALESCE(evidence_source.name,''))='gdelt'
                     THEN article.payload->>'quality_status'='accepted'
@@ -377,8 +398,14 @@ export async function listIntelligenceEvents(options: {
          LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
          LEFT JOIN item article ON article.id=${sourceRecordBigintSql("evidence", "item")}
          LEFT JOIN news_item_assessment assessment ON assessment.item_id=article.id AND evidence.domain='news'
-         WHERE evidence.event_id=event.id
-       ) feed_evidence
+         WHERE evidence.event_id=ANY(ARRAY(SELECT id FROM eligible))
+         GROUP BY evidence.event_id
+     ), candidates AS MATERIALIZED (
+       SELECT event.*,
+              ${eventOriginDomainSql()} AS origin_domain,
+              COALESCE(feed_evidence.news_priority,0) AS news_priority
+       FROM eligible event
+       JOIN feed_evidence ON feed_evidence.event_id=event.id
        WHERE ${intelligenceEventHasRetainedOriginSql("event")} AND feed_evidence.displayable
      ), scored AS (
        SELECT candidates.*,${eventPriorityScoreSql("candidates", true)} AS raw_priority

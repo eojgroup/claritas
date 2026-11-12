@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { refreshPreparedIntelligenceFeed } from "./feed-snapshot";
 import { query, withTransaction, withWorkerLease } from "../db";
 import { SharedReadCache } from "../shared-read-cache";
 import { assembleIntelligenceOverview, buildOverviewProjectionQuery, buildOverviewEventQuery,
@@ -272,6 +273,9 @@ export async function runIntelligenceOverviewWorkerCycle() {
   running = true;
   try {
     await withWorkerLease("intelligence-overview", 180, async () => {
+      await refreshPreparedIntelligenceFeed().catch((error) => {
+        console.warn(JSON.stringify({ event: "intelligence_feed_prepare_failed", message: error instanceof Error ? error.message : String(error) }));
+      });
       const state = (await query<State>("SELECT generation_id,generated_at,pending_events FROM intelligence_overview_state WHERE singleton=true")).rows[0];
       // The short poll keeps initial backfill moving. Two-minute snapshots
       // rotate the reporting window while bounding shared database CPU work.

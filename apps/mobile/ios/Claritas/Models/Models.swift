@@ -1,4 +1,77 @@
 import Foundation
+
+/// Natural Earth 1, matching the web map. A single scale preserves country
+/// proportions on both a narrow phone and a wide iPad; viewport zoom never
+/// changes label or touch-target size. Coefficients follow d3-geo (ISC).
+struct SignalMapProjection {
+    let minLongitude: Double
+    let maxLongitude: Double
+    let minLatitude: Double
+    let maxLatitude: Double
+
+    static func raw(latitude: Double, longitude: Double) -> (x: Double, y: Double) {
+        let phi = max(-90, min(90, latitude)) * .pi / 180
+        let lambda = longitude * .pi / 180
+        let p2 = phi * phi, p4 = p2 * p2
+        let x = lambda * (0.8707 - 0.131979 * p2 + p4 * (-0.013791 + p4 * (0.003971 * p2 - 0.001529 * p4)))
+        let y = phi * (1.007226 + p2 * (0.015085 + p4 * (-0.044475 + 0.028874 * p2 - 0.005916 * p4)))
+        return (x, y)
+    }
+
+    func point(latitude: Double, longitude: Double, width: Double, height: Double,
+               zoom: Double = 1, offsetX: Double = 0, offsetY: Double = 0) -> (x: Double, y: Double) {
+        fitted(width: width, height: height, zoom: zoom, offsetX: offsetX, offsetY: offsetY).point(latitude: latitude, longitude: longitude)
+    }
+
+    func fitted(width: Double, height: Double, zoom: Double = 1, offsetX: Double = 0, offsetY: Double = 0) -> SignalMapTransform {
+        let latitudes = [minLatitude, maxLatitude, max(minLatitude, min(maxLatitude, 0))]
+        let corners = latitudes.flatMap { lat in [Self.raw(latitude: lat, longitude: minLongitude), Self.raw(latitude: lat, longitude: maxLongitude)] }
+        let minX = corners.map { $0.x }.min()!, maxX = corners.map { $0.x }.max()!
+        let minY = corners.map { $0.y }.min()!, maxY = corners.map { $0.y }.max()!
+        let scale = min(max(1, width - 24) / max(0.001, maxX - minX), max(1, height - 24) / max(0.001, maxY - minY))
+        return SignalMapTransform(scale: scale * zoom, rawCenterX: (minX + maxX) / 2, rawCenterY: (minY + maxY) / 2,
+                                  centerX: width / 2 + offsetX, centerY: height / 2 + offsetY)
+    }
+}
+
+struct SignalMapTransform {
+    let scale: Double
+    let rawCenterX: Double
+    let rawCenterY: Double
+    let centerX: Double
+    let centerY: Double
+    func point(rawX: Double, rawY: Double) -> (x: Double, y: Double) {
+        (centerX + (rawX - rawCenterX) * scale, centerY - (rawY - rawCenterY) * scale)
+    }
+    func point(latitude: Double, longitude: Double) -> (x: Double, y: Double) {
+        let raw = SignalMapProjection.raw(latitude: latitude, longitude: longitude)
+        return point(rawX: raw.x, rawY: raw.y)
+    }
+}
+
+struct SignalMapPinGroup: Identifiable {
+    let id: String
+    var eventIDs: [String]
+    var x: Double
+    var y: Double
+    var hasImagery: Bool
+
+    /// Groups overlapping targets in screen space, so zoom naturally reveals
+    /// individual events without losing their IDs or inventing incident points.
+    static func groups(_ pins: [SignalMapPinGroup], distance: Double = 32) -> [SignalMapPinGroup] {
+        var result: [SignalMapPinGroup] = []
+        for pin in pins {
+            if let index = result.firstIndex(where: { hypot($0.x - pin.x, $0.y - pin.y) < distance }) {
+                let count = Double(result[index].eventIDs.count), added = Double(pin.eventIDs.count)
+                result[index].x = (result[index].x * count + pin.x * added) / (count + added)
+                result[index].y = (result[index].y * count + pin.y * added) / (count + added)
+                result[index].eventIDs += pin.eventIDs
+                result[index].hasImagery = result[index].hasImagery || pin.hasImagery
+            } else { result.append(pin) }
+        }
+        return result
+    }
+}
 import CryptoKit
 
 /// Publishes each startup resource as soon as it arrives. The generation check

@@ -9,7 +9,10 @@ The iPhone and iPad signal map uses [Natural Earth country geometry](https://www
 (public domain), distributed through the `world-atlas` dataset, for its native
 SwiftUI Canvas signal-concentration layer. The branded overview uses bundled
 country boundaries, full-window shading, event/imagery markers and touch controls,
-without Apple basemap tiles. It focuses on the leading or selected country.
+without Apple basemap tiles. Natural Earth 1 preserves country proportions across
+phone/tablet sizes. Nearby event groups open a list; country names/flags and a
+legend explain the layers. Two-finger pan keeps one-finger page scrolling usable.
+It focuses on the leading or selected country.
 
 Natural Earth rings at the ±180° meridian are split before MapKit consumes
 them. After replacing or regenerating the resource, run

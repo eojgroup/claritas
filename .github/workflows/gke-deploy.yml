@@ -1282,6 +1282,7 @@ jobs:
                 const started = Date.now();
                 const events = await listIntelligenceEvents({ limit: 100 });
                 const feedMs = Date.now()-started;
+                if (feedMs > 5000) throw new Error("Prepared event feed exceeded its five-second production read budget");
                 const detailStarted = Date.now();
                 const detail = events[0] ? await getIntelligenceEvent(events[0].id) : null;
                 if (events[0] && !detail) throw new Error("Priority event detail unavailable");
