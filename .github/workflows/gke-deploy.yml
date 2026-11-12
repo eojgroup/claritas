@@ -1276,16 +1276,46 @@ jobs:
             kubectl -n "${NAMESPACE}" exec deployment/claritas-api -c claritas-api -- node -e '
               const { listIntelligenceEvents, getIntelligenceEvent } = require("./dist/intelligence/service.js");
               const { getIntelligenceOverview } = require("./dist/intelligence/overview.js");
-              const { pool } = require("./dist/db.js");
+              const { pool, query } = require("./dist/db.js");
+              const { withReadPriority } = require("./dist/reader-work.js");
               (async () => {
                 const started = Date.now();
                 const events = await listIntelligenceEvents({ limit: 100 });
-                if (events[0] && !await getIntelligenceEvent(events[0].id)) throw new Error("Priority event detail unavailable");
-                const overview = await getIntelligenceOverview({ hours: 24 });
+                const feedMs = Date.now()-started;
+                const detailStarted = Date.now();
+                const detail = events[0] ? await getIntelligenceEvent(events[0].id) : null;
+                if (events[0] && !detail) throw new Error("Priority event detail unavailable");
+                const detailMs = Date.now()-detailStarted;
+                let optionalFinished = 0;
+                const optional = Array.from({ length: 24 }, () => withReadPriority("optional", async () => {
+                  await query("SELECT pg_sleep(0.05)"); optionalFinished++;
+                }));
+                const overviewStarted = Date.now();
+                const overview = await withReadPriority("core", () => getIntelligenceOverview({ hours: 24 }));
+                const overviewMs = Date.now()-overviewStarted;
+                const finishedAtOverview = optionalFinished;
+                await Promise.all(optional);
                 if (!Array.isArray(overview.events) || !Array.isArray(overview.timeline) || !Number.isInteger(overview.summary.event_count)) {
                   throw new Error("Situation overview unavailable");
                 }
-                console.log(JSON.stringify({ event: "release_intelligence_read_verified", count: events.length, overview_count: overview.events.length, duration_ms: Date.now()-started }));
+                if (overviewMs > 5000) throw new Error("Saved overview exceeded its five-second production read budget");
+                const views = [overview, await getIntelligenceOverview({ hours: 24, priority: "all" }), await getIntelligenceOverview({ hours: 168, priority: "all" })];
+                for (const view of views) {
+                  if (![view.countries, view.map_events, view.visual_events].every(Array.isArray)) throw new Error("Complete map and visual coverage fields are missing");
+                  if (view.buckets.reduce((sum, bucket) => sum+bucket.event_count, 0) !== view.summary.event_count) throw new Error("Activity chart totals do not match the selected period");
+                  console.log(JSON.stringify({ event: "release_overview_coverage_verified", hours: view.window.hours, priority: view.filters.priority,
+                    count: view.summary.event_count, countries: view.countries.length, map_events: view.map_events.length, images: view.visual_events.length, buckets: view.buckets.length }));
+                }
+                const visual = views.flatMap((view) => view.visual_events).find((event) => event.imagery)?.imagery;
+                if (visual) {
+                  const path = new URL(visual.preview_url, "http://127.0.0.1").pathname.split("/");
+                  const asset = path[2] === "news-images" ? await require("./dist/image-analysis/news-image-store.js").getNewsImagePreview(path[3])
+                    : path[2] === "earth-observation" ? await require("./dist/earth-observation/service.js").getEarthAssetBuffer(path[4]) : null;
+                  if (!(asset?.preview?.length || asset?.bytes?.length)) throw new Error("Retained overview image bytes are unavailable");
+                  console.log(JSON.stringify({ event: "release_overview_image_verified", source_kind: visual.source_kind }));
+                }
+                console.log(JSON.stringify({ event: "release_intelligence_read_verified", count: events.length, overview_count: overview.events.length,
+                  feed_ms: feedMs, detail_ms: detailMs, overview_ms: overviewMs, optional_finished_at_overview: finishedAtOverview, duration_ms: Date.now()-started }));
               })().catch((error) => { console.error(error.message); process.exitCode=1; }).finally(() => pool.end());
             '
 

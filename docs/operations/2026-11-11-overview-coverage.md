@@ -41,3 +41,16 @@ countries, 59 located events and two retained visual events. Rebuilding the 24-h
 payload queries took 194 ms, seven-day queries 1,124 ms and a country scope 20 ms.
 Initial retained-image enrichment updated 504 historical projection records in
 2,827 ms. This work stays in the background; global readers use saved JSON.
+
+Release `8250402` passed both [GKE](https://github.com/eojgroup/claritas/actions/runs/43082536073)
+and [Apple distribution](https://github.com/eojgroup/claritas/actions/runs/43082536091).
+TestFlight **1.0 (1000.0.56)** is available to Claritas Test Group; all 54 shared
+Apple tests and iPhone/iPad/Watch builds passed. GKE verified six restored views,
+1,580 current news records and current primary transport reception.
+
+Final web verification also surfaces available natural-colour satellite previews
+and reused location images directly after the event summary. Reused images retain
+their capture dates, provenance and context-only notice, and can open the original
+event inline. Deployment checks log separate feed/detail/overview timings under
+24 optional queries, reconcile full-window chart totals, validate map/image fields
+and read retained preview bytes before accepting the release.

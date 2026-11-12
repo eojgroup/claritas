@@ -635,7 +635,7 @@ export default function IntelligenceWorkspace({
                 <div className="event-essential-facts"><span><MapPin size={13} />{detail.understanding?.where || detailPresentation?.locationLabel}</span><span>{linkedNews.length} linked {linkedNews.length === 1 ? "report" : "reports"}</span>{displayedEarthObservations.length > 0 && <span>{displayedEarthObservations.length} satellite {displayedEarthObservations.length === 1 ? "scene" : "scenes"}</span>}</div>
                 {detail.event.priority_reasons?.length ? <details><summary>Why prioritised</summary><ul>{detail.event.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details> : null}
               </section>
-              <EventSignalVisuals detail={detail} />
+              <EventSignalVisuals detail={detail} onOpenEvent={selectEvent} />
               <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={onOpenImagery} />
               <details className="event-optional-context" open={contextExpanded} onToggle={(event) => setContextExpanded(event.currentTarget.open)}>
                 <summary>Explore surrounding context</summary>
