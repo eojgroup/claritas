@@ -3746,12 +3746,12 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
     let topic: String?
     let priority: String
 
-    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "high") {
+    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "all") {
         self.hours = Self.windows.contains(hours) ? hours : 24
         let code = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         self.country = code?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil ? (code == "UK" ? "GB" : code) : nil
         self.topic = Self.topics.contains(where: { $0.key == topic }) ? topic : nil
-        self.priority = priority == "all" ? "all" : "high"
+        self.priority = priority == "high" ? "high" : "all"
     }
 
     var requestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")|\(priority)" }

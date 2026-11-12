@@ -32,6 +32,9 @@ import {
   RefreshCw,
   Route,
   Radio,
+  CloudSun,
+  TrendingUp,
+  Satellite,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -858,7 +861,7 @@ export default function ClaritasDashboard() {
   const [overviewEventsLoading, setOverviewEventsLoading] = useState(true);
   const [overview, setOverview] = useState<IntelligenceOverview | null>(null);
   const [overviewHours, setOverviewHours] = useState<24 | 72 | 168>(24);
-  const [overviewPriority, setOverviewPriority] = useState<"high" | "all">("high");
+  const [overviewPriority, setOverviewPriority] = useState<"high" | "all">("all");
   const [overviewTopic, setOverviewTopic] = useState<OverviewTopic | null>(null);
   const [overviewEventRefresh, setOverviewEventRefresh] = useState(0);
   const [authStatus, setAuthStatus] = useState<
@@ -3975,6 +3978,9 @@ export default function ClaritasDashboard() {
     { id: "social", label: "Social signals", view: "social" as const, icon: Radio, group: "sources" },
     { id: "podcasts", label: "Podcasts", view: "podcasts" as const, icon: Podcast, group: "sources" },
     { id: "transport", label: "Transport", view: "transport" as const, icon: Route, group: "sources" },
+    { id: "weather", label: "Weather", view: "weather" as const, icon: CloudSun, group: "sources" },
+    { id: "markets", label: "Markets", view: "markets" as const, icon: TrendingUp, group: "sources" },
+    { id: "earth-observation", label: "Imagery", view: "earth-observation" as const, icon: Satellite, group: "sources" },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),

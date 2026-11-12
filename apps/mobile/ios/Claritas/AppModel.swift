@@ -88,7 +88,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var isRefreshingIntelligenceOverview = false
     @Published var overviewHours = 24
     @Published var overviewTopic: String? = nil
-    @Published var overviewPriority = "high"
+    @Published var overviewPriority = "all"
     private var overviewRequestID = UUID()
     private var overviewLoadedScope: IntelligenceOverviewScope?
     private var overviewPendingScope: IntelligenceOverviewScope?
@@ -669,7 +669,7 @@ final class AppModel: ObservableObject {
         isRefreshingIntelligenceOverview = false
         overviewHours = 24
         overviewTopic = nil
-        overviewPriority = "high"
+        overviewPriority = "all"
         dailyBriefing = nil
         dailyBriefingSchedule = nil
         dailyBriefingScheduleError = nil

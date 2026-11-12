@@ -9,7 +9,7 @@ final class OverviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(scope.country, "GB")
         XCTAssertEqual(scope.topic, "security")
         XCTAssertEqual(scope.queryItems, [
-            URLQueryItem(name: "hours", value: "72"), URLQueryItem(name: "priority", value: "high"),
+            URLQueryItem(name: "hours", value: "72"), URLQueryItem(name: "priority", value: "all"),
             URLQueryItem(name: "country", value: "GB"),
             URLQueryItem(name: "topic", value: "security"),
         ])
@@ -75,10 +75,11 @@ final class OverviewAnalyticsTests: XCTestCase {
     }
 
     func testPriorityDefaultsAndScopeCoordinationRejectDifferentCohorts() throws {
-        let high = IntelligenceOverviewScope()
-        let all = IntelligenceOverviewScope(priority: "all")
+        let high = IntelligenceOverviewScope(priority: "high")
+        let all = IntelligenceOverviewScope()
         XCTAssertEqual(high.priority, "high")
-        XCTAssertEqual(IntelligenceOverviewScope(priority: "unknown").priority, "high")
+        XCTAssertEqual(all.priority, "all")
+        XCTAssertEqual(IntelligenceOverviewScope(priority: "unknown").priority, "all")
         XCTAssertNotEqual(high.requestKey, all.requestKey)
         XCTAssertTrue(all.queryItems.contains(URLQueryItem(name: "priority", value: "all")))
 

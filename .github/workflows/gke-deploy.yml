@@ -1291,7 +1291,7 @@ jobs:
                   await query("SELECT pg_sleep(0.05)"); optionalFinished++;
                 }));
                 const overviewStarted = Date.now();
-                const overview = await withReadPriority("core", () => getIntelligenceOverview({ hours: 24 }));
+                const overview = await withReadPriority("core", () => getIntelligenceOverview({ hours: 24, priority: "all" }));
                 const overviewMs = Date.now()-overviewStarted;
                 const finishedAtOverview = optionalFinished;
                 await Promise.all(optional);
@@ -1299,7 +1299,7 @@ jobs:
                   throw new Error("Situation overview unavailable");
                 }
                 if (overviewMs > 5000) throw new Error("Saved overview exceeded its five-second production read budget");
-                const views = [overview, await getIntelligenceOverview({ hours: 24, priority: "all" }), await getIntelligenceOverview({ hours: 168, priority: "all" })];
+                const views = [overview, await getIntelligenceOverview({ hours: 24, priority: "high" }), await getIntelligenceOverview({ hours: 168, priority: "all" })];
                 for (const view of views) {
                   if (![view.countries, view.map_events, view.visual_events].every(Array.isArray)) throw new Error("Complete map and visual coverage fields are missing");
                   if (view.buckets.reduce((sum, bucket) => sum+bucket.event_count, 0) !== view.summary.event_count) throw new Error("Activity chart totals do not match the selected period");

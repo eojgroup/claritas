@@ -1916,7 +1916,7 @@ struct IntelligenceOverviewPanel: View {
                     activityChart(overview)
                     if let images = overview.visual_events, !images.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(alignment: .top, spacing: 10) {
+                            LazyHStack(alignment: .top, spacing: 10) {
                                 ForEach(images) { event in
                                     if let image = event.imagery {
                                         Button {

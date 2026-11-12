@@ -54,3 +54,16 @@ their capture dates, provenance and context-only notice, and can open the origin
 event inline. Deployment checks log separate feed/detail/overview timings under
 24 optional queries, reconcile full-window chart totals, validate map/image fields
 and read retained preview bytes before accepting the release.
+
+Direct Weather, Markets and Imagery navigation is restored as well. These
+existing workspaces remain lazy: opening Weather triggers its data read, while
+the initial World overview still stays within its three-request peak budget.
+
+The November 12 runtime check exposed why the first screen could still look
+empty: High priority had 214 events but no precise pins or retained images,
+whereas All developments had 12,056 events, 116 countries, 71 pins and eight
+visual highlights. Web and Apple overview defaults now show All developments;
+High priority remains an explicit filter. Both are prepared snapshots, so this
+does not restore background source fan-out. Apple image highlights use a lazy
+horizontal stack. The legacy API default remains unchanged for compatibility;
+clients send their selected priority explicitly.
