@@ -55,3 +55,40 @@ blocked optional requests. Regression tests preserve quality, social retention,
 assessment freshness, critical ranking and pagination, and invalidate rejected/
 expired saved cards without reranking all history. Swift parse and project
 validation passed; full device builds and native captures run in Apple CI.
+
+## Successful release receipt
+
+[GKE run 43239242243](https://github.com/eojgroup/claritas/actions/runs/43239242243)
+deployed backend/web commit `e889356` successfully. V72/V73 applied, all six
+overview views and the prepared feed were fresh before API/web rollout, and
+ingestion/transport/runtime checks passed. Production measured the 100-event feed
+at **407 ms**, event detail at **360 ms**, and the saved overview at **25 ms**
+while 24 optional queries were pending. The previous release failed at the
+15-second feed timeout. The interactive deadline was not increased.
+
+The 24-hour All overview contained 12,361 developments, 111 countries, 80 located
+map events and eight images; all 12 chart buckets reconciled with the full count.
+The seven-day view contained 62,094 developments, 170 countries, 200 bounded pins
+and eight images. Retained publisher preview bytes were read successfully.
+News runtime verified 1,680 current stories and current transport reception.
+
+An independent post-deployment check loaded the exact Valencia event with
+`regional_reporting: null` and valid transport evidence. It measured feed/detail
+reads at 453/256 ms and found eight timely weather forecast points. Public event
+HTML and its JavaScript assets returned HTTP 200; the live `index-slhSRV36.js`
+and `IntelligenceWorkspace-B8Jdi3u3.js` match the Linux CI build. The event bundle
+contains the weather loader, forecast and visual selector.
+
+[Apple run 43240620106](https://github.com/eojgroup/claritas/actions/runs/43240620106)
+released mobile commit `5603046` as **1.0 (1000.0.62)** to Claritas Test Group.
+All 60 model tests, iPhone/iPad/Watch builds, simulator captures and signed
+distribution passed. The phone/tablet captures were visually inspected. Country
+proportions, names/flags and grouped pins are visible; iPad count labels stay on
+one line, and the explanatory event/image/group key sits below the map.
+
+The intermediate native build exposed a transport dependency on shared country
+polygons, which was restored. Superseded GKE runs were cancelled during validation,
+before production mutations. Mobile-only pushes now trigger Apple CI without
+restarting web/API deployments. Native QA fixtures and launch handling remain
+test-only; production still uses the authenticated application and live data.
+Temporary validation pods and the isolated production-probe files were removed.
