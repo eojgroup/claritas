@@ -682,6 +682,12 @@ final class APIClient {
         return try await request(URLRequest(url: components.url!), as: IntelligenceEventDetail.self)
     }
 
+    func fetchEventWeather(id: String) async throws -> EventWeatherVisual? {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let url = baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)/weather")
+        return try await request(URLRequest(url: url), as: EventWeatherEnvelope.self).weather
+    }
+
     func fetchEventGibsContext(id: String) async throws -> GibsEventContext? {
         let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         let url = baseURL.appendingPathComponent("/api/earth-observation/events/\(encoded)/gibs")

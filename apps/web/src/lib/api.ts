@@ -2558,6 +2558,21 @@ export async function fetchIntelligenceEvent(id: string, options?: { includeCont
   });
 }
 
+export type EventWeatherVisual = {
+  country: string; location_name: string; observed_at: string; temp_c: number | null;
+  precipitation_mm: number | null; wind_speed: number | null; wind_direction: number | null; wind_gust: number | null;
+  weather_desc: string | null; source_name: string; source_kind: string | null; attribution: string;
+  scope_label: string; notice: string; forecast: Array<{ forecast_time: string; temp_c: number }>;
+};
+
+export async function fetchEventWeather(id: string, signal?: AbortSignal): Promise<EventWeatherVisual | null> {
+  return readWithDeadline(async (requestSignal) => {
+    const response = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}/weather`, { credentials: "include", signal: requestSignal });
+    if (!response.ok) throw new Error(await readError(response, "Weather context could not be loaded"));
+    return (await response.json()).weather;
+  }, signal);
+}
+
 export async function fetchIntelligenceLocations(params?: {
   limit?: number;
   query?: string;

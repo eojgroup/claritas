@@ -86,6 +86,20 @@ final class UnifiedEventTests: XCTestCase {
         XCTAssertTrue(detail.earth_observations.isEmpty)
     }
 
+    func testWeatherVisualDistinguishesReferenceSampleAndForecast() throws {
+        let envelope = try decode(EventWeatherEnvelope.self, ["weather": [
+            "country": "ES", "location_name": "Madrid", "observed_at": "2026-11-12T12:00:00Z",
+            "temp_c": 20, "wind_speed": 5, "wind_direction": 90, "source_name": "Provider",
+            "source_kind": "forecast_model", "attribution": "Provider attribution",
+            "scope_label": "Country reference location · not the event site", "notice": "Forecast, not observed history",
+            "forecast": [["forecast_time": "2026-11-12T15:00:00Z", "temp_c": 21]],
+        ]])
+        XCTAssertEqual(envelope.weather?.wind_speed, 5)
+        XCTAssertEqual(envelope.weather?.forecast.first?.temp_c, 21)
+        XCTAssertTrue(envelope.weather?.scope_label.contains("not the event site") == true)
+        XCTAssertNil(try decode(EventWeatherEnvelope.self, ["weather": NSNull()]).weather)
+    }
+
     func testRegionalTransportMetricsStayOutsideAttachedEvidence() throws {
         let detail = try decode(IntelligenceEventDetail.self, [
             "event": eventPayload,

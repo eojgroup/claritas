@@ -3468,6 +3468,31 @@ struct IntelligenceNewsImage: Codable, Identifiable {
     let notice: String
 }
 
+struct EventWeatherEnvelope: Codable { let weather: EventWeatherVisual? }
+
+struct EventWeatherVisual: Codable {
+    struct Forecast: Codable, Identifiable {
+        var id: Date { forecast_time }
+        let forecast_time: Date
+        let temp_c: Double
+    }
+    let country: String
+    let location_name: String
+    let observed_at: Date
+    let temp_c: Double?
+    let precipitation_mm: Double?
+    let wind_speed: Double?
+    let wind_direction: Double?
+    let wind_gust: Double?
+    let weather_desc: String?
+    let source_name: String
+    let source_kind: String?
+    let attribution: String
+    let scope_label: String
+    let notice: String
+    let forecast: [Forecast]
+}
+
 struct IntelligenceContextImage: Codable, Identifiable {
     let id: String
     let kind: String

@@ -131,6 +131,7 @@ test("authenticated overview page and readiness survive a real HTTP burst of blo
     };
     const unauthorized = await read("/api/intelligence/overview", false);
     assert.equal(unauthorized.status, 401, "spawned application must enforce actual paid-access authentication");
+    assert.equal((await read(`/api/intelligence/events/${fixture}/weather`, false)).status, 401);
 
     blocker = await pool.connect();
     await blocker.query("BEGIN");
@@ -185,6 +186,9 @@ test("authenticated overview page and readiness survive a real HTTP burst of blo
       assert.ok("response" in result, `optional request failed: ${"error" in result ? String(result.error) : ""}`);
       assert.equal(result.response.status, 200, `${result.response.path}: ${JSON.stringify(result.response.body)}\n${serverOutput}`);
     }
+    const weather = await read(`/api/intelligence/events/${fixture}/weather`);
+    assert.equal(weather.status, 200);
+    assert.equal(weather.body.weather, null, "missing weather is an explicit null object, never an array");
   } finally {
     try {
       if (blocker) {

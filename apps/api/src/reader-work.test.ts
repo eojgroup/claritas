@@ -47,6 +47,7 @@ test("request priorities stay isolated across async requests and surrounding con
   assert.equal(routeReadPriority("/api/intelligence/overview"), "core");
   assert.equal(routeReadPriority("/api/briefings/daily/latest"), "core");
   assert.equal(routeReadPriority("/api/intelligence/events/id", true), "optional");
+  assert.equal(routeReadPriority("/api/intelligence/events/id/weather"), "optional");
   assert.equal(routeReadPriority("/api/market/countries"), "optional");
   assert.equal(routeReadPriority("/api/weather/country-latest"), "optional");
   const results = await Promise.all(["core", "optional"].map((priority) => withReadPriority(priority as "core" | "optional", async () => {

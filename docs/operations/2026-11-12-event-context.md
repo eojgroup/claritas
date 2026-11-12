@@ -32,3 +32,13 @@ coverage. Recently collected bytes cannot make an old capture or old article
 eligible. The same time window controls background overview image selection.
 Article publication is never represented as a verified photograph capture date.
 No image downloads, model inference or extra source fan-out run on event opening.
+
+The event visual selector leads with available images or the recorded transport
+comparison. Weather loads only after selection, through an authenticated,
+optional-priority, cached endpoint. It reads one retained country reference
+snapshot within six hours of the event update, and at most twelve temperature
+forecast points from that provider. Temperature, precipitation, wind speed and
+direction are rendered from those records. Reference geography is explicitly
+separated from the event site; the line is labelled as a forecast, not observed
+history. Missing samples return `weather: null`. The initial overview/event
+request budget does not grow, and no generated weather or transport scene is used.

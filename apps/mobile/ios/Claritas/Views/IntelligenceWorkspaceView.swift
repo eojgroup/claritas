@@ -31,6 +31,11 @@ struct IntelligenceWorkspaceView: View {
     @State private var showsEvidence = false
     @State private var showsContext = false
     @State private var showsEventOptions = false
+    @State private var visualLayer: String?
+    @State private var weatherVisual: EventWeatherVisual?
+    @State private var weatherLoaded = false
+    @State private var weatherError: String?
+    @State private var weatherRetry = 0
 
     var body: some View {
         BrandBackground {
@@ -55,6 +60,20 @@ struct IntelligenceWorkspaceView: View {
             selectEvent(contextualEventID, revealDetail: false)
         }
         .task(id: selectedID) { await loadDetail() }
+        .onChange(of: selectedID) { _ in
+            visualLayer = nil; weatherVisual = nil; weatherLoaded = false; weatherError = nil
+        }
+        .task(id: "\(selectedID ?? "none")|\(visualLayer ?? "none")|\(weatherRetry)") {
+            guard visualLayer == "weather", !weatherLoaded, let selectedID else { return }
+            do {
+                let value = try await model.api.fetchEventWeather(id: selectedID)
+                guard !Task.isCancelled, self.selectedID == selectedID else { return }
+                weatherVisual = value; weatherLoaded = true
+            } catch {
+                guard !Task.isCancelled, self.selectedID == selectedID else { return }
+                weatherError = "Weather could not be loaded."; weatherLoaded = true
+            }
+        }
         .task(id: "\(selectedID ?? "none")|\(showsContext)") {
             guard showsContext else { return }
             await loadDetail(includeContext: true)
@@ -342,49 +361,7 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
-                if let observation = detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) {
-                    BrandCard {
-                        EventImageryHero(observation: observation)
-                        Label("Linked observation · \(observation.capture_start.formatted(date: .abbreviated, time: .shortened))", systemImage: "photo")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        if let attribution = observation.attribution {
-                            Text(attribution).font(.caption2).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-
-                if !detail.news_images.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        LazyHStack(alignment: .top, spacing: 12) {
-                            ForEach(Array(detail.news_images.prefix(3))) { image in
-                                VStack(alignment: .leading, spacing: 6) {
-                                    AuthenticatedEarthImage(path: image.preview_url, contentMode: .fit, unavailableLabel: "Publisher image unavailable")
-                                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                    Text(image.caption ?? image.article_title).font(.caption).lineLimit(2)
-                                    if let url = URL(string: image.article_url), url.scheme == "https" {
-                                        Link(image.publisher, destination: url).font(.caption.weight(.semibold))
-                                    }
-                                    if let published = image.article_published_at {
-                                        Text("Published \(published.formatted(date: .abbreviated, time: .shortened))")
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                    }
-                                    Text("Publisher photo · capture unverified").font(.caption2).foregroundStyle(.secondary)
-                                }.frame(width: 260, alignment: .leading)
-                            }
-                        }
-                    }
-                }
-
-                if detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) == nil,
-                   let image = detail.context_images.first {
-                    ReusedContextImageCard(image: image) { id in
-                        if contextualEventID != nil { model.selectedIntelligenceEventID = id }
-                        else { selectEvent(id, revealDetail: true) }
-                    }
-                }
-
-                transportSignalChart(detail)
+                eventVisuals(detail)
 
                 if detail.evidence.contains(where: { !isContextAssessment($0) }) {
                     BrandCard {
@@ -566,6 +543,129 @@ struct IntelligenceWorkspaceView: View {
     }
 
     @ViewBuilder
+    private func eventVisuals(_ detail: IntelligenceEventDetail) -> some View {
+        let hasImages = !detail.news_images.isEmpty || !detail.context_images.isEmpty
+            || detail.earth_observations.contains { $0.preferredDisplayAsset != nil }
+        let hasTransport = detail.evidence.contains { item in
+            guard item.domain == "transport", item.evidence_type == "rolling_baseline_anomaly",
+                  let current = item.metadata?.object?["current"]?.number,
+                  let baseline = item.metadata?.object?["baseline"]?.number else { return false }
+            return current.isFinite && baseline.isFinite && current >= 0 && baseline >= 0
+        }
+        let selected = visualLayer ?? (hasImages ? "images" : hasTransport ? "transport" : "none")
+        if hasImages || hasTransport || detail.event.primary_country_iso2 != nil {
+            HStack(spacing: 8) {
+                if hasImages { visualButton("Images", layer: "images", selected: selected) }
+                if hasTransport { visualButton("Transport", layer: "transport", selected: selected) }
+                if detail.event.primary_country_iso2 != nil {
+                    visualButton(weatherLoaded ? "Weather" : "Load weather", layer: "weather", selected: selected)
+                }
+            }.accessibilityElement(children: .contain).accessibilityLabel("Event visual layers")
+            if selected == "images" {
+                if let observation = detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) {
+                    BrandCard {
+                        EventImageryHero(observation: observation)
+                        Label("Linked observation · \(observation.capture_start.formatted(date: .abbreviated, time: .shortened))", systemImage: "photo")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        if let attribution = observation.attribution {
+                            Text(attribution).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+
+                if !detail.news_images.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(detail.news_images.prefix(3))) { image in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    AuthenticatedEarthImage(path: image.preview_url, contentMode: .fit, unavailableLabel: "Publisher image unavailable")
+                                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Text(image.caption ?? image.article_title).font(.caption).lineLimit(2)
+                                    if let url = URL(string: image.article_url), url.scheme == "https" {
+                                        Link(image.publisher, destination: url).font(.caption.weight(.semibold))
+                                    }
+                                    if let published = image.article_published_at {
+                                        Text("Published \(published.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Text("Publisher photo · capture unverified").font(.caption2).foregroundStyle(.secondary)
+                                }.frame(width: 260, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+
+                if detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) == nil,
+                   let image = detail.context_images.first {
+                    ReusedContextImageCard(image: image) { id in
+                        if contextualEventID != nil { model.selectedIntelligenceEventID = id }
+                        else { selectEvent(id, revealDetail: true) }
+                    }
+                }
+
+            } else if selected == "transport" {
+                transportSignalChart(detail)
+            } else if selected == "weather" {
+                if !weatherLoaded { ProgressView("Loading weather context") }
+                else if let weatherVisual { eventWeatherCard(weatherVisual) }
+                else {
+                    Text(weatherError ?? "No weather reference sample close to this event’s update time.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    if weatherError != nil {
+                        Button("Retry weather") { weatherLoaded = false; weatherError = nil; weatherRetry += 1 }
+                            .buttonStyle(.bordered)
+                    }
+                }
+            }
+        }
+    }
+
+    private func visualButton(_ title: String, layer: String, selected: String) -> some View {
+        Button { visualLayer = layer } label: { Text(title).font(.caption.weight(.semibold)).frame(minHeight: 30) }
+            .buttonStyle(.bordered)
+            .tint(selected == layer ? ClaritasPalette.shellAccent(for: colorScheme) : .secondary)
+            .accessibilityValue(selected == layer ? "Selected" : "")
+    }
+
+    private func eventWeatherCard(_ weather: EventWeatherVisual) -> some View {
+        BrandCard(title: "Weather · \(weather.location_name)", icon: "cloud.sun") {
+            Text(weather.scope_label).font(.caption2).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 18) {
+                if let temperature = weather.temp_c {
+                    VStack(alignment: .leading) {
+                        Text("\(temperature.formatted())°C").font(.title2.weight(.semibold))
+                        Text(weather.weather_desc ?? "Temperature").font(.caption2)
+                    }
+                }
+                if let rain = weather.precipitation_mm {
+                    VStack(alignment: .leading) { Text("\(rain.formatted()) mm").font(.headline); Text("Precipitation").font(.caption2) }
+                }
+                if let wind = weather.wind_speed {
+                    VStack(alignment: .leading) {
+                        Text("\(wind.formatted()) m/s").font(.headline)
+                        if let direction = weather.wind_direction {
+                            HStack { Image(systemName: "location.north.fill").rotationEffect(.degrees(direction)); Text("Wind from \(Int(direction))°") }.font(.caption2)
+                        } else { Text("Wind").font(.caption2) }
+                    }
+                }
+            }
+            if weather.forecast.count >= 2 {
+                Text("Temperature forecast").font(.caption.weight(.semibold))
+                Chart(weather.forecast) { point in
+                    LineMark(x: .value("Forecast time", point.forecast_time), y: .value("Temperature °C", point.temp_c))
+                        .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                }.frame(height: 110)
+                Text("Forecast · not observed event history").font(.caption2).foregroundStyle(.secondary)
+            }
+            Text("\(weather.source_kind?.contains("model") == true ? "Modelled reference" : "Reference sample") · \(weather.observed_at.formatted(date: .abbreviated, time: .shortened))")
+                .font(.caption2).foregroundStyle(.secondary)
+            Text(weather.attribution).font(.caption2).foregroundStyle(.secondary)
+            DisclosureGroup("Scope & source") { Text(weather.notice).font(.caption2).foregroundStyle(.secondary) }.font(.caption)
+        }
+    }
+
+    @ViewBuilder
     private func transportSignalChart(_ detail: IntelligenceEventDetail) -> some View {
         if let evidence = detail.evidence.first(where: { $0.domain == "transport" && $0.evidence_type == "rolling_baseline_anomaly" }),
            let metadata = evidence.metadata?.object,
@@ -581,7 +681,7 @@ struct IntelligenceWorkspaceView: View {
                         .foregroundStyle(Color.secondary.opacity(0.5))
                         .annotation(position: .trailing) { Text(baseline.formatted()).font(.caption2) }
                 }.frame(height: 100)
-                Text("Same completed UTC hours. Telemetry coverage; a change alone does not establish disruption.")
+                Text("\(metadata["event_type"]?.string == "departure" ? "Departures" : metadata["event_type"]?.string == "arrival" ? "Arrivals" : "Movements") · Same completed UTC hours. Telemetry coverage; a change alone does not establish disruption.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }

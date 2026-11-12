@@ -6,7 +6,7 @@ export const withReadPriority = <T>(priority: ReadPriority, task: () => T): T =>
 export const currentReadPriority = (): ReadPriority => requestPriority.getStore() ?? "normal";
 
 export function routeReadPriority(path: string, includeContext = false): ReadPriority {
-  if (includeContext || /^\/api\/(weather|market|transport|leadership)(\/|$)/.test(path)
+  if (includeContext || /^\/api\/intelligence\/events\/[^/]+\/weather$/.test(path) || /^\/api\/(weather|market|transport|leadership)(\/|$)/.test(path)
     || /^\/api\/(news\/country-stats|news\/coverage|social\/coverage)/.test(path)) return "optional";
   if (/^\/api\/(auth|briefings\/daily\/latest|intelligence\/(overview|events))(\/|$)/.test(path)) return "core";
   return "normal";

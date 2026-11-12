@@ -354,9 +354,6 @@ export default function IntelligenceWorkspace({
       confidence: item.confidence,
     }));
   }, [detail?.linked_news, linkedReporting]);
-  const leadImage = detail?.news_images?.[0];
-  const leadEvidenceImage = detail?.evidence.find((item) => item.domain === "news" && /^https?:\/\//i.test(item.image_url ?? ""));
-  const leadImageUrl = leadImage?.preview_url || leadEvidenceImage?.image_url;
   const detailPresentation = useMemo(
     () => detail ? presentEvent(detail.event) : null,
     [detail],
@@ -628,14 +625,13 @@ export default function IntelligenceWorkspace({
                 </div>
               </header>
 
-              <section className={`event-essential-brief ${leadImageUrl ? "has-image" : ""}`} aria-label="Event essentials">
-                {leadImageUrl && <figure className="event-lead-image"><SatelliteImage sources={[leadImageUrl]} alt={leadImage?.caption || leadImage?.article_title || leadEvidenceImage?.source_title || "Image from linked reporting"} className="h-full w-full object-cover" /><figcaption>Publisher context · {leadImage?.publisher || leadEvidenceImage?.source_name || "Linked reporting"}</figcaption></figure>}
+              <section className="event-essential-brief" aria-label="Event essentials">
                 <article><h3>What happened</h3><p>{detail.understanding?.what_happened || detailPresentation?.summary}</p></article>
                 {(detail.understanding?.why_interesting || detailPresentation?.why) && <article><h3>Why it matters</h3><p>{detail.understanding?.why_interesting || detailPresentation?.why}</p></article>}
                 <div className="event-essential-facts"><span><MapPin size={13} />{detail.understanding?.where || detailPresentation?.locationLabel}</span><span>{linkedNews.length} linked {linkedNews.length === 1 ? "report" : "reports"}</span>{displayedEarthObservations.length > 0 && <span>{displayedEarthObservations.length} satellite {displayedEarthObservations.length === 1 ? "scene" : "scenes"}</span>}</div>
                 {detail.event.priority_reasons?.length ? <details><summary>Why prioritised</summary><ul>{detail.event.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details> : null}
               </section>
-              <EventSignalVisuals detail={detail} onOpenEvent={selectEvent} />
+              <EventSignalVisuals key={detail.event.id} detail={detail} onOpenEvent={selectEvent} />
               <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={onOpenImagery} />
               <details className="event-optional-context" open={contextExpanded} onToggle={(event) => setContextExpanded(event.currentTarget.open)}>
                 <summary>Explore surrounding context</summary>
