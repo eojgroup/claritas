@@ -48,7 +48,7 @@ test("retained context reuses rendered coverage and same-place article previews 
     await client.query(`INSERT INTO news_image_asset(content_hash,preview,width,height) VALUES($1,$2,768,512)`, [newsHash, Buffer.from("fixture")]);
     const news = await client.query<{ id: string }>(`INSERT INTO news_article_image(item_id,content_hash,image_url,discovery,publisher,article_url)
       VALUES($1,$2,'https://example.org/photo.jpg','publisher_metadata','Fixture publisher','https://example.org/news') RETURNING id`, [item.rows[0].id, newsHash]);
-    const input = { id: targetId, primary_location_id: locationId, location_type: "airport", latitude: 26.5, longitude: 56.2 };
+    const input = { id: targetId, event_type: "aviation_disruption", last_activity_time: new Date(), primary_location_id: locationId, location_type: "airport", latitude: 26.5, longitude: 56.2 };
     const read = (sql: string, params: any[]) => client.query(sql, params);
     const statement = buildContextImageQuery(input)!;
     const explained = await client.query(`EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) ${statement.sql}`, statement.params);
@@ -59,6 +59,16 @@ test("retained context reuses rendered coverage and same-place article previews 
     assert.equal(images.find((image) => image.kind === "news")?.captured_at, null);
     assert.equal(images.find((image) => image.kind === "satellite")?.source_event_id, originalId);
     assert.equal((await client.query("SELECT count(*)::int AS count FROM intelligence_event_evidence WHERE event_id=$1", [targetId])).rows[0].count, 0);
+    // Recently collected bytes must not make an old capture/article look current.
+    await client.query("UPDATE earth_observation SET captured_at=now()-interval '30 days' WHERE id=$1", [coveringId]);
+    await client.query("UPDATE item SET event_time=now()-interval '30 days' WHERE id=$1", [item.rows[0].id]);
+    assert.deepEqual(await getEventContextImages(input, read), []);
+    await client.query("UPDATE earth_observation SET captured_at=now()-interval '2 days' WHERE id=$1", [coveringId]);
+    await client.query("UPDATE item SET event_time=now()-interval '1 day' WHERE id=$1", [item.rows[0].id]);
+    // Sharing a place alone is insufficient: reporting must share an event type or an explicit relationship.
+    await client.query("UPDATE intelligence_event SET event_type='unrelated_development' WHERE id=$1", [originalId]);
+    assert.deepEqual((await getEventContextImages(input, read)).map(image => image.id), [coveringId]);
+    await client.query("UPDATE intelligence_event SET event_type='aviation_disruption' WHERE id=$1", [originalId]);
     // Own photograph content must not also be presented as reused context.
     await client.query(`INSERT INTO intelligence_event_evidence(event_id,domain,evidence_type,source_record_type,source_record_id,observed_at,confidence,relationship,provenance)
       VALUES($1,'news','publisher_report','item',$2,now(),0.6,'reported','{}')`, [targetId, `${item.rows[0].id}`]);

@@ -3421,6 +3421,7 @@ struct IntelligenceEventDetail: Codable {
     let understanding: IntelligenceEventUnderstanding?
     let evidence: [IntelligenceEvidence]
     let linked_news: [IntelligenceLinkedNews]
+    let news_images: [IntelligenceNewsImage]
     let locations: [IntelligenceEventLocation]
     let earth_observations: [EarthObservation]
     let context_images: [IntelligenceContextImage]
@@ -3433,7 +3434,7 @@ struct IntelligenceEventDetail: Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case event, understanding, evidence, linked_news, locations, earth_observations, context_images, related_events, epistemic_notice, social_context, regional_reporting, signal_coverage, context_signals
+        case event, understanding, evidence, linked_news, news_images, locations, earth_observations, context_images, related_events, epistemic_notice, social_context, regional_reporting, signal_coverage, context_signals
     }
 
     init(from decoder: Decoder) throws {
@@ -3446,6 +3447,7 @@ struct IntelligenceEventDetail: Codable {
         understanding = try container.decodeIfPresent(IntelligenceEventUnderstanding.self, forKey: .understanding)
         evidence = try container.decodeIfPresent([IntelligenceEvidence].self, forKey: .evidence) ?? []
         linked_news = try container.decodeIfPresent([IntelligenceLinkedNews].self, forKey: .linked_news) ?? []
+        news_images = try container.decodeIfPresent([IntelligenceNewsImage].self, forKey: .news_images) ?? []
         locations = try container.decodeIfPresent([IntelligenceEventLocation].self, forKey: .locations) ?? []
         earth_observations = try container.decodeIfPresent([EarthObservation].self, forKey: .earth_observations) ?? []
         context_images = try container.decodeIfPresent([IntelligenceContextImage].self, forKey: .context_images) ?? []
@@ -3453,6 +3455,17 @@ struct IntelligenceEventDetail: Codable {
         epistemic_notice = try container.decodeIfPresent(String.self, forKey: .epistemic_notice)
             ?? "Evidence relationships are qualified. Correlation does not establish causation."
     }
+}
+
+struct IntelligenceNewsImage: Codable, Identifiable {
+    let id: String
+    let preview_url: String
+    let publisher: String
+    let article_title: String
+    let article_url: String
+    let article_published_at: Date?
+    let caption: String?
+    let notice: String
 }
 
 struct IntelligenceContextImage: Codable, Identifiable {

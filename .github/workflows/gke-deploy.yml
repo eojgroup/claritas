@@ -1285,6 +1285,9 @@ jobs:
                 const detailStarted = Date.now();
                 const detail = events[0] ? await getIntelligenceEvent(events[0].id) : null;
                 if (events[0] && !detail) throw new Error("Priority event detail unavailable");
+                if (detail && (detail.context_included !== false || detail.regional_reporting !== null)) {
+                  throw new Error("Lightweight event contract requires regional_reporting=null");
+                }
                 const detailMs = Date.now()-detailStarted;
                 let optionalFinished = 0;
                 const optional = Array.from({ length: 24 }, () => withReadPriority("optional", async () => {

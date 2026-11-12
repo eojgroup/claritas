@@ -353,6 +353,29 @@ struct IntelligenceWorkspaceView: View {
                     }
                 }
 
+                if !detail.news_images.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        LazyHStack(alignment: .top, spacing: 12) {
+                            ForEach(Array(detail.news_images.prefix(3))) { image in
+                                VStack(alignment: .leading, spacing: 6) {
+                                    AuthenticatedEarthImage(path: image.preview_url, contentMode: .fit, unavailableLabel: "Publisher image unavailable")
+                                        .aspectRatio(16.0 / 9.0, contentMode: .fit)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                    Text(image.caption ?? image.article_title).font(.caption).lineLimit(2)
+                                    if let url = URL(string: image.article_url), url.scheme == "https" {
+                                        Link(image.publisher, destination: url).font(.caption.weight(.semibold))
+                                    }
+                                    if let published = image.article_published_at {
+                                        Text("Published \(published.formatted(date: .abbreviated, time: .shortened))")
+                                            .font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                    Text("Publisher photo · capture unverified").font(.caption2).foregroundStyle(.secondary)
+                                }.frame(width: 260, alignment: .leading)
+                            }
+                        }
+                    }
+                }
+
                 if detail.earth_observations.sortedForDisplay.first(where: { $0.preferredDisplayAsset != nil }) == nil,
                    let image = detail.context_images.first {
                     ReusedContextImageCard(image: image) { id in

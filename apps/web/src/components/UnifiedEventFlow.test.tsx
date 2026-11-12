@@ -47,6 +47,15 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
+it("opens lightweight event essentials before regional context has been requested", async () => {
+  vi.mocked(fetchIntelligenceEvent).mockResolvedValue({ ...detail, context_signals: [], regional_reporting: null });
+  render(<IntelligenceWorkspace embedded initialEventId={detail.event.id} />);
+  expect(await screen.findByRole("heading", { name: story.title!, level: 2 })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Related signals" })).toBeTruthy();
+  expect(screen.queryByText("Loading event context…")).toBeNull();
+  expect(fetchIntelligenceEvent).toHaveBeenCalledWith(detail.event.id);
+});
+
 it("follows a Colombian news report into an event with related sources and separate regional transport data", async () => {
   vi.mocked(resolveSourceInvestigation).mockResolvedValue({ status: "available", event_id: detail.event.id });
   render(<Flow />);

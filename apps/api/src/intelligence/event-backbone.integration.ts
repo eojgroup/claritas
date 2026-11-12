@@ -549,9 +549,12 @@ test("source replay corrects classification while later interpretations preserve
   assert.ok(feed.some((event) => event.id === created.id && event.origin_domain === "news"));
   const baseDetail = await getIntelligenceEvent(created.id);
   assert.equal(baseDetail?.context_included, false);
+  assert.equal(baseDetail?.regional_reporting, null);
   assert.deepEqual(baseDetail?.context_signals, []);
   assert.equal(baseDetail?.event.origin_domain, "news");
   const detail = await getIntelligenceEvent(created.id, { includeContext: true });
+  assert.ok(detail?.regional_reporting === null || (!Array.isArray(detail?.regional_reporting)
+    && Array.isArray(detail?.regional_reporting.items)));
   assert.equal(detail?.event.origin_domain, "news");
   assert.equal(detail?.signal_coverage.find((group) => group.domain === "podcast")?.state, "context");
   assert.ok(detail?.context_signals.some((signal) => signal.domain === "transport" && signal.relationship === "regional_context"));

@@ -87,6 +87,10 @@ test("authenticated overview page and readiness survive a real HTTP burst of blo
       "INSERT INTO auth_session(user_id,session_token_hash,expires_at,last_seen_at) VALUES($1,$2,now()+interval '1 hour',now())",
       [userID, createHash("sha256").update(token).digest("hex")],
     );
+    await pool.query(`INSERT INTO intelligence_event(id,dedupe_key,event_type,title,summary,start_time,last_activity_time)
+      VALUES($1::uuid,$1::text,'transport_activity_anomaly','Port movement anomaly','Observed movement comparison',now(),now())`, [fixture]);
+    await pool.query(`INSERT INTO intelligence_event_evidence(event_id,domain,evidence_type,source_record_type,source_record_id,observed_at,confidence,relationship,provenance)
+      VALUES($1::uuid,'transport','rolling_baseline_anomaly','fixture',$1::text,now(),0.7,'observed','{}')`, [fixture]);
 
     const port = await availablePort();
     const origin = `http://127.0.0.1:${port}`;
@@ -148,7 +152,7 @@ test("authenticated overview page and readiness survive a real HTTP burst of blo
       .finally(() => { optionalFinished++; }));
     await until(async () => await blockedOptionalQueries() >= 2, "optional HTTP reads never occupied both reserved optional query slots");
 
-    const routes = ["/api/auth/me", "/api/auth/providers", "/api/intelligence/overview?hours=24&priority=high", "/api/briefings/daily/latest", "/readyz"];
+    const routes = ["/api/auth/me", "/api/auth/providers", "/api/intelligence/overview?hours=24&priority=high", "/api/briefings/daily/latest", `/api/intelligence/events/${fixture}`, "/readyz"];
     const core = await within(Promise.all(routes.map((route) => read(route))), 10_000,
       "core page waited behind optional HTTP requests instead of using reserved reader capacity");
     for (const response of core) {
@@ -163,6 +167,10 @@ test("authenticated overview page and readiness survive a real HTTP burst of blo
     assert.equal(overview.filters.priority, "high");
     assert.ok(["warming", "fresh", "stale"].includes(overview.snapshot.status));
     assert.ok(Array.isArray(overview.buckets));
+    const detail = core.find((response) => response.path === `/api/intelligence/events/${fixture}`)!.body;
+    assert.equal(detail.event.id, fixture);
+    assert.equal(detail.context_included, false);
+    assert.equal(detail.regional_reporting, null, "unrequested object-valued context must never be an array");
     assert.ok(Object.hasOwn(core.find((response) => response.path === "/api/briefings/daily/latest")!.body, "briefing"));
     assert.equal(core.find((response) => response.path === "/readyz")!.body, "ready");
     assert.equal(core.find((response) => response.path === "/readyz")!.poolWaiting, "0");
@@ -194,6 +202,7 @@ test("authenticated overview page and readiness survive a real HTTP burst of blo
       }
     } finally {
       try {
+        await pool.query("DELETE FROM intelligence_event WHERE id=$1", [fixture]);
         if (userID) await pool.query("DELETE FROM app_user WHERE id=$1", [userID]);
       } finally { await pool.end(); }
     }

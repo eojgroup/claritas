@@ -238,7 +238,9 @@ export async function refreshRetainedOverviewImages(generation: string, read: Ov
       jsonb_build_object('preview_url','/api/earth-observation/assets/'||asset.id::text||'?v='||left(asset.content_hash,16),
         'captured_at',observation.captured_at,'attribution',observation.attribution,'source_kind','satellite') AS imagery
     FROM earth_observation observation JOIN earth_observation_asset asset ON asset.observation_id=observation.id
+    JOIN intelligence_overview_projection target ON target.id=observation.event_id AND target.generation_id=$1
     WHERE observation.event_id IS NOT NULL AND observation.status='available' AND observation.product_type='true_color'
+      AND observation.captured_at BETWEEN target.last_activity_time-interval '72 hours' AND target.last_activity_time+interval '24 hours'
       AND asset.asset_type='preview' AND (asset.expires_at IS NULL OR asset.expires_at>now())
     UNION ALL
     SELECT evidence.event_id,1,image.collected_at,
@@ -248,7 +250,9 @@ export async function refreshRetainedOverviewImages(generation: string, read: Ov
     JOIN item article ON article.id=image.item_id JOIN source ON source.id=article.source_id
     JOIN intelligence_event_evidence evidence ON evidence.domain='news' AND evidence.source_record_type='item'
       AND evidence.source_record_id=image.item_id::text
+    JOIN intelligence_overview_projection target ON target.id=evidence.event_id AND target.generation_id=$1
     WHERE asset.expires_at>now() AND (lower(source.name)<>'gdelt' OR article.payload->>'quality_status'='accepted')
+      AND article.event_time BETWEEN target.last_activity_time-interval '72 hours' AND target.last_activity_time+interval '24 hours'
   ), chosen AS MATERIALIZED (
     SELECT DISTINCT ON(event_id) event_id,imagery,preference FROM retained ORDER BY event_id,preference,sort_time DESC
   ) UPDATE intelligence_overview_projection projection

@@ -1,3 +1,4 @@
+import { eventMediaWindow } from "./event-media";
 import { query } from "../db";
 import { sourceRecordBigintSql } from "./source-record";
 
@@ -24,6 +25,8 @@ export type ContextImage = {
 
 type ContextImageEvent = {
   id: string;
+  event_type?: string;
+  last_activity_time?: string | Date | null;
   primary_location_id?: string | null;
   location_type?: string | null;
   location_name?: string | null;
@@ -43,7 +46,7 @@ type ContextImageRead = (sql: string, params: any[]) => Promise<{ rows: ContextI
 
 const broadLocations = new Set(["country", "region", "area", "agricultural_region"]);
 const satelliteNotice = "Previously captured satellite imagery of this location, reused for geographic context. The acquisition date belongs to the original scene; this image does not establish conditions during this event or prove its cause.";
-const newsNotice = "Image from a different article associated with this named location. Its capture location and time are unverified; it is contextual reporting, not a photograph or evidence of this event.";
+const newsNotice = "Image from related reporting in this named location and event time window. Its capture location and time are unverified; it is contextual reporting, not a photograph or evidence of this event.";
 
 function finiteCoordinate(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= maximum;
@@ -54,11 +57,17 @@ function finiteCoordinate(value: unknown, maximum: number): value is number {
  * analysis nor event/evidence writes belong on the event-detail read path.
  */
 export function buildContextImageQuery(event: ContextImageEvent) {
+  const window = eventMediaWindow(event);
+  if (!window) return null;
   const specificLocation = Boolean(event.primary_location_id && event.location_type
     && !broadLocations.has(event.location_type));
   const exactPoint = (event.metadata?.exact_geography === true || specificLocation)
     && finiteCoordinate(event.latitude, 90) && finiteCoordinate(event.longitude, 180);
   if (!specificLocation && !exactPoint) return null;
+  const offset = exactPoint ? 4 : 2;
+  const since = `$${offset + 1}::timestamptz`;
+  const until = `$${offset + 2}::timestamptz`;
+  const eventType = `$${offset + 3}::text`;
   const satellite = exactPoint ? `
     SELECT * FROM (SELECT DISTINCT ON (preview.content_hash)
       observation.id::text AS id,'satellite'::text AS kind,preview.content_hash,
@@ -79,6 +88,7 @@ export function buildContextImageQuery(event: ContextImageEvent) {
     WHERE scene.geometry && ST_SetSRID(ST_MakePoint($3::double precision,$4::double precision),4326)
       AND ST_Covers(scene.geometry,ST_SetSRID(ST_MakePoint($3::double precision,$4::double precision),4326))
       AND observation.status='available' AND observation.product_type='true_color'
+      AND observation.captured_at BETWEEN (SELECT since FROM context_window) AND (SELECT until FROM context_window)
       AND observation.event_id IS DISTINCT FROM $1::uuid
       AND (original.id IS NULL OR original.status<>'dismissed')
       AND (preview.expires_at IS NULL OR preview.expires_at>now())
@@ -118,6 +128,7 @@ export function buildContextImageQuery(event: ContextImageEvent) {
     JOIN news_article_image image ON image.item_id=item.id
     JOIN news_image_asset asset ON asset.content_hash=image.content_hash
     WHERE asset.expires_at>now() AND item.kind='news_article'
+      AND item.event_time BETWEEN (SELECT since FROM context_window) AND (SELECT until FROM context_window)
       AND CASE WHEN lower(source.name)='gdelt' THEN item.payload->>'quality_status'='accepted'
         ELSE COALESCE(item.payload->>'quality_status','accepted')='accepted' END
       AND NOT EXISTS (SELECT 1 FROM intelligence_event_evidence own
@@ -127,13 +138,17 @@ export function buildContextImageQuery(event: ContextImageEvent) {
     ORDER BY image.content_hash,image.collected_at DESC,image.id
     ) retained_news ORDER BY collected_at DESC,id LIMIT 12` : null;
   return {
-    sql: `WITH context_events AS MATERIALIZED (
+    sql: `WITH context_window AS (SELECT ${since} AS since,${until} AS until,${eventType} AS event_type),
+    context_events AS MATERIALIZED (
       SELECT id,title,primary_location_id FROM intelligence_event
       WHERE primary_location_id=$2::uuid AND id<>$1::uuid AND status<>'dismissed'
+        AND last_activity_time BETWEEN (SELECT since FROM context_window) AND (SELECT until FROM context_window)
+        AND (event_type=(SELECT event_type FROM context_window) OR EXISTS (
+          SELECT 1 FROM intelligence_event_relationship link WHERE link.from_event_id=$1::uuid AND link.to_event_id=intelligence_event.id))
       ORDER BY last_activity_time DESC,id LIMIT 24
     ) ${[satellite, news].filter(Boolean).map((sql) => `(${sql})`).join(" UNION ALL ")}`,
     params: [event.id, specificLocation ? event.primary_location_id : null,
-      ...(exactPoint ? [event.longitude, event.latitude] : [])],
+      ...(exactPoint ? [event.longitude, event.latitude] : []), window.since, window.until, event.event_type ?? null],
   };
 }
 

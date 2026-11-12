@@ -3,7 +3,7 @@ export async function listNewsImages(options: { eventId?: string; country?: stri
   const limit = Math.min(100, Math.max(1, Math.trunc(options.limit ?? 30)));
   const { rows } = await query<any>(
     `SELECT image.id,image.item_id,image.image_url,image.caption,image.discovery,image.publisher,
-            image.article_url,image.license,image.collected_at,item.title AS article_title,item.event_time AS article_published_at,
+            image.article_url,image.license,image.collected_at,COALESCE(NULLIF(item.title,''),'Publisher image') AS article_title,item.event_time AS article_published_at,
             asset.content_hash,asset.width,asset.height,asset.expires_at,asset.analysis,asset.analysis_model,asset.analysis_attempts
      FROM news_article_image image JOIN news_image_asset asset USING(content_hash)
      JOIN item ON item.id=image.item_id JOIN source ON source.id=item.source_id

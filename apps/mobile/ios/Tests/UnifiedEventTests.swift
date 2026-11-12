@@ -37,6 +37,20 @@ final class UnifiedEventTests: XCTestCase {
         XCTAssertNil(detail.regional_reporting)
     }
 
+    func testLightweightEventContractUsesNullForUnrequestedRegionalReporting() throws {
+        let detail = try decode(IntelligenceEventDetail.self, [
+            "event": eventPayload, "context_included": false,
+            "regional_reporting": NSNull(), "evidence": [], "locations": [],
+            "earth_observations": [], "context_images": [], "linked_news": [],
+        ])
+        XCTAssertEqual(detail.event.id, "event-1")
+        XCTAssertNil(detail.regional_reporting)
+        // An array is a broken API contract, not a supported event format.
+        XCTAssertThrowsError(try decode(IntelligenceEventDetail.self, [
+            "event": eventPayload, "regional_reporting": [],
+        ]))
+    }
+
     func testReusedImageryRetainsOriginalDatesAndSourceWithoutBecomingEvidence() throws {
         let detail = try decode(IntelligenceEventDetail.self, [
             "event": eventPayload,
@@ -57,6 +71,18 @@ final class UnifiedEventTests: XCTestCase {
         XCTAssertEqual(image.dateLabel, "Published")
         XCTAssertEqual(image.source_event_id, "older-event")
         XCTAssertTrue(detail.evidence.isEmpty)
+        XCTAssertTrue(detail.earth_observations.isEmpty)
+    }
+
+    func testEventPublisherPhotosRetainArticleTimeWithoutInventingCaptureTime() throws {
+        let detail = try decode(IntelligenceEventDetail.self, [
+            "event": eventPayload, "regional_reporting": NSNull(),
+            "news_images": [["id": "photo", "preview_url": "/api/news-images/photo/preview",
+                "publisher": "Publisher", "article_title": "Port reopens", "article_url": "https://example.org/report",
+                "article_published_at": "2026-09-23T12:00:00Z", "notice": "Capture time unverified"]],
+        ])
+        XCTAssertEqual(detail.news_images.first?.publisher, "Publisher")
+        XCTAssertNotNil(detail.news_images.first?.article_published_at)
         XCTAssertTrue(detail.earth_observations.isEmpty)
     }
 

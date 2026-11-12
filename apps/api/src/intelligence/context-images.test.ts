@@ -6,29 +6,33 @@ process.env.DB_USER ||= "claritas_test";
 process.env.DB_PASSWORD ||= "claritas_test";
 
 const eventId = "a2a8fc41-69d4-46d3-bcb5-64ab9d5c6dda";
+const activity = "2026-11-12T12:00:00.000Z";
+const windowParams = ["2026-11-09T12:00:00.000Z", "2026-11-13T12:00:00.000Z", null];
 const locationId = "f1f8835b-b690-4036-ac86-de730260d014";
 
 test("country-only and partial geography never select arbitrary context imagery", async () => {
   const { getEventContextImages, buildContextImageQuery } = await import("./context-images");
   for (const location_type of ["country", "region", "area", "agricultural_region", undefined]) {
-    const input = { id: eventId, primary_location_id: locationId, location_type, latitude: 12, longitude: 24 };
+    const input = { id: eventId, last_activity_time: activity, primary_location_id: locationId, location_type, latitude: 12, longitude: 24 };
     assert.equal(buildContextImageQuery(input), null);
     assert.deepEqual(await getEventContextImages(input, async () => { throw new Error("Must not query broad geography"); }), []);
   }
-  assert.equal(buildContextImageQuery({ id: eventId, latitude: 0, metadata: { exact_geography: true } }), null);
-  assert.equal(buildContextImageQuery({ id: eventId, latitude: NaN, longitude: 0, metadata: { exact_geography: true } }), null);
+  assert.equal(buildContextImageQuery({ id: eventId, last_activity_time: activity, latitude: 0, metadata: { exact_geography: true } }), null);
+  assert.equal(buildContextImageQuery({ id: eventId, last_activity_time: activity, latitude: NaN, longitude: 0, metadata: { exact_geography: true } }), null);
 });
 
 test("specific places enable retained article context while exact coordinates enable rendered-area context", async () => {
   const { buildContextImageQuery } = await import("./context-images");
-  const namedPlace = buildContextImageQuery({ id: eventId, primary_location_id: locationId, location_type: "airport" });
+  const namedPlace = buildContextImageQuery({ id: eventId, last_activity_time: activity, primary_location_id: locationId, location_type: "airport" });
   assert.ok(namedPlace);
-  assert.deepEqual(namedPlace.params, [eventId, locationId]);
+  assert.deepEqual(namedPlace.params, [eventId, locationId, ...windowParams]);
+  assert.match(namedPlace.sql, /item.event_time BETWEEN/);
+  assert.match(namedPlace.sql, /event_type=\(SELECT event_type/);
   assert.match(namedPlace.sql, /image\.article_url AS source_url/);
   assert.doesNotMatch(namedPlace.sql, /FROM earth_scene/);
-  const point = buildContextImageQuery({ id: eventId, latitude: 0, longitude: 0, metadata: { exact_geography: true } });
+  const point = buildContextImageQuery({ id: eventId, last_activity_time: activity, latitude: 0, longitude: 0, metadata: { exact_geography: true } });
   assert.ok(point);
-  assert.deepEqual(point.params, [eventId, null, 0, 0]);
+  assert.deepEqual(point.params, [eventId, null, 0, 0, ...windowParams]);
   assert.match(point.sql, /render_context'->'aoi_bbox'/);
   assert.match(point.sql, /observation\.status='available'/);
   assert.match(point.sql, /preview\.expires_at>now\(\)/);

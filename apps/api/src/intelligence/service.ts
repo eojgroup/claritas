@@ -1,5 +1,6 @@
 import { listNewsImages } from "../image-analysis/news-image-store";
 import { getEventContextImages } from "./context-images";
+import { isTimelyEventMedia } from "./event-media";
 import { loadTranslationContext, translateEventPresentation, translateEvidencePresentation, normalizeIntelligenceDisplayLanguage } from "./translation-presentation";
 import { sourceRecordBigintSql, canonicalSocialSignalBigintSql } from "./source-record";
 import { getRegionalContext } from "./regional-context";
@@ -587,7 +588,7 @@ export async function getIntelligenceEvent(eventId: string, options: { displayLa
   )).map((row: any) => buildLinkedNewsPresentation(row));
   const [socialContext, regionalReporting, contextSignals, newsImages, contextImages] = await Promise.all([
     options.includeContext ? getSocialEventContexts([eventId]) : Promise.resolve([]),
-    options.includeContext ? getRegionalReporting(normalizedEvent) : Promise.resolve([]),
+    options.includeContext ? getRegionalReporting(normalizedEvent) : Promise.resolve(null),
     options.includeContext ? getRegionalContext(normalizedEvent) : Promise.resolve([]), listNewsImages({ eventId, limit: 6 }),
     getEventContextImages(normalizedEvent).catch((error) => {
       console.warn(JSON.stringify({ event: "event_context_images_unavailable", event_id: eventId, message: error instanceof Error ? error.message : String(error) }));
@@ -598,13 +599,13 @@ export async function getIntelligenceEvent(eventId: string, options: { displayLa
     event: normalizedEvent,
     context_included: options.includeContext === true,
     social_context: socialContext,
-    regional_reporting: regionalReporting,
+    regional_reporting: regionalReporting satisfies Awaited<ReturnType<typeof getRegionalReporting>>,
     signal_coverage: buildSignalCoverage(evidence, socialContext),
     context_signals: contextSignals,
     understanding: buildEventUnderstanding(normalizedEvent as Record<string, unknown>, evidence),
     evidence,
     linked_news: linkedNews,
-    news_images: newsImages,
+    news_images: newsImages.filter((image) => isTimelyEventMedia(normalizedEvent, image.article_published_at)),
     context_images: contextImages,
     locations: locationsResult.rows.map((row: any) => ({
       ...row,
@@ -616,7 +617,7 @@ export async function getIntelligenceEvent(eventId: string, options: { displayLa
       importance_score: Number(row.importance_score),
       monitoring_tier: Number(row.monitoring_tier),
     })),
-    earth_observations: observationsResult.rows.map((row: any) => normalizeEarthObservationRow({
+    earth_observations: observationsResult.rows.filter((row: any) => isTimelyEventMedia(normalizedEvent, row.capture_start)).map((row: any) => normalizeEarthObservationRow({
       ...row,
       event_title: normalizedEvent.title,
       event_summary: normalizedEvent.summary,

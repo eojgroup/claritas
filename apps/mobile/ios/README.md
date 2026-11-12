@@ -7,8 +7,9 @@ evidence-first workflow on iPhone, iPad, and Apple Watch.
 
 The iPhone and iPad signal map uses [Natural Earth country geometry](https://www.naturalearthdata.com/about/terms-of-use/)
 (public domain), distributed through the `world-atlas` dataset, for its native
-MapKit signal-concentration layer. Apple Maps remains the basemap and interaction
-engine; the bundled geometry only supplies country boundaries.
+SwiftUI Canvas signal-concentration layer. The branded overview uses bundled
+country boundaries, full-window shading, event/imagery markers and touch controls,
+without Apple basemap tiles. It focuses on the leading or selected country.
 
 Natural Earth rings at the ±180° meridian are split before MapKit consumes
 them. After replacing or regenerating the resource, run
@@ -206,8 +207,8 @@ The App Store Connect key must be a team key with Admin access because CI uses t
   `claritas://auth/callback`; scheme-only callback trust and runtime callback
   overrides are intentionally unsupported.
 - Country centroids support overview navigation only; they are not valid substitutes for event-specific EO coordinates.
-- The native iPhone/iPad map uses Apple Maps with a Natural Earth country
-  choropleth, a bounded set of priority labels, event/satellite markers,
-  scoped transport markers, country profiles, native pan/zoom, and reset
-  behavior aligned with web. Watch retains its intentionally compact glance map.
+- The native iPhone/iPad overview uses a branded Natural Earth canvas with a
+  country choropleth, priority labels, event/satellite markers, scoped transport
+  markers, country profiles, touch pan/zoom and reset. Watch retains its compact
+  glance map. The dedicated transport tracking workspace keeps its separate map.
 - The structure is modular (Models, Services, Views) to ease future extensions (auth, settings, notifications, charts).
