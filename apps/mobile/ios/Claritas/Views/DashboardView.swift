@@ -4519,6 +4519,7 @@ struct SignalMapPanel: View {
                     }
                 }
 
+                SignalMapInteractionKey()
                 if !overviewOnly {
                     HStack(spacing: 10) {
                         if mode == .transport {
@@ -5338,6 +5339,17 @@ private struct NativeSignalMap: View {
     }
 }
 
+private struct SignalMapInteractionKey: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            HStack(spacing: 4) { Circle().fill(Color(hex: "#E98D53")).frame(width: 7, height: 7); Text("Event") }
+            HStack(spacing: 4) { Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 1.5, dash: [2, 1])).frame(width: 10, height: 10); Text("Image") }
+            Text("Number = nearby events")
+        }.font(.caption2).foregroundStyle(.secondary)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 private struct SignalDensityLegend: View {
     let mode: SignalMapMode
     let points: [CountryBubblePoint]
@@ -5365,18 +5377,12 @@ private struct SignalDensityLegend: View {
                 Text(format(upper))
             }
             .font(.system(size: 9).monospacedDigit())
-            HStack(spacing: 5) {
-                Circle().fill(Color(hex: "#E98D53")).frame(width: 7, height: 7)
-                Text("Development")
-                Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 1.5, dash: [2, 1])).frame(width: 10, height: 10)
-                Text("Images")
-            }.font(.system(size: 8))
-            Text("Numbers group nearby events").font(.system(size: 8)).foregroundStyle(.white.opacity(0.7))
+
         }
         .foregroundStyle(.white.opacity(0.88))
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .frame(width: 154)
+        .frame(width: 140)
         .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 7))
     }
 
@@ -5660,7 +5666,10 @@ private struct InteractiveCountryBubbleMap: View {
                 Text(flag(point.iso))
                 Text(Locale.current.localizedString(forRegionCode: point.iso) ?? point.iso)
                     .lineLimit(1)
-                if !compactPresentation { Text(point.valueLabel).foregroundStyle(.secondary) }
+                if !compactPresentation {
+                    Text(point.id.hasPrefix("overview-") ? Int(point.colorValue).formatted() : point.valueLabel)
+                        .lineLimit(1).foregroundStyle(.secondary)
+                }
             }
             .font(.system(size: compactPresentation ? 11 : 12, weight: .semibold))
             .padding(.horizontal, 8).padding(.vertical, 6)
@@ -5682,7 +5691,7 @@ private struct InteractiveCountryBubbleMap: View {
             guard let latitude = event.latitude, let longitude = event.longitude,
                   contains(latitude: latitude, longitude: longitude) else { return nil }
             let pixel = project(CLLocationCoordinate2D(latitude: latitude, longitude: longitude), size: size)
-            guard pixel.x >= 0, pixel.x <= size.width, pixel.y >= 0, pixel.y <= size.height else { return nil }
+            guard pixel.x >= 18, pixel.x <= size.width - 18, pixel.y >= 18, pixel.y <= size.height - 18 else { return nil }
             return SignalMapPinGroup(id: event.id, eventIDs: [event.id], x: pixel.x, y: pixel.y, hasImagery: event.earth_observation_available || event.imagery != nil)
         })
     }
@@ -5706,7 +5715,12 @@ private struct InteractiveCountryBubbleMap: View {
         }
         for point in preferred {
             let pixel = project(point.coordinate, size: size)
-            guard pixel.x > 40, pixel.x < size.width - 40, pixel.y > 35, pixel.y < size.height - 35 else { continue }
+            let halfWidth: CGFloat = compactPresentation ? 73 : 105
+            guard pixel.x > halfWidth + 8, pixel.x < size.width - halfWidth - 8, pixel.y > 52, pixel.y < size.height - 24 else { continue }
+            let labelBox = CGRect(x: pixel.x - halfWidth, y: pixel.y - 46, width: halfWidth * 2, height: 44)
+            let legendBox = CGRect(x: size.width - 156, y: size.height - 58, width: 156, height: 58)
+            let controlsBox = CGRect(x: size.width - 64, y: 0, width: 64, height: 152)
+            guard !labelBox.intersects(legendBox), !labelBox.intersects(controlsBox) else { continue }
             if visible.allSatisfy({
                 let other = project($0.coordinate, size: size)
                 return abs(other.y - pixel.y) > 34 || abs(other.x - pixel.x) > (compactPresentation ? 130 : 180)
@@ -6033,6 +6047,7 @@ struct SignalMapSnapshotReview: View {
                             transportEntities: [], resetToken: resetToken, onSelectCountry: { selectedCountry = $0 }, onSelectEvent: { _ in })
                             .frame(height: geometry.size.width < 600 ? 260 : 460)
                             .clipShape(RoundedRectangle(cornerRadius: 12))
+                        SignalMapInteractionKey()
                         Text("Tap a country for its profile. Tap a dot to open a development, or a number to see nearby developments.")
                             .font(.caption).foregroundStyle(.secondary)
                         Button("Show world") { selectedCountry = nil; resetToken += 1 }
