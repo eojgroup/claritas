@@ -29,6 +29,10 @@ it("keeps the expanded map and its camera mounted while country and event contex
   expect(screen.getByRole("dialog", { name: "Expanded development map" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
+  fireEvent.click(screen.getByRole("button", { name: "All countries ×" }));
+  expect(screen.queryByRole("region", { name: "Country profile" })).toBeNull();
+  expect(screen.getByTestId("map-camera")).toBe(map);
+  fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
   fireEvent.click(screen.getByRole("button", { name: "Select port event" }));
   expect(await screen.findByRole("heading", { name: "Selected event evidence" })).toBeTruthy();
   expect(screen.getByRole("dialog", { name: "Expanded development map" })).toBeTruthy();

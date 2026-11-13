@@ -58,7 +58,7 @@ export default function SituationDashboard(props: Props) {
   const revealContext = () => setPanelStop((stop) => stop === "peek" ? "half" : stop);
   const selectEvent = (id: string | null) => { onSelect(id); if (id) { setProfileCountry(null); revealContext(); } };
   const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null); props.onCountryChange(iso); revealContext(); };
-  const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setter(value); };
+  const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
   const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country}
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale="log" featuredCountry={leadingCountries[0]?.country} focusOnActivity
@@ -77,8 +77,9 @@ export default function SituationDashboard(props: Props) {
     </section>
     <aside className="situation-context-panel situation-stream" aria-label="Map context">
       <button type="button" className="situation-panel-handle" aria-label="Resize context panel" aria-controls="world-map-context" aria-expanded={panelStop !== "peek"}
-        onClick={() => {
-          if (suppressPanelClick.current) { suppressPanelClick.current = false; return; }
+        onClick={(event) => {
+          if (suppressPanelClick.current && event.detail > 0) { suppressPanelClick.current = false; return; }
+          suppressPanelClick.current = false;
           movePanel((stops.indexOf(panelStop) + 1) % 3);
         }}
         onKeyDown={(event) => {

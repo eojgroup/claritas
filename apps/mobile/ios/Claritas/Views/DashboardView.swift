@@ -5242,11 +5242,17 @@ struct WorldMapWorkspace: View {
 
     private var events: [IntelligenceEvent] {
         let overview = model.intelligenceOverview
-        let candidates = overview?.map_events ?? overview?.events ?? []
+        var candidates = overview?.map_events ?? overview?.events ?? []
         if let event = model.selectedIntelligenceEvent, !candidates.contains(where: { $0.id == event.id }) {
-            return candidates + [event]
+            candidates.append(event)
         }
-        return candidates
+        return candidates.filter { event in
+            guard let latitude = event.latitude, let longitude = event.longitude,
+                  latitude.isFinite, longitude.isFinite,
+                  (-90...90).contains(latitude), (-180...180).contains(longitude) else { return false }
+            let type = event.location_type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return !["country", "country_centroid", "admin", "admin1", "administrative_area"].contains(type)
+        }
     }
 
     var body: some View {
@@ -5303,7 +5309,7 @@ struct WorldMapWorkspace: View {
             if id != nil { profileCountry = nil; revealContext() }
         }
         .onChange(of: model.selectedCountry) { country in
-            if country == nil { profileCountry = nil }
+            if country != profileCountry { profileCountry = nil }
         }
     }
 
@@ -5328,7 +5334,7 @@ struct WorldMapWorkspace: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.selectedIntelligenceEventID != nil ? "Event context" : profileCountry.map(countryName) ?? "World overview")
+                    Text(model.selectedIntelligenceEventID != nil ? "Event context" : model.selectedCountry.map(countryName) ?? "World overview")
                         .font(.title3.weight(.semibold)).lineLimit(1)
                     Text("\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
