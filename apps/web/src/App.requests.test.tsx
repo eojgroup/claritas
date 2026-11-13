@@ -47,9 +47,11 @@ it("loads the overview and briefing without an optional-feed request burst and s
   expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("2");
   expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("1000");
   expect(screen.getByRole("region", { name: "Images from this period" })).toBeTruthy();
+  fireEvent.click(screen.getByText("Filters"));
   fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "priority" } });
   expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("20");
   fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "activity" } });
+  fireEvent.click(screen.getByText("Filters"));
   fireEvent.click(screen.getByRole("button", { name: "Expand map" }));
   expect(screen.getByRole("dialog", { name: "Expanded development map" })).toBeTruthy();
   fireEvent.keyDown(document, { key: "Escape" });

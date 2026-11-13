@@ -68,10 +68,10 @@ export default function SituationDashboard(props: Props) {
   const stops = ["peek", "half", "full"] as const;
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
   const overviewControls = <>
-        <div className="situation-map-tools"><label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "activity" | "priority")}><option value="activity">All selected activity</option><option value="priority">High-priority activity</option></select></label>{country && <button type="button" onClick={() => { setProfileCountry(null); changeScope(props.onCountryChange)(null); }}>Clear {country} ×</button>}</div>
         <p className="situation-map-key"><span><i />Event · colour = priority</span><span><i />Image available</span></p>
           <div id="world-event-stream" tabIndex={-1}>
-            <SituationOverview variant="summary" {...props} selectedId={selectedId}
+            <SituationOverview variant="summary" compact {...props} selectedId={selectedId}
+              filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "activity" | "priority")}><option value="activity">All selected activity</option><option value="priority">High-priority activity</option></select></label>}
               onHoursChange={changeScope(props.onHoursChange)} onTopicChange={changeScope(props.onTopicChange)}
               onPriorityChange={changeScope(props.onPriorityChange)} onCountryChange={changeScope(props.onCountryChange)} />
           </div>
@@ -109,6 +109,7 @@ export default function SituationDashboard(props: Props) {
           }
         }}><span /><span className="sr-only">Drag up for details; down for more map</span></button>
       <header className="situation-panel-heading"><div><h2>{selectedId ? "Event context" : profileCountry ? new Intl.DisplayNames(undefined, { type: "region" }).of(profileCountry) : "World overview"}</h2><p>{overview && scopeMatches ? `${overview.summary.event_count.toLocaleString()} developments · ` : ""}{props.hours === 24 ? "Past 24 hours" : props.hours === 72 ? "Past 3 days" : "Past 7 days"}</p></div>
+        {country && <button type="button" className="situation-country-clear" onClick={() => changeScope(props.onCountryChange)(null)}>Clear {country} ×</button>}
         <button type="button" className="situation-panel-toggle" onClick={() => setPanelStop(panelStop === "peek" ? "half" : "peek")} aria-label={panelStop === "peek" ? "Show context" : "Show more map"} aria-expanded={panelStop !== "peek"} aria-controls="world-map-context">{panelStop === "peek" ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</button>
       </header>
       <div id="world-map-context" className="situation-context-scroll" inert={panelStop === "peek"}>

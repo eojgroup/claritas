@@ -5257,14 +5257,14 @@ struct WorldMapWorkspace: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let wide = geometry.size.width >= 760
+            let wide = SignalMapLayout.usesSidebar(width: Double(geometry.size.width), height: Double(geometry.size.height))
             let sideWidth = min(400.0, geometry.size.width * 0.42)
             let stops: [CGFloat] = [112, geometry.size.height * 0.46, geometry.size.height - 12]
             let panelHeight = min(stops[2], max(stops[0], stops[panelStop] - panelDrag))
             ZStack(alignment: wide ? .topLeading : .bottom) {
                 Color(hex: "#0C2230").ignoresSafeArea()
                 NativeSignalMap(points: points, events: events, mode: .signals, mapRegion: .global,
-                    compactPresentation: !wide, selectedCountry: model.selectedCountry,
+                    compactPresentation: geometry.size.width < 600, selectedCountry: model.selectedCountry,
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: points.first?.iso,
                     transportEntities: [], resetToken: 0, onSelectCountry: selectCountry,
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
@@ -5355,7 +5355,11 @@ struct WorldMapWorkspace: View {
                 if wide {
                     Button { withAnimation { panelStop = panelStop == 0 ? 1 : 0 } } label: {
                         Image(systemName: "sidebar.left").frame(width: 44, height: 44)
-                    }.accessibilityLabel("Toggle context details")
+                    }.accessibilityLabel(panelStop == 0 ? "Show context" : "Show more map")
+                } else {
+                    Button { withAnimation(.easeInOut(duration: 0.22)) { panelStop = panelStop == 0 ? 1 : 0 } } label: {
+                        Image(systemName: panelStop == 0 ? "chevron.up" : "chevron.down").frame(width: 44, height: 44)
+                    }.accessibilityLabel(panelStop == 0 ? "Show context" : "Show more map")
                 }
             }
             .padding(.horizontal, 18).padding(.top, wide ? 12 : 28).padding(.bottom, 10)
@@ -5684,6 +5688,7 @@ private struct InteractiveCountryBubbleMap: View {
     @State private var userAdjustedViewport = false
     @State private var committedScale: CGFloat = 1
     @State private var committedOffset: CGSize = .zero
+    @State private var previousViewportSize: CGSize?
 
     var body: some View {
         GeometryReader { proxy in
@@ -5751,7 +5756,17 @@ private struct InteractiveCountryBubbleMap: View {
                 }
             }
             .clipped()
-            .onAppear { resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
+            .onAppear { previousViewportSize = proxy.size; resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
+            .onChange(of: proxy.size) { next in
+                if let previous = previousViewportSize {
+                    let camera = projection.resizedViewport(width: Double(previous.width), height: Double(previous.height),
+                        newWidth: Double(next.width), newHeight: Double(next.height), zoom: Double(committedScale),
+                        offsetX: Double(committedOffset.width), offsetY: Double(committedOffset.height))
+                    committedScale = CGFloat(camera.zoom)
+                    committedOffset = CGSize(width: camera.offsetX, height: camera.offsetY)
+                }
+                previousViewportSize = next
+            }
             .onChange(of: mapRegion) { _ in resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
             .onChange(of: resetToken) { _ in resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
             .onChange(of: selectedCountry) { next in

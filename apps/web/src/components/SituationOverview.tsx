@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { ArrowUpRight, MapPin, RefreshCw } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { ArrowUpRight, MapPin, RefreshCw, SlidersHorizontal } from "lucide-react";
 import type { IntelligenceOverview, OverviewTopic } from "../lib/api";
 import SatelliteImage from "./SatelliteImage";
 import CountryFlag from "./CountryFlag";
@@ -15,6 +15,8 @@ const OVERVIEW_TOPICS: Array<{ key: OverviewTopic; label: string }> = [
 ];
 type Props = {
   variant?: "all" | "summary" | "timeline" | "history" | "developments";
+  compact?: boolean;
+  filterExtras?: ReactNode;
   overview: IntelligenceOverview | null;
   loading: boolean;
   error: string | null;
@@ -37,7 +39,7 @@ function timeLabel(value: string, day = true) {
 function periodLabel(hours: number) { return hours === 24 ? "24 hours" : `${hours / 24} days`; }
 function changeLabel(change: number) { return change === 0 ? "the same as" : `${Math.abs(change)} ${change > 0 ? "more" : "fewer"} than`; }
 
-export default function SituationOverview({ variant = "all", overview, loading, error, hours, topic, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
+export default function SituationOverview({ variant = "all", compact = false, filterExtras, overview, loading, error, hours, topic, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(false);
   const scopeMatches = overview?.window.hours === hours && (overview.filters.topic ?? null) === topic
     && (overview.filters.priority ?? priority) === priority
@@ -53,16 +55,23 @@ export default function SituationOverview({ variant = "all", overview, loading, 
   const showDevelopments = variant === "all" || variant === "timeline" || variant === "developments";
   if (!showSummary && (!data || data.snapshot?.status === "warming")) return null;
 
-  return <section className="situation-overview app-card" aria-label={showSummary ? "Situation overview" : variant === "history" ? "Activity history" : "Latest developments"} aria-busy={loading}>
+  const priorityControl = onPriorityChange && <div className="situation-priority-toggle" role="group" aria-label="Development priority">{(["high", "all"] as const).map((value) => <button key={value} type="button" aria-pressed={priority === value} onClick={() => { resetTimeline(); onPriorityChange(value); }}>{value === "high" ? "High priority" : "All developments"}</button>)}</div>;
+  const refreshControl = <button type="button" onClick={onRefresh} disabled={loading} aria-label="Refresh situation overview"><RefreshCw size={15} className={loading ? "animate-spin" : undefined} />{!compact && <span>Refresh</span>}</button>;
+  const periodFilters = <>
+    <label>Period<select value={hours} onChange={(event) => { resetTimeline(); onHoursChange(Number(event.target.value) as 24 | 72 | 168); }}><option value={24}>Past 24 hours</option><option value={72}>Past 3 days</option><option value={168}>Past 7 days</option></select></label>
+    <label>Topic<select value={topic ?? "all"} onChange={(event) => { resetTimeline(); onTopicChange(event.target.value === "all" ? null : event.target.value as OverviewTopic); }}><option value="all">All topics</option>{OVERVIEW_TOPICS.map((item) => <option key={item.key} value={item.key}>{item.label}{!topic && data ? ` (${data.topics.find((entry) => entry.key === item.key)?.event_count ?? 0})` : ""}</option>)}</select></label>
+    {filterExtras}
+  </>;
+
+  return <section className={`situation-overview app-card${compact ? " situation-overview-compact" : ""}`} aria-label={showSummary ? "Situation overview" : variant === "history" ? "Activity history" : "Latest developments"} aria-busy={loading}>
     {showSummary && <>
     <header className="situation-heading">
       <div><span className="situation-eyebrow">One view across sources</span><h2>World overview{country ? <><CountryFlag country={country} /><span>{country.toUpperCase()}</span></> : null}</h2></div>
-      <div className="situation-filters">
-        {onPriorityChange && <div className="situation-priority-toggle" role="group" aria-label="Development priority">{(["high", "all"] as const).map((value) => <button key={value} type="button" aria-pressed={priority === value} onClick={() => { resetTimeline(); onPriorityChange(value); }}>{value === "high" ? "High priority" : "All developments"}</button>)}</div>}
-        <label>Period<select value={hours} onChange={(event) => { resetTimeline(); onHoursChange(Number(event.target.value) as 24 | 72 | 168); }}><option value={24}>Past 24 hours</option><option value={72}>Past 3 days</option><option value={168}>Past 7 days</option></select></label>
-        <label>Topic<select value={topic ?? "all"} onChange={(event) => { resetTimeline(); onTopicChange(event.target.value === "all" ? null : event.target.value as OverviewTopic); }}><option value="all">All topics</option>{OVERVIEW_TOPICS.map((item) => <option key={item.key} value={item.key}>{item.label}{!topic && data ? ` (${data.topics.find((entry) => entry.key === item.key)?.event_count ?? 0})` : ""}</option>)}</select></label>
-        <button type="button" onClick={onRefresh} disabled={loading} aria-label="Refresh situation overview"><RefreshCw size={15} className={loading ? "animate-spin" : undefined} /><span>Refresh</span></button>
-      </div>
+      {compact ? <div className="situation-compact-controls">
+        {priorityControl}
+        <details className="situation-filter-menu"><summary><SlidersHorizontal size={16} /><span>Filters</span>{(topic || hours !== 24) && <i aria-label="Filters active" />}</summary><div className="situation-filters">{periodFilters}</div></details>
+        {refreshControl}
+      </div> : <div className="situation-filters">{priorityControl}{periodFilters}{refreshControl}</div>}
     </header>
     {error && <div className="situation-message" role="alert">{data ? "Could not refresh. Showing the last loaded overview." : "The overview is temporarily unavailable."} <button type="button" onClick={onRefresh} disabled={loading}>Retry overview</button></div>}
     {!data && loading && <p role="status" className="situation-message">Loading the situation overview…</p>}
@@ -70,11 +79,12 @@ export default function SituationOverview({ variant = "all", overview, loading, 
     {data && <>
       {showSummary && <>
       {data.snapshot?.status !== "warming" && <div className="situation-summary">
-        <p><strong>{data.coverage.truncated ? "At least " : ""}{data.summary.event_count} {data.summary.event_count === 1 ? "development" : "developments"} updated</strong> in the past {periodLabel(hours)}{data.coverage.comparison_available ? ` — ${changeLabel(data.summary.change)} the previous ${periodLabel(hours)}.` : ". Period comparison unavailable."}</p>
-        <p>{priority === "all" && <>{data.summary.high_priority_count} high-priority · </>}{data.summary.location_count} {data.summary.location_count === 1 ? "place" : "places"}{leadingTopic && !topic ? ` · Most updates: ${leadingTopic.label.toLowerCase()}` : ""}</p>
+        <p>{compact ? data.coverage.comparison_available ? `${changeLabel(data.summary.change)} the previous ${periodLabel(hours)}.` : "Period comparison unavailable." : <><strong>{data.coverage.truncated ? "At least " : ""}{data.summary.event_count} {data.summary.event_count === 1 ? "development" : "developments"} updated</strong> in the past {periodLabel(hours)}{data.coverage.comparison_available ? ` — ${changeLabel(data.summary.change)} the previous ${periodLabel(hours)}.` : ". Period comparison unavailable."}</>}</p>
+        <p>{priority === "all" && <>{data.summary.high_priority_count} high-priority · </>}{data.summary.location_count} {data.summary.location_count === 1 ? "place" : "places"}{!compact && leadingTopic && !topic ? ` · Most updates: ${leadingTopic.label.toLowerCase()}` : ""}</p>
       </div>}
       {country && <div className="situation-places"><button type="button" onClick={() => { resetTimeline(); onCountryChange(null); }}>All countries ×</button></div>}
-      {data.topics.length > 0 && <div className="situation-topic-pulse" role="group" aria-label="Topics in this period">{data.topics.map((item) => <button type="button" key={item.key} aria-pressed={topic === item.key} onClick={() => { resetTimeline(); onTopicChange(topic === item.key ? null : item.key); }}><span>{item.label}</span><strong>{item.event_count.toLocaleString()}</strong></button>)}</div>}
+      {compact && topic && <button type="button" className="situation-active-topic" onClick={() => onTopicChange(null)}>{OVERVIEW_TOPICS.find((item) => item.key === topic)?.label} ×</button>}
+      {!compact && data.topics.length > 0 && <div className="situation-topic-pulse" role="group" aria-label="Topics in this period">{data.topics.map((item) => <button type="button" key={item.key} aria-pressed={topic === item.key} onClick={() => { resetTimeline(); onTopicChange(topic === item.key ? null : item.key); }}><span>{item.label}</span><strong>{item.event_count.toLocaleString()}</strong></button>)}</div>}
       {data.snapshot?.status === "stale" && <p className="situation-snapshot-state">Showing the latest available overview. A fresh update is being prepared.</p>}
       {data.snapshot?.status === "warming" && <p role="status" className="situation-snapshot-state">Preparing the first overview. It will appear here automatically.</p>}
       </>}
