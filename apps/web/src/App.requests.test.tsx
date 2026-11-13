@@ -55,11 +55,16 @@ it("loads the overview and briefing without an optional-feed request burst and s
   fireEvent.keyDown(document, { key: "Escape" });
   expect(screen.queryByRole("dialog", { name: "Expanded development map" })).toBeNull();
   expect(screen.getByRole("button", { name: "All developments" }).getAttribute("aria-pressed")).toBe("true");
+  const mapBeforeContext = screen.getByTestId("overview-map");
+  fireEvent.click(screen.getByRole("button", { name: "Show more map" }));
+  expect(document.getElementById("world-map-context")?.hasAttribute("inert")).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Map development" }));
   // The real lazy detail module is transformed on demand in Vitest. Allow
   // cold compilation under parallel CI load; request concurrency is asserted
   // independently above.
   expect(await screen.findByRole("heading", { name: event.title }, { timeout: 3000 })).toBeTruthy();
+  expect(screen.getByTestId("overview-map")).toBe(mapBeforeContext);
+  expect(document.getElementById("world-map-context")?.hasAttribute("inert")).toBe(false);
   expect(screen.getByRole("region", { name: "Selected development" }).closest(".situation-workspace")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Map development" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByRole("button", { name: "Back to developments" })).toBeTruthy();

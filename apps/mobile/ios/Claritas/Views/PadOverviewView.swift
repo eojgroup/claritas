@@ -53,45 +53,9 @@ struct PadOverviewView: View {
     }
 
     var body: some View {
-        BrandBackground {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    commandHeader
-
-                    ViewThatFits(in: .horizontal) {
-                        HStack(alignment: .top, spacing: 16) {
-                            SignalMapPanel(
-                                height: 500,
-                                allowsComparison: false,
-                                showsCountryProfile: false,
-                                overviewOnly: true
-                            )
-                            .frame(minWidth: 320, maxWidth: .infinity, alignment: .top)
-
-                            worldContext
-                                .frame(width: 420, alignment: .top)
-                        }
-
-                        VStack(spacing: 16) {
-                            SignalMapPanel(
-                                height: 460,
-                                allowsComparison: false,
-                                showsCountryProfile: false,
-                                overviewOnly: true
-                            )
-                            worldContext
-                        }
-                    }
-
-                    BriefingOverviewCard(briefing: model.dailyBriefing) {
-                        destination = .briefing
-                    }
-
-                }
-                .padding(22)
-            }
+        WorldMapWorkspace {
+            destination = .briefing
         }
-
     }
 
     @ViewBuilder
