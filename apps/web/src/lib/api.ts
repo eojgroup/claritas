@@ -2008,8 +2008,8 @@ export async function fetchCountryStats(params?: { days?: number }): Promise<Cou
   };
 }
 
-export async function fetchCountryWeather() {
-  const resp = await fetch(`${API_BASE}/api/weather/country-latest`, { credentials: "include" });
+export async function fetchCountryWeather(signal?: AbortSignal) {
+  const resp = await fetch(`${API_BASE}/api/weather/country-latest`, { credentials: "include", signal });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country weather"));
   const data = await resp.json();
   return (data.stats ?? []) as CountryWeather[];
@@ -2025,8 +2025,8 @@ export async function fetchCountryWeatherForecast(
   return (await resp.json()) as CountryWeatherForecastDetail;
 }
 
-export async function fetchCountryLeadership() {
-  const resp = await fetch(`${API_BASE}/api/leadership/countries`, { credentials: "include" });
+export async function fetchCountryLeadership(signal?: AbortSignal) {
+  const resp = await fetch(`${API_BASE}/api/leadership/countries`, { credentials: "include", signal });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country leadership"));
   const data = await resp.json();
   return (data.countries ?? []) as CountryLeadership[];
@@ -2085,9 +2085,9 @@ export async function fetchCountryMarketOverview(): Promise<CountryMarketOvervie
   return (await resp.json()) as CountryMarketOverviewResponse;
 }
 
-export async function fetchCountryMarketDetail(country: string): Promise<CountryMarketDetail> {
+export async function fetchCountryMarketDetail(country: string, signal?: AbortSignal): Promise<CountryMarketDetail> {
   const resp = await fetch(`${API_BASE}/api/market/countries/${encodeURIComponent(country)}`, {
-    credentials: "include",
+    credentials: "include", signal,
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country market detail"));
   return (await resp.json()) as CountryMarketDetail;

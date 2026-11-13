@@ -1213,6 +1213,23 @@ private struct TransportTrackingMap: View {
     }
 }
 
+// Local ocean tiles replace the Apple basemap while retaining native tracking,
+// route selection and gestures. All country geometry comes from our bundled map.
+private final class TransportOceanTiles: MKTileOverlay {
+    private let imageData: Data
+    override init(urlTemplate: String?) {
+        imageData = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256)).image { context in
+            UIColor(red: 12 / 255.0, green: 34 / 255.0, blue: 48 / 255.0, alpha: 1).setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
+        }.pngData()!
+        super.init(urlTemplate: nil)
+        canReplaceMapContent = true
+    }
+    override func loadTile(at path: MKTileOverlayPath, result: @escaping (Data?, Error?) -> Void) {
+        result(imageData, nil)
+    }
+}
+
 private struct MapKitTransportTrackingView: UIViewRepresentable {
     let entities: [TransportEntity]
     let connections: [TransportMapConnection]
@@ -1321,6 +1338,7 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
 
         private func installOverlays(on map: MKMapView) {
             map.removeOverlays(map.overlays)
+            map.addOverlay(TransportOceanTiles(urlTemplate: nil), level: .aboveRoads)
             countryPolygons.removeAll(keepingCapacity: true)
             overlayStyles.removeAll(keepingCapacity: true)
 
@@ -1388,6 +1406,7 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
+            if let tiles = overlay as? TransportOceanTiles { return MKTileOverlayRenderer(tileOverlay: tiles) }
             if let polygon = overlay as? MKPolygon {
                 let renderer = MKPolygonRenderer(polygon: polygon)
                 let iso = countryPolygons[ObjectIdentifier(polygon)]
@@ -1396,10 +1415,10 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
                     $0.originCountry == iso || $0.destinationCountry == iso
                 }
                 renderer.fillColor = iso == scope
-                    ? UIColor(red: 0.85, green: 0.65, blue: 0.42, alpha: 0.22)
+                    ? UIColor(red: 0.85, green: 0.46, blue: 0.26, alpha: 1)
                     : linked
-                        ? UIColor(red: 0.36, green: 0.66, blue: 0.74, alpha: 0.14)
-                        : .clear
+                        ? UIColor(red: 0.19, green: 0.36, blue: 0.43, alpha: 1)
+                        : UIColor(red: 28 / 255.0, green: 48 / 255.0, blue: 65 / 255.0, alpha: 1)
                 renderer.strokeColor = iso == scope
                     ? UIColor.white.withAlphaComponent(0.92)
                     : linked

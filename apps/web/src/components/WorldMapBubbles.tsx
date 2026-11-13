@@ -417,6 +417,10 @@ export default memo(function WorldMapBubbles({
       setSize({ width: rect.width, height: rect.height });
     };
     updateSize();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateSize);
+      return () => window.removeEventListener("resize", updateSize);
+    }
     const observer = new ResizeObserver(updateSize);
     observer.observe(container);
     return () => observer.disconnect();

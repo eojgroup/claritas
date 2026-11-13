@@ -1,5 +1,5 @@
 import { lazy, Suspense, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronUp, FileText, Maximize2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Maximize2, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import type { DailySignalBriefing, IntelligenceEvent, IntelligenceOverview, OverviewTopic } from "../lib/api";
 import SituationOverview from "./SituationOverview";
 import WorldMapBubbles from "./WorldMapBubbles";
@@ -17,7 +17,7 @@ type Props = {
   briefing: DailySignalBriefing | null; briefingError: string | null;
   onHoursChange: (hours: 24 | 72 | 168) => void; onTopicChange: (topic: OverviewTopic | null) => void;
   onPriorityChange: (priority: "high" | "all") => void; onCountryChange: (country: string | null) => void;
-  onSelect: (id: string | null) => void; onOpenImagery: (id?: string) => void;
+  onSelect: (id: string | null, options?: { focus?: boolean }) => void; onOpenImagery: (id?: string) => void;
   onRefresh: () => void; onRefreshBriefing: () => Promise<void>;
 };
 
@@ -26,6 +26,8 @@ export default function SituationDashboard(props: Props) {
   const [selectedEvent, setSelectedEvent] = useState<IntelligenceEvent | null>(null);
   const [profileCountry, setProfileCountry] = useState<string | null>(null);
   const [expandedMap, setExpandedMap] = useState(false);
+  const [wideContext, setWideContext] = useState(false);
+  const contextScroll = useRef<HTMLDivElement>(null);
   const [panelStop, setPanelStop] = useState<"peek" | "half" | "full">("half");
   const panelDrag = useRef<{ y: number; stop: number } | null>(null);
   const suppressPanelClick = useRef(false);
@@ -57,7 +59,7 @@ export default function SituationDashboard(props: Props) {
   const visuals = scopeMatches ? (overview?.visual_events ?? overview?.events.filter((event) => event.imagery) ?? []) : [];
   const revealContext = () => setPanelStop((stop) => stop === "peek" ? "half" : stop);
   const selectEvent = (id: string | null) => { onSelect(id); if (id) { setProfileCountry(null); revealContext(); } };
-  const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null); props.onCountryChange(iso); revealContext(); };
+  const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
   const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country}
@@ -76,10 +78,16 @@ export default function SituationDashboard(props: Props) {
               onPriorityChange={changeScope(props.onPriorityChange)} onCountryChange={changeScope(props.onCountryChange)} />
           </div>
   </>;
-  const workspace = <div className={`situation-workspace situation-map-workspace panel-${panelStop}`}>
+  const workspace = <div className={`situation-workspace situation-map-workspace panel-${panelStop}${wideContext ? " context-wide" : ""}`}>
     <section className="situation-map-canvas" aria-label="Development map">
       {map}
       <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span></div>
+      {visuals.some((event) => event.imagery) && <section className="situation-map-images" aria-label="Images on the map">
+        {visuals.filter((event) => event.imagery).slice(0, 4).map((event) => <button type="button" key={event.id} onClick={() => selectEvent(event.id)} aria-label={`Open image context: ${presentEvent(event).headline}`}>
+          <SatelliteImage compact sources={[event.imagery!.preview_url]} alt="" className="situation-map-image" />
+          <span><CountryFlag country={event.primary_country_iso2} />{event.imagery!.source_kind === "publisher" ? "News photo" : "Satellite"}</span>
+        </button>)}
+      </section>}
       <div className="situation-map-actions">
         <button type="button" onClick={() => setExpandedMap(!expandedMap)} aria-label={expandedMap ? "Close expanded map" : "Expand map"}>{expandedMap ? <X size={18} /> : <Maximize2 size={18} />}</button>
       </div>
@@ -110,10 +118,11 @@ export default function SituationDashboard(props: Props) {
         }}><span /><span className="sr-only">Drag up for details; down for more map</span></button>
       <header className="situation-panel-heading"><div><h2>{selectedId ? "Event context" : profileCountry ? new Intl.DisplayNames(undefined, { type: "region" }).of(profileCountry) : "World overview"}</h2><p>{overview && scopeMatches ? `${overview.summary.event_count.toLocaleString()} developments · ` : ""}{props.hours === 24 ? "Past 24 hours" : props.hours === 72 ? "Past 3 days" : "Past 7 days"}</p></div>
         {country && <button type="button" className="situation-country-clear" onClick={() => changeScope(props.onCountryChange)(null)}>Clear {country} ×</button>}
+        <button type="button" className="situation-panel-widen" onClick={() => setWideContext(!wideContext)} aria-label={wideContext ? "Narrow context" : "Widen context"} aria-pressed={wideContext}>{wideContext ? <PanelLeftClose size={20} /> : <PanelLeftOpen size={20} />}</button>
         <button type="button" className="situation-panel-toggle" onClick={() => setPanelStop(panelStop === "peek" ? "half" : "peek")} aria-label={panelStop === "peek" ? "Show context" : "Show more map"} aria-expanded={panelStop !== "peek"} aria-controls="world-map-context">{panelStop === "peek" ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</button>
       </header>
-      <div id="world-map-context" className="situation-context-scroll" inert={panelStop === "peek"}>
-        {!selectedId && overviewControls}
+      <div ref={contextScroll} id="world-map-context" className="situation-context-scroll" inert={panelStop === "peek"}>
+        {!selectedId && !profileCountry && overviewControls}
         {selectedId ? <><section id="overview-event-context" tabIndex={-1} className="situation-detail" aria-label="Selected development">
           <header><span>Event context</span><button type="button" onClick={() => onSelect(null)}><X size={16} />Back to developments</button></header>
           <Suspense fallback={<p role="status">Loading development…</p>}>
@@ -122,8 +131,12 @@ export default function SituationDashboard(props: Props) {
               onEventLoaded={setSelectedEvent} onSelectEvent={selectEvent} onOpenImagery={props.onOpenImagery} />
           </Suspense>
         </section>{overviewControls}</> : <>
-          {profileCountry && <OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setProfileCountry(null)} />}
+          {profileCountry && <><OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setProfileCountry(null)} />{overviewControls}</>}
           <SituationOverview variant="history" {...props} selectedId={selectedId} />
+          {visuals.length > 0 && <section className="overview-visuals" aria-label="Images from this period"><h3>Images & location context</h3><div>{visuals.map((event) => event.imagery && <button type="button" key={event.id} onClick={() => selectEvent(event.id)}>
+            <SatelliteImage compact sources={[event.imagery.preview_url]} alt={presentEvent(event).headline} className="overview-visual-image" />
+            <strong>{presentEvent(event).headline}</strong><small>{event.imagery.source_kind === "publisher" ? "Publisher photo · capture unverified" : "Satellite context"} · {event.imagery.attribution}</small>
+          </button>)}</div></section>}
           <section className="situation-briefing" aria-label="Daily briefing">
             <div className="situation-briefing-label"><FileText size={16} /><strong>Daily briefing</strong>{props.briefing?.published_at && <time dateTime={props.briefing.published_at}>{new Date(props.briefing.published_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>}</div>
             {props.briefing ? <>
@@ -134,10 +147,6 @@ export default function SituationDashboard(props: Props) {
             {props.briefingError && <button type="button" onClick={() => void props.onRefreshBriefing()}>Retry briefing</button>}
           </section>
           <SituationOverview variant="developments" {...props} onSelect={selectEvent} selectedId={selectedId} />
-          {visuals.length > 0 && <section className="overview-visuals" aria-label="Images from this period"><h3>Images & location context</h3><div>{visuals.map((event) => event.imagery && <button type="button" key={event.id} onClick={() => selectEvent(event.id)}>
-            <SatelliteImage sources={[event.imagery.preview_url]} alt={presentEvent(event).headline} className="overview-visual-image" />
-            <strong>{presentEvent(event).headline}</strong><small>{event.imagery.source_kind === "publisher" ? "Publisher photo · capture unverified" : "Satellite context"} · {event.imagery.attribution}</small>
-          </button>)}</div></section>}
           {leadingCountries.length > 0 && <div className="situation-country-pulse" aria-label="Leading country activity">{leadingCountries.map((item) => <button type="button" key={item.country} onClick={() => selectCountry(item.country)}><CountryFlag country={item.country} /><span>{new Intl.DisplayNames(undefined, { type: "region" }).of(item.country) || item.country}</span><strong>{item.count.toLocaleString()}</strong></button>)}</div>}
           <p className="situation-map-coverage">Country shading covers the full period. Pins show located events; country-only reports stay in the heatmap.</p>
         </>}
