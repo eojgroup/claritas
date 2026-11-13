@@ -305,6 +305,23 @@ describe("WorldMapBubbles interaction", () => {
     expect(onSelectPoint).not.toHaveBeenCalled();
   });
 
+  it("lets a single finger pan the immersive canvas and suppresses the resulting synthetic click", () => {
+    const onSelectPoint = vi.fn();
+    render(<WorldMapBubbles data={[]} allowsSingleFingerPan points={[{ id: "event", latitude: 0, longitude: 0, title: "Event location" }]} onSelectPoint={onSelectPoint} />);
+    const svg = screen.getByRole("application");
+    const layer = svg.querySelector("g[transform]")!;
+    const before = layer.getAttribute("transform");
+    const marker = screen.getByRole("button", { name: /Event location/ });
+    Object.defineProperty(svg, "setPointerCapture", { value: vi.fn() });
+    fireEvent.pointerDown(marker, { pointerId: 1, pointerType: "touch", button: 0, clientX: 450, clientY: 180 });
+    fireEvent.pointerMove(svg, { pointerId: 1, pointerType: "touch", clientX: 450, clientY: 300 });
+    fireEvent.pointerUp(svg, { pointerId: 1, pointerType: "touch", clientX: 450, clientY: 300 });
+    fireEvent.click(marker);
+    expect(svg.style.touchAction).toBe("none");
+    expect(layer.getAttribute("transform")).not.toBe(before);
+    expect(onSelectPoint).not.toHaveBeenCalled();
+  });
+
   it("leaves one-finger vertical movement to native page scrolling", () => {
     const { mapLayer, svg } = renderMap();
     const setPointerCapture = vi.fn();

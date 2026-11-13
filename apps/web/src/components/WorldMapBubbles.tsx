@@ -70,6 +70,7 @@ export type WorldMapBubblesProps = {
   featuredLabel?: string;
   focusOnActivity?: boolean;
   focusCoordinate?: [number, number];
+  allowsSingleFingerPan?: boolean;
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
@@ -347,6 +348,7 @@ export default memo(function WorldMapBubbles({
   featuredLabel = "Highest relevance",
   focusOnActivity = false,
   focusCoordinate,
+  allowsSingleFingerPan = false,
   scale = "linear",
   showLabels = true,
   legendLabel = "Relative intensity",
@@ -644,18 +646,17 @@ export default memo(function WorldMapBubbles({
     const svg = svgRef.current;
     if (!svg) return;
     const preserveTwoFingerGesture = (event: TouchEvent) => {
-      if (event.touches.length >= 2 && event.cancelable) {
+      if ((allowsSingleFingerPan || event.touches.length >= 2) && event.cancelable) {
         event.preventDefault();
       }
     };
-    // CSS leaves one-finger vertical pan to the document. Reserving only
-    // multi-touch movement prevents the browser from claiming an intentional
-    // two-finger map pinch/pan before the pointer handlers can process it.
+    // Embedded maps leave a single finger to document scrolling. Immersive
+    // workspaces reserve the map canvas for direct pan and pinch gestures.
     svg.addEventListener("touchmove", preserveTwoFingerGesture, {
       passive: false,
     });
     return () => svg.removeEventListener("touchmove", preserveTwoFingerGesture);
-  }, []);
+  }, [allowsSingleFingerPan]);
 
   const clientToMap = (clientX: number, clientY: number) => {
     const rect = svgRef.current?.getBoundingClientRect();
@@ -702,9 +703,8 @@ export default memo(function WorldMapBubbles({
       dragRef.current = null;
       return;
     }
-    if (event.pointerType === "touch") {
-      // A single finger belongs to normal vertical page scrolling. Touch map
-      // manipulation starts only after a second active pointer is present.
+    if (event.pointerType === "touch" && !allowsSingleFingerPan) {
+      // Embedded maps keep one-finger scrolling available to the surrounding page.
       dragRef.current = null;
       return;
     }
@@ -760,7 +760,7 @@ export default memo(function WorldMapBubbles({
       event.preventDefault();
       return;
     }
-    if (event.pointerType === "touch") return;
+    if (event.pointerType === "touch" && !allowsSingleFingerPan) return;
     const drag = dragRef.current;
     if (!drag || drag.pointerId !== event.pointerId) return;
     const dx = event.clientX - drag.startX;
@@ -872,7 +872,7 @@ export default memo(function WorldMapBubbles({
         viewBox={`0 0 ${size.width} ${size.height}`}
         role="application"
         tabIndex={0}
-        style={{ touchAction: "pan-y" }}
+        style={{ touchAction: allowsSingleFingerPan ? "none" : "pan-y" }}
         aria-label="Interactive world signal map. Use the mouse wheel, trackpad, or pinch gesture to zoom and drag to pan."
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

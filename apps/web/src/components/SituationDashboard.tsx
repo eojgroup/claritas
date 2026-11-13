@@ -62,7 +62,7 @@ export default function SituationDashboard(props: Props) {
   const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
-  const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country}
+  const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country} allowsSingleFingerPan
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale="log" featuredCountry={leadingCountries[0]?.country} focusOnActivity
     featuredLabel={mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
     onSelectPoint={(point) => selectEvent(point.id)} showBubbles={false} showLabels legend
