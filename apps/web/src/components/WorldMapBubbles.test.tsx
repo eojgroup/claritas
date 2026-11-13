@@ -153,6 +153,22 @@ describe("WorldMapBubbles interaction", () => {
     expect(viewport()).toBe(zoomed);
   });
 
+  it("starts around the activity leader and preserves the camera on background updates", () => {
+    const view = render(<WorldMapBubbles data={[{ country: "DE", count: 100 }, { country: "BR", count: 20 }]}
+      focusOnActivity featuredCountry="DE" />);
+    const viewport = () => screen.getByRole("application").querySelector("g[transform]")?.getAttribute("transform");
+    const focused = viewport();
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    const zoomed = viewport();
+    expect(zoomed).not.toBe(focused);
+    view.rerender(<WorldMapBubbles data={[{ country: "DE", count: 104 }, { country: "BR", count: 24 }]}
+      focusOnActivity featuredCountry="DE" />);
+    expect(viewport()).toBe(zoomed);
+    view.rerender(<WorldMapBubbles data={[{ country: "DE", count: 104 }, { country: "BR", count: 24 }]}
+      focusOnActivity featuredCountry="DE" primaryCountry="BR" />);
+    expect(viewport()).not.toBe(zoomed);
+  });
+
   it("keeps ordinary wheel scrolling inert on hover until the map is activated", () => {
     const { mapLayer, svg } = renderMap();
     const eventMarker = screen.getByRole("button", { name: /Observed fire signal/i });

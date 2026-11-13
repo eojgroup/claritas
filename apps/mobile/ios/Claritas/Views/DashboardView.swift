@@ -5266,7 +5266,7 @@ struct WorldMapWorkspace: View {
                     // Fit the geography to the unobstructed area. Opening context
                     // leaves this map instance (and its camera) mounted.
                     .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
-                    .padding(.bottom, wide ? 0 : stops[panelStop == 0 ? 0 : 1] - 20)
+                    .padding(.bottom, wide ? 0 : stops[panelStop == 0 ? 0 : 1] + 8)
 
                 contextPanel(wide: wide)
                     .frame(width: wide ? sideWidth : nil, height: wide ? (panelStop == 0 ? 88 : geometry.size.height - 24) : panelHeight)
@@ -5927,7 +5927,8 @@ private struct InteractiveCountryBubbleMap: View {
         }
         let projected = basePoint(coordinate, size: size)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        let nextScale: CGFloat = mapRegion == .global ? (allowsSingleFingerPan && compactPresentation ? 3.4 : 2.2) : 1.4
+        let portraitWorkspace = allowsSingleFingerPan && (compactPresentation || size.height > size.width * 1.2)
+        let nextScale: CGFloat = mapRegion == .global ? (portraitWorkspace ? 3.4 : 2.2) : 1.4
         withAnimation(.easeInOut(duration: 0.24)) {
             committedScale = nextScale
             committedOffset = CGSize(
