@@ -579,6 +579,16 @@ final class AppModel: ObservableObject {
         updateWidgetSnapshot()
     }
 
+    #if DEBUG
+    /// Loaded only by the simulator capture entry point; never bundled data.
+    func installMapReview(_ overview: IntelligenceOverview) {
+        intelligenceOverview = overview
+        overviewPriority = overview.filters.priority ?? "all"
+        overviewHours = overview.window.hours
+        overviewTopic = overview.filters.topic
+    }
+    #endif
+
     func refreshIntelligenceOverview(force: Bool = false) async {
         guard authStatus == .authed, hasPaidAccess else { return }
         let scope = overviewScope

@@ -65,7 +65,7 @@ struct RootView: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var tab: Tab = .dashboard
     @State private var sidebarSelection: Tab? = .overview
-    @State private var columnVisibility: NavigationSplitViewVisibility = .all
+    @State private var columnVisibility: NavigationSplitViewVisibility = .detailOnly
     @State private var compactMorePath: [Tab] = []
     @AppStorage("THEME_DARK") private var dark: Bool = true
 

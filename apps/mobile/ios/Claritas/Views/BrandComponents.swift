@@ -155,17 +155,29 @@ struct BrandBackground<Content: View>: View {
 struct BrandCard<Content: View>: View {
     let title: String?
     let icon: String?
+    let framed: Bool
     @ViewBuilder var content: Content
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
-    init(title: String? = nil, icon: String? = nil, @ViewBuilder content: () -> Content) {
+    init(title: String? = nil, icon: String? = nil, framed: Bool = true, @ViewBuilder content: () -> Content) {
         self.title = title
         self.icon = icon
+        self.framed = framed
         self.content = content()
     }
 
     var body: some View {
+        if framed {
+            contents
+                .padding(horizontalSizeClass == .compact ? 12 : 16)
+                .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
+        } else {
+            contents
+        }
+    }
+
+    private var contents: some View {
         VStack(alignment: .leading, spacing: horizontalSizeClass == .compact ? 8 : 12) {
             if let title {
                 HStack(spacing: 8) {
@@ -180,8 +192,6 @@ struct BrandCard<Content: View>: View {
             }
             content
         }
-        .padding(horizontalSizeClass == .compact ? 12 : 16)
-        .brandGlass(cornerRadius: ClaritasLayout.panelRadius, elevated: true)
     }
 }
 

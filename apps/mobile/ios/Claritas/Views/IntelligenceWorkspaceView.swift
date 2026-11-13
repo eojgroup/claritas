@@ -2004,6 +2004,8 @@ struct AdminIntelligenceOperationsView: View {
 
 /// A single scoped read drives the chart, topic pulse and event timeline.
 struct IntelligenceOverviewPanel: View {
+    var automaticallyRefresh = true
+    var embedded = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -2021,9 +2023,9 @@ struct IntelligenceOverviewPanel: View {
     }
 
     var body: some View {
-        BrandCard {
+        BrandCard(framed: !embedded) {
             header
-            controls
+            if !embedded { controls }
             if let overview = model.intelligenceOverview {
                 if !overview.hasUsableData {
                     ProgressView("Preparing this overview")
@@ -2034,9 +2036,15 @@ struct IntelligenceOverviewPanel: View {
                         Label("Last saved overview", systemImage: "clock.arrow.circlepath")
                             .font(.caption2).foregroundStyle(.secondary)
                     }
-                    summary(overview)
-                    topics(overview)
+                    if embedded {
+                        Text(overview.summary.momentumLabel)
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        summary(overview)
+                        topics(overview)
+                    }
                     activityChart(overview)
+                    if embedded { topics(overview) }
                     if let images = overview.visual_events, !images.isEmpty {
                         ScrollView(.horizontal, showsIndicators: false) {
                             LazyHStack(alignment: .top, spacing: 10) {
@@ -2090,7 +2098,7 @@ struct IntelligenceOverviewPanel: View {
             }
         }
         .task(id: "\(scope.requestKey)|\(scenePhase == .active)") {
-            guard scenePhase == .active else { return }
+            guard automaticallyRefresh, scenePhase == .active else { return }
             showsMore = false
             while !Task.isCancelled {
                 await model.refreshIntelligenceOverview()
@@ -2104,9 +2112,38 @@ struct IntelligenceOverviewPanel: View {
 
     private var header: some View {
         HStack(alignment: .top) {
-            VStack(alignment: .leading, spacing: 3) {
+            if embedded {
+                Menu {
+                    Picker("Event priority", selection: $model.overviewPriority) {
+                        Text("High priority").tag("high")
+                        Text("All events").tag("all")
+                    }
+                    Picker("Time window", selection: $model.overviewHours) {
+                        Text("24 hours").tag(24)
+                        Text("3 days").tag(72)
+                        Text("7 days").tag(168)
+                    }
+                    Picker("Topic", selection: $model.overviewTopic) {
+                        Text("All topics").tag(Optional<String>.none)
+                        ForEach(IntelligenceOverviewScope.topics, id: \.key) { topic in
+                            Text(topic.label).tag(Optional(topic.key))
+                        }
+                    }
+                    Picker("Location", selection: $model.selectedCountry) {
+                        Text("Worldwide").tag(Optional<String>.none)
+                        ForEach(countries, id: \.self) { country in
+                            Text(countryName(country)).tag(Optional(country))
+                        }
+                    }
+                } label: {
+                    Label(model.overviewPriority == "high" ? "High priority" : "All developments", systemImage: "line.3.horizontal.decrease")
+                        .font(.caption.weight(.semibold)).frame(minHeight: 44)
+                }.accessibilityLabel("Filter developments")
+            } else {
+                VStack(alignment: .leading, spacing: 3) {
                 Text("Developments")
                     .font(.title3.weight(.semibold))
+                }
             }
             Spacer(minLength: 8)
             Button {

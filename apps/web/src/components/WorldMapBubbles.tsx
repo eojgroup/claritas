@@ -68,6 +68,7 @@ export type WorldMapBubblesProps = {
   pinnedCountry?: string | null;
   featuredCountry?: string | null;
   featuredLabel?: string;
+  focusOnActivity?: boolean;
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
@@ -343,6 +344,7 @@ export default memo(function WorldMapBubbles({
   pinnedCountry,
   featuredCountry,
   featuredLabel = "Highest relevance",
+  focusOnActivity = false,
   scale = "linear",
   showLabels = true,
   legendLabel = "Relative intensity",
@@ -358,6 +360,7 @@ export default memo(function WorldMapBubbles({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const viewRef = useRef<ViewTransform>({ scale: 1, x: 0, y: 0 });
   const fittedFootprintRef = useRef("");
+  const activityCameraRef = useRef<{ country: string; width: number; height: number; projection: typeof projection } | null>(null);
   const activePointersRef = useRef(new globalThis.Map<number, ActivePointer>());
   const pinchRef = useRef<PinchGesture | null>(null);
   const gestureMovedRef = useRef(false);
@@ -517,6 +520,30 @@ export default memo(function WorldMapBubbles({
   );
 
   useEffect(() => {
+    if (focusOnActivity) {
+      const iso = primaryIso ?? featuredIso;
+      const coordinate = iso && (markerByCountry.get(iso)?.coordinate ?? WORLD_GEOMETRY.centroidByIso.get(iso));
+      const center = coordinate && projection(coordinate);
+      if (iso && center) {
+        const previous = activityCameraRef.current;
+        // Background counts and evidence refresh without moving the camera.
+        if (previous?.country === iso && previous.width === size.width && previous.height === size.height) return;
+        activityCameraRef.current = { country: iso, ...size, projection };
+        if (previous?.country === iso) {
+          const current = viewRef.current;
+          const anchor = previous.projection.invert?.([(previous.width / 2 - current.x) / current.scale, (previous.height / 2 - current.y) / current.scale]);
+          const projected = anchor && projection(anchor);
+          if (projected) {
+            const scale = clamp(current.scale * previous.projection.scale() / projection.scale(), 1, 5);
+            setView({ scale, x: size.width / 2 - projected[0] * scale, y: size.height / 2 - projected[1] * scale });
+            return;
+          }
+        }
+        const scale = size.width <= 760 ? 3.4 : 2.2;
+        setView({ scale, x: size.width / 2 - center[0] * scale, y: size.height / 2 - center[1] * scale });
+        return;
+      }
+    }
     const projectedPoints = [
       ...markers.map((marker) => marker.coordinate),
       ...eventPoints.map((point): [number, number] => [point.longitude, point.latitude]),
@@ -556,7 +583,7 @@ export default memo(function WorldMapBubbles({
       x: size.width / 2 - centerX * fittedScale,
       y: size.height / 2 - centerY * fittedScale,
     });
-  }, [eventPoints, isCompact, markers, projection, size.height, size.width]);
+  }, [eventPoints, isCompact, markers, markerByCountry, projection, size, primaryIso, featuredIso, focusOnActivity]);
 
   const zoomByAt = useCallback(
     (factor: number, anchorX: number, anchorY: number) => {
@@ -1118,7 +1145,7 @@ export default memo(function WorldMapBubbles({
               : eventPoint.severity === "high"
                 ? 6
                 : 5) / view.scale;
-            const showPointLabel = eventPoint.selected || index < (isCompact ? 5 : 8);
+            const showPointLabel = Boolean(eventPoint.label) && (eventPoint.selected || index < (isCompact ? 5 : 8));
             return (
               <g
                 key={eventPoint.id}

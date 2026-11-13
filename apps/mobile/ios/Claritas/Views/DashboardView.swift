@@ -19,70 +19,9 @@ struct DashboardView: View {
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
 
     var body: some View {
-        DashboardBackground {
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    SignalMapPanel(
-                        height: 260,
-                        allowsComparison: false,
-                        showsCountryProfile: false,
-                        overviewOnly: true,
-                        onExpand: { showsExpandedMap = true }
-                    )
-
-                    IntelligenceOverviewPanel()
-
-                    BriefingOverviewCard(briefing: model.dailyBriefing) {
-                        openCompactDestination("briefing")
-                    }
-
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 16)
-            }
-            .refreshable {
-                await model.loadInitial()
-            }
+        WorldMapWorkspace {
+            openCompactDestination("briefing")
         }
-        .sheet(isPresented: $showsCountryFocus) {
-            mobileCountryFocusSheet
-                .presentationDetents([.medium, .large])
-                .presentationDragIndicator(.visible)
-        }
-        .sheet(isPresented: eventContextPresented(inExpandedMap: false)) {
-            eventContextSheet
-        }
-        .fullScreenCover(isPresented: $showsExpandedMap) {
-            NavigationStack {
-                BrandBackground {
-                    GeometryReader { proxy in
-                        SignalMapPanel(
-                            height: max(300, proxy.size.height - 132),
-                            allowsComparison: false,
-                            showsCountryProfile: false,
-                            overviewOnly: true
-                        )
-                        .padding(14)
-                    }
-                }
-                .navigationTitle("Global event map")
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .confirmationAction) {
-                        Button("Done") { showsExpandedMap = false }
-                    }
-                }
-            }
-            .sheet(isPresented: eventContextPresented(inExpandedMap: true)) {
-                eventContextSheet
-            }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
-            guard let destination = note.object as? String, destination != "intelligence" else { return }
-            showsExpandedMap = false
-            showsCountryFocus = false
-        }
-
     }
 
     private func eventContextPresented(inExpandedMap: Bool) -> Binding<Bool> {
@@ -5280,6 +5219,182 @@ private enum SignalMapDataBuilder {
     }
 }
 
+/// The map is the workspace. Context moves over it without replacing the map
+/// or resetting the user's zoom when a development is opened or dismissed.
+struct WorldMapWorkspace: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var panelStop = 1
+    @GestureState private var panelDrag: CGFloat = 0
+    @State private var profileCountry: String?
+    var refreshesAutomatically = true
+    let onOpenBriefing: () -> Void
+
+    private var points: [CountryBubblePoint] {
+        (model.intelligenceOverview?.countries ?? []).enumerated().compactMap { index, country in
+            guard let coordinate = CountryCentroidLookup.coordinate(for: country.country_iso2) else { return nil }
+            return CountryBubblePoint(id: "overview-\(country.country_iso2)", iso: country.country_iso2,
+                valueLabel: "\(country.event_count) developments", detail: "\(country.high_priority_count) high priority",
+                magnitude: Double(country.event_count), colorValue: Double(country.event_count), rank: index + 1, coordinate: coordinate)
+        }
+    }
+
+    private var events: [IntelligenceEvent] {
+        let overview = model.intelligenceOverview
+        var candidates = overview?.map_events ?? overview?.events ?? []
+        if let event = model.selectedIntelligenceEvent, !candidates.contains(where: { $0.id == event.id }) {
+            candidates.append(event)
+        }
+        return candidates.filter { event in
+            guard let latitude = event.latitude, let longitude = event.longitude,
+                  latitude.isFinite, longitude.isFinite,
+                  (-90...90).contains(latitude), (-180...180).contains(longitude) else { return false }
+            let type = event.location_type?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
+            return !["country", "country_centroid", "admin", "admin1", "administrative_area"].contains(type)
+        }
+    }
+
+    var body: some View {
+        GeometryReader { geometry in
+            let wide = geometry.size.width >= 760
+            let sideWidth = min(400.0, geometry.size.width * 0.42)
+            let stops: [CGFloat] = [112, geometry.size.height * 0.46, geometry.size.height - 12]
+            let panelHeight = min(stops[2], max(stops[0], stops[panelStop] - panelDrag))
+            ZStack(alignment: wide ? .topLeading : .bottom) {
+                Color(hex: "#0C2230").ignoresSafeArea()
+                NativeSignalMap(points: points, events: events, mode: .signals, mapRegion: .global,
+                    compactPresentation: !wide, selectedCountry: model.selectedCountry,
+                    comparisonCountry: nil, pinnedCountry: nil, featuredCountry: points.first?.iso,
+                    transportEntities: [], resetToken: 0, onSelectCountry: selectCountry,
+                    onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
+                    immersive: true)
+                    // Fit the geography to the unobstructed area. Opening context
+                    // leaves this map instance (and its camera) mounted.
+                    .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
+                    .padding(.bottom, wide ? 0 : stops[panelStop == 0 ? 0 : 1] + 8)
+
+                contextPanel(wide: wide)
+                    .frame(width: wide ? sideWidth : nil, height: wide ? (panelStop == 0 ? 88 : geometry.size.height - 24) : panelHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 24))
+                    .background(ClaritasPalette.shellBackground(for: colorScheme), in: RoundedRectangle(cornerRadius: 24))
+                    .overlay(RoundedRectangle(cornerRadius: 24).stroke(ClaritasPalette.shellBorderStrong(for: colorScheme), lineWidth: 1))
+                    .shadow(color: .black.opacity(0.22), radius: 24, y: -4)
+                    .padding(wide ? 12 : 0)
+                    .overlay(alignment: .top) {
+                        if !wide {
+                            panelHandle
+                                .gesture(DragGesture(minimumDistance: 10)
+                                    .updating($panelDrag) { value, state, _ in state = value.translation.height }
+                                    .onEnded { value in
+                                        let target = stops[panelStop] - value.predictedEndTranslation.height
+                                        withAnimation(.easeInOut(duration: 0.22)) {
+                                            panelStop = stops.indices.min(by: { abs(stops[$0] - target) < abs(stops[$1] - target) }) ?? 1
+                                        }
+                                    })
+                        }
+                    }
+            }
+            .clipped()
+        }
+        .task(id: "\(model.overviewScope.requestKey)|\(scenePhase == .active)") {
+            guard refreshesAutomatically, scenePhase == .active else { return }
+            while !Task.isCancelled {
+                await model.refreshIntelligenceOverview()
+                do { try await Task.sleep(nanoseconds: model.intelligenceOverview?.snapshot?.isWarming == true ? 15_000_000_000 : 120_000_000_000) }
+                catch { return }
+            }
+        }
+        .onChange(of: model.selectedIntelligenceEventID) { id in
+            if id != nil { profileCountry = nil; revealContext() }
+        }
+        .onChange(of: model.selectedCountry) { country in
+            if country != profileCountry { profileCountry = nil }
+        }
+    }
+
+    private var panelHandle: some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.22)) { panelStop = (panelStop + 1) % 3 }
+        } label: {
+            Capsule().fill(.secondary.opacity(0.45)).frame(width: 36, height: 4)
+                .frame(maxWidth: .infinity).frame(height: 28).contentShape(Rectangle())
+        }.buttonStyle(.plain)
+        .accessibilityLabel("Resize context panel")
+        .accessibilityValue(["Map focus", "Map and context", "Full context"][panelStop])
+        .accessibilityAdjustableAction { direction in
+            withAnimation(.easeInOut(duration: 0.22)) {
+                if direction == .increment { panelStop = min(2, panelStop + 1) }
+                else if direction == .decrement { panelStop = max(0, panelStop - 1) }
+            }
+        }
+    }
+
+    private func contextPanel(wide: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(model.selectedIntelligenceEventID != nil ? "Event context" : model.selectedCountry.map(countryName) ?? "World overview")
+                        .font(.title3.weight(.semibold)).lineLimit(1)
+                    Text("\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
+                        .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
+                Spacer(minLength: 4)
+                if model.selectedIntelligenceEventID != nil || profileCountry != nil {
+                    Button {
+                        model.selectedIntelligenceEventID = nil; profileCountry = nil
+                    } label: { Image(systemName: "arrow.left").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Back to developments")
+                }
+                if model.selectedCountry != nil {
+                    Button {
+                        model.selectedCountry = nil; model.selectedIntelligenceEventID = nil; profileCountry = nil
+                    } label: { Image(systemName: "globe").frame(width: 44, height: 44) }
+                    .accessibilityLabel("Clear country focus")
+                }
+                if wide {
+                    Button { withAnimation { panelStop = panelStop == 0 ? 1 : 0 } } label: {
+                        Image(systemName: "sidebar.left").frame(width: 44, height: 44)
+                    }.accessibilityLabel("Toggle context details")
+                }
+            }
+            .padding(.horizontal, 18).padding(.top, wide ? 12 : 28).padding(.bottom, 10)
+            Divider()
+            Group {
+            if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
+                IntelligenceWorkspaceView(contextualEventID: id)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        SignalMapInteractionKey()
+                        if let profileCountry {
+                            CountryProfileView(selectedCountry: profileCountry)
+                        }
+                        IntelligenceOverviewPanel(automaticallyRefresh: false, embedded: true)
+                        BriefingOverviewCard(briefing: model.dailyBriefing, onOpen: onOpenBriefing)
+                    }.padding(14)
+                }.refreshable { await model.refreshIntelligenceOverview(force: true) }
+            }
+            }
+            .opacity(panelStop == 0 ? 0 : 1)
+            .accessibilityHidden(panelStop == 0)
+            .allowsHitTesting(panelStop != 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private func revealContext() {
+        if panelStop == 0 { withAnimation(.easeInOut(duration: 0.22)) { panelStop = 1 } }
+    }
+    private func selectCountry(_ country: String) {
+        model.selectedIntelligenceEventID = nil
+        model.selectedCountry = country
+        profileCountry = country
+        revealContext()
+    }
+    private func countryName(_ code: String) -> String { Locale.current.localizedString(forRegionCode: code) ?? code }
+}
+
 private struct NativeSignalMap: View {
     let points: [CountryBubblePoint]
     let events: [IntelligenceEvent]
@@ -5294,6 +5409,7 @@ private struct NativeSignalMap: View {
     let resetToken: Int
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
+    var immersive = false
 
     var body: some View {
         InteractiveCountryBubbleMap(
@@ -5309,7 +5425,8 @@ private struct NativeSignalMap: View {
             transportEntities: transportEntities,
             resetToken: resetToken,
             onSelectCountry: onSelectCountry,
-            onSelectEvent: onSelectEvent
+            onSelectEvent: onSelectEvent,
+            allowsSingleFingerPan: immersive
         )
         .overlay(alignment: .bottomLeading) {
             Text("Natural Earth · Claritas signals")
@@ -5327,7 +5444,7 @@ private struct NativeSignalMap: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .topLeading) {
-            Text("Pinch to zoom · Two fingers to move")
+            Text(immersive ? "Drag to explore · Pinch to zoom" : "Pinch to zoom · Two fingers to move")
                 .font(.system(size: 9, weight: .medium))
                 .foregroundStyle(Color(hex: "#F2EEE6").opacity(0.85))
                 .padding(.horizontal, 8).padding(.vertical, 5)
@@ -5503,6 +5620,7 @@ private enum SignalDensityColorScale {
 // event overlays. No basemap tiles or network request is needed to draw it.
 /// Two-finger gestures belong to the map; one finger continues scrolling the page.
 private struct SignalMapTouchSurface: UIViewRepresentable {
+    var allowsSingleFingerPan = false
     let onTap: (CGPoint) -> Void
     let onPan: (CGPoint) -> Void
     let onPinch: (CGFloat, CGPoint) -> Void
@@ -5513,7 +5631,7 @@ private struct SignalMapTouchSurface: UIViewRepresentable {
         view.backgroundColor = .clear
         let tap = UITapGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.tap(_:)))
         let pan = UIPanGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pan(_:)))
-        pan.minimumNumberOfTouches = 2
+        pan.minimumNumberOfTouches = allowsSingleFingerPan ? 1 : 2
         let pinch = UIPinchGestureRecognizer(target: context.coordinator, action: #selector(Coordinator.pinch(_:)))
         for gesture in [tap, pan, pinch] {
             gesture.delegate = context.coordinator
@@ -5521,7 +5639,12 @@ private struct SignalMapTouchSurface: UIViewRepresentable {
         }
         return view
     }
-    func updateUIView(_ view: UIView, context: Context) { context.coordinator.parent = self }
+    func updateUIView(_ view: UIView, context: Context) {
+        context.coordinator.parent = self
+        view.gestureRecognizers?.compactMap { $0 as? UIPanGestureRecognizer }.forEach {
+            $0.minimumNumberOfTouches = allowsSingleFingerPan ? 1 : 2
+        }
+    }
 
     final class Coordinator: NSObject, UIGestureRecognizerDelegate {
         var parent: SignalMapTouchSurface
@@ -5555,6 +5678,7 @@ private struct InteractiveCountryBubbleMap: View {
     let resetToken: Int
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
+    var allowsSingleFingerPan = false
 
     @State private var expandedGroup: SignalMapPinGroup?
     @State private var userAdjustedViewport = false
@@ -5579,7 +5703,7 @@ private struct InteractiveCountryBubbleMap: View {
                         drawGrid(context: context, size: size)
                         drawLand(context: context, size: size)
                     }.allowsHitTesting(false)
-                    SignalMapTouchSurface(onTap: { location in
+                    SignalMapTouchSurface(allowsSingleFingerPan: allowsSingleFingerPan, onTap: { location in
                         if let country = country(at: location, size: proxy.size) { onSelectCountry(country) }
                     }, onPan: { delta in
                         userAdjustedViewport = true
@@ -5809,7 +5933,8 @@ private struct InteractiveCountryBubbleMap: View {
         }
         let projected = basePoint(coordinate, size: size)
         let center = CGPoint(x: size.width / 2, y: size.height / 2)
-        let nextScale: CGFloat = mapRegion == .global ? 2.2 : 1.4
+        let portraitWorkspace = allowsSingleFingerPan && (compactPresentation || size.height > size.width * 1.2)
+        let nextScale: CGFloat = mapRegion == .global ? (portraitWorkspace ? 3.4 : 2.2) : 1.4
         withAnimation(.easeInOut(duration: 0.24)) {
             committedScale = nextScale
             committedOffset = CGSize(
@@ -6019,43 +6144,16 @@ enum CountryCentroidLookup {
 /// Data is staged in the simulator container; no fixture is bundled or used
 /// by production, and this launch path does not exist in App Store builds.
 struct SignalMapSnapshotReview: View {
-    @State private var overview: IntelligenceOverview?
-    @State private var selectedCountry: String?
-    @State private var resetToken = 0
-
-    private var points: [CountryBubblePoint] {
-        (overview?.countries ?? []).enumerated().compactMap { index, country in
-            guard let coordinate = CountryCentroidLookup.coordinate(for: country.country_iso2) else { return nil }
-            return CountryBubblePoint(id: "overview-\(country.country_iso2)", iso: country.country_iso2,
-                valueLabel: "\(country.event_count) developments", detail: "\(country.event_count) developments",
-                magnitude: Double(country.event_count), colorValue: Double(country.event_count), rank: index + 1, coordinate: coordinate)
-        }
-    }
+    @StateObject private var model = AppModel()
 
     var body: some View {
-        GeometryReader { geometry in
-            BrandBackground {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 18) {
-                        Text("World overview").font(.title2.bold())
-                        Text("Where it’s happening").font(.headline)
-                        Text("\(overview?.countries?.count ?? 0) countries · \(overview?.map_events?.count ?? 0) located developments")
-                            .font(.caption).foregroundStyle(.secondary)
-                        NativeSignalMap(points: points, events: overview?.map_events ?? [], mode: .signals, mapRegion: .global,
-                            compactPresentation: geometry.size.width < 600, selectedCountry: selectedCountry,
-                            comparisonCountry: nil, pinnedCountry: nil, featuredCountry: points.first?.iso,
-                            transportEntities: [], resetToken: resetToken, onSelectCountry: { selectedCountry = $0 }, onSelectEvent: { _ in })
-                            .frame(height: geometry.size.width < 600 ? 260 : 460)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                        SignalMapInteractionKey()
-                        Text("Tap a country for its profile. Tap a dot to open a development, or a number to see nearby developments.")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Button("Show world") { selectedCountry = nil; resetToken += 1 }
-                        Text("Native map QA · captured production overview").font(.caption2).foregroundStyle(.secondary)
-                    }.padding(18)
-                }
-            }
-        }.preferredColorScheme(.dark)
+        NavigationStack {
+            WorldMapWorkspace(refreshesAutomatically: false, onOpenBriefing: {})
+                .environmentObject(model)
+                .navigationTitle("Claritas")
+                .navigationBarTitleDisplayMode(.inline)
+        }
+        .preferredColorScheme(.dark)
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             do {
@@ -6067,7 +6165,7 @@ struct SignalMapSnapshotReview: View {
                     }
                     return date
                 }
-                overview = try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json")))
+                model.installMapReview(try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json"))))
                 try Data("ready".utf8).write(to: documents.appendingPathComponent("map-review-ready"))
             } catch {
                 try? Data(String(describing: error).utf8).write(to: documents.appendingPathComponent("map-review-error"))
