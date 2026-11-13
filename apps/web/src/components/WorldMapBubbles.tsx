@@ -69,6 +69,7 @@ export type WorldMapBubblesProps = {
   featuredCountry?: string | null;
   featuredLabel?: string;
   focusOnActivity?: boolean;
+  focusCoordinate?: [number, number];
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
@@ -345,6 +346,7 @@ export default memo(function WorldMapBubbles({
   featuredCountry,
   featuredLabel = "Highest relevance",
   focusOnActivity = false,
+  focusCoordinate,
   scale = "linear",
   showLabels = true,
   legendLabel = "Relative intensity",
@@ -525,8 +527,8 @@ export default memo(function WorldMapBubbles({
 
   useEffect(() => {
     if (focusOnActivity) {
-      const iso = primaryIso ?? featuredIso;
-      const coordinate = iso && (markerByCountry.get(iso)?.coordinate ?? WORLD_GEOMETRY.centroidByIso.get(iso));
+      const iso = focusCoordinate ? `point:${focusCoordinate.join(",")}` : primaryIso ?? featuredIso;
+      const coordinate = focusCoordinate ?? (iso && (markerByCountry.get(iso)?.coordinate ?? WORLD_GEOMETRY.centroidByIso.get(iso)));
       const center = coordinate && projection(coordinate);
       if (iso && center) {
         const previous = activityCameraRef.current;
@@ -587,7 +589,7 @@ export default memo(function WorldMapBubbles({
       x: size.width / 2 - centerX * fittedScale,
       y: size.height / 2 - centerY * fittedScale,
     });
-  }, [eventPoints, isCompact, markers, markerByCountry, projection, size, primaryIso, featuredIso, focusOnActivity]);
+  }, [eventPoints, isCompact, markers, markerByCountry, projection, size, primaryIso, featuredIso, focusOnActivity, focusCoordinate]);
 
   const zoomByAt = useCallback(
     (factor: number, anchorX: number, anchorY: number) => {

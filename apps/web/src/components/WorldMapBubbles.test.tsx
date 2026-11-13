@@ -153,6 +153,16 @@ describe("WorldMapBubbles interaction", () => {
     expect(viewport()).toBe(zoomed);
   });
 
+  it("centers standalone event maps on their precise point instead of the country reference", () => {
+    render(<WorldMapBubbles data={[{ country: "BR", count: 1 }]} primaryCountry="BR" focusOnActivity
+      focusCoordinate={[-47.9, -15.7]} points={[{ id: "event", latitude: -15.7, longitude: -47.9, title: "Event location" }]} />);
+    const mapLayer = screen.getByRole("application").querySelector("g[transform]")!;
+    const camera = mapLayer.getAttribute("transform")!.match(/translate\(([^ ]+) ([^)]+)\) scale\(([^)]+)\)/)!;
+    const pin = screen.getByRole("button", { name: /Event location/ }).getAttribute("transform")!.match(/translate\(([^ ]+) ([^)]+)\)/)!;
+    expect(Number(camera[1]) + Number(pin[1]) * Number(camera[3])).toBeCloseTo(480);
+    expect(Number(camera[2]) + Number(pin[2]) * Number(camera[3])).toBeCloseTo(240);
+  });
+
   it("starts around the activity leader and preserves the camera on background updates", () => {
     const view = render(<WorldMapBubbles data={[{ country: "DE", count: 100 }, { country: "BR", count: 20 }]}
       focusOnActivity featuredCountry="DE" />);

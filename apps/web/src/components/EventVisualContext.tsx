@@ -18,7 +18,7 @@ const EventLocationMap = memo(function EventLocationMap({ detail }: { detail: In
   return <figure className="event-location-map">
         <figcaption><strong><CountryFlag country={detail.event.primary_country_iso2} />Geographic context</strong><span>{center ? detail.event.location_name || "Event area" : "Location not resolved · world overview"}</span></figcaption>
         <div className="event-location-canvas"><WorldMapBubbles data={country ? [{ country, count: 1 }] : []} points={points}
-          primaryCountry={country} focusOnActivity legend={false} showBubbles={false} showLabels
+          primaryCountry={country} focusOnActivity focusCoordinate={center ? [center.longitude!, center.latitude!] : undefined} legend={false} showBubbles={false} showLabels
           fillMode="relevance" /></div>
         <p>{primary?.basis === "estimated_mapped" ? "Estimated geography; pin is not a verified incident position." : primary ? "Source-observed geography." : located.length ? "Linked places; no precise incident position is available." : "No coordinates available; no incident pin is inferred."} {!primary && !located.length && country && " Country reference geography; no incident pin is inferred."} Map: Natural Earth.</p>
       </figure>;
