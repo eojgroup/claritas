@@ -5675,6 +5675,7 @@ body {
   overflow: hidden; background: var(--shell-bg); isolation: isolate;
   container: world-map / size;
 }
+.situation-map-workspace.context-wide { --context-width: min(55cqw, 44rem); }
 .situation-map-canvas { position: absolute; z-index: 0; inset: 0 0 calc(46% + .5rem); min-width: 0; }
 .situation-map-canvas > .world-map { border-radius: 0; }
 .situation-map-heading { position: absolute; left: .75rem; top: .75rem; display: grid; gap: .25rem; pointer-events: none; padding: .65rem .85rem; background: color-mix(in srgb, var(--shell-bg) 90%, transparent); border-radius: 1rem; max-width: calc(100% - 5.5rem); backdrop-filter: blur(12px); }
@@ -5745,7 +5746,6 @@ body {
 .situation-expanded-map:has(.situation-map-workspace) { border: 0; border-radius: 0; }
 .situation-expanded-map .situation-map-workspace { height: 100dvh; min-height: 0; }
 @container world-map (min-width: 980px) and (min-aspect-ratio: 112/100) {
-  .context-wide { --context-width: min(55cqw, 44rem); }
   .situation-panel-widen { display: grid; place-items: center; min-width: 44px; min-height: 44px; border-radius: 50%; background: var(--shell-surface); }
   .situation-map-canvas { inset: 0 0 0 calc(var(--context-width) + 1.5rem); }
   .situation-context-panel { top: .75rem; left: .75rem; bottom: .75rem; right: auto; width: var(--context-width); height: auto; border-radius: 1.5rem; box-shadow: 0 12px 40px #0003; }
