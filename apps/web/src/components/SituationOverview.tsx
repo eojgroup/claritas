@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUpRight, MapPin, RefreshCw, SlidersHorizontal } from "lucide-react";
 import type { IntelligenceOverview, OverviewTopic } from "../lib/api";
 import SatelliteImage from "./SatelliteImage";
@@ -41,6 +41,9 @@ function changeLabel(change: number) { return change === 0 ? "the same as" : `${
 
 export default function SituationOverview({ variant = "all", compact = false, filterExtras, overview, loading, error, hours, topic, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const filterId = useId();
+  const filterButton = useRef<HTMLButtonElement>(null);
   const scopeMatches = overview?.window.hours === hours && (overview.filters.topic ?? null) === topic
     && (overview.filters.priority ?? priority) === priority
     && (overview.filters.country ?? "").toUpperCase() === (country ?? "").toUpperCase();
@@ -69,7 +72,7 @@ export default function SituationOverview({ variant = "all", compact = false, fi
       <div><span className="situation-eyebrow">One view across sources</span><h2>World overview{country ? <><CountryFlag country={country} /><span>{country.toUpperCase()}</span></> : null}</h2></div>
       {compact ? <div className="situation-compact-controls">
         {priorityControl}
-        <details className="situation-filter-menu"><summary><SlidersHorizontal size={16} /><span>Filters</span>{(topic || hours !== 24) && <i aria-label="Filters active" />}</summary><div className="situation-filters">{periodFilters}</div></details>
+        <div className="situation-filter-menu"><button ref={filterButton} type="button" aria-expanded={filtersOpen} aria-controls={filterId} onClick={() => setFiltersOpen((value) => !value)}><SlidersHorizontal size={16} /><span>Filters</span>{(topic || hours !== 24) && <i aria-label="Filters active" />}</button>{filtersOpen && <div id={filterId} className="situation-filters" role="group" aria-label="Overview filters" onKeyDown={(event) => { if (event.key === "Escape") { event.stopPropagation(); setFiltersOpen(false); filterButton.current?.focus(); } }}>{periodFilters}</div>}</div>
         {refreshControl}
       </div> : <div className="situation-filters">{priorityControl}{periodFilters}{refreshControl}</div>}
     </header>

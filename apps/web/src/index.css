@@ -5729,10 +5729,10 @@ body {
 .situation-compact-controls .situation-priority-toggle button { padding: .35rem .6rem; font-size: .7rem; }
 .situation-compact-controls > button { display: grid; place-items: center; width: 44px; height: 44px; }
 .situation-filter-menu { position: relative; font-size: .72rem; }
-.situation-filter-menu > summary { display: flex; align-items: center; justify-content: center; gap: .35rem; min-height: 44px; cursor: pointer; list-style: none; }
-.situation-filter-menu > summary::-webkit-details-marker { display: none; }
-.situation-filter-menu > summary i { width: 5px; height: 5px; border-radius: 50%; background: var(--shell-accent-2); }
-.situation-filter-menu[open] { z-index: 6; }
+.situation-filter-menu > button { display: flex; align-items: center; justify-content: center; gap: .35rem; min-height: 44px; cursor: pointer; list-style: none; }
+.situation-filter-menu > button::-webkit-details-marker { display: none; }
+.situation-filter-menu > button i { width: 5px; height: 5px; border-radius: 50%; background: var(--shell-accent-2); }
+.situation-filter-menu:has(> button[aria-expanded="true"]) { z-index: 6; }
 .situation-filter-menu > .situation-filters { position: absolute; top: calc(100% + .25rem); right: 0; width: min(19rem, 75cqw); padding: 1rem; display: grid; background: var(--shell-bg-elevated); border: 1px solid var(--shell-border); border-radius: 1rem; box-shadow: 0 8px 30px #0004; }
 .situation-filter-menu .situation-filters label { display: grid; gap: .35rem; width: 100%; }
 .situation-active-topic { min-height: 36px; margin-top: .4rem; font-size: .7rem; color: var(--shell-accent-2); }
