@@ -4,6 +4,27 @@ import XCTest
 final class SignalMapProjectionTests: XCTestCase {
     private let world = SignalMapProjection(minLongitude: -180, maxLongitude: 180, minLatitude: -60, maxLatitude: 82)
 
+    func testPortraitPadAndSplitViewKeepTheMapWideWithABottomPanel() {
+        XCTAssertFalse(SignalMapLayout.usesSidebar(width: 1024, height: 1290))
+        XCTAssertFalse(SignalMapLayout.usesSidebar(width: 850, height: 750))
+        XCTAssertFalse(SignalMapLayout.usesSidebar(width: 393, height: 720))
+        XCTAssertTrue(SignalMapLayout.usesSidebar(width: 1024, height: 710))
+        XCTAssertTrue(SignalMapLayout.usesSidebar(width: 1366, height: 940))
+    }
+
+    func testRotationPreservesThePannedCenterAndGeographicPixelScale() {
+        let old = world.fitted(width: 390, height: 430, zoom: 4, offsetX: 70, offsetY: -40)
+        let camera = world.resizedViewport(width: 390, height: 430, newWidth: 900, newHeight: 610,
+            zoom: 4, offsetX: 70, offsetY: -40)
+        let next = world.fitted(width: 900, height: 610, zoom: camera.zoom, offsetX: camera.offsetX, offsetY: camera.offsetY)
+        for raw in [(0.0, 0.0), (0.4, 0.6)] {
+            let before = old.point(rawX: raw.0, rawY: raw.1)
+            let after = next.point(rawX: raw.0, rawY: raw.1)
+            XCTAssertEqual(before.x - 195, after.x - 450, accuracy: 0.000001)
+            XCTAssertEqual(before.y - 215, after.y - 305, accuracy: 0.000001)
+        }
+    }
+
     func testPhoneAndPadPreserveTheSameCountryProportions() {
         func ratio(width: Double, height: Double) -> Double {
             let west = world.point(latitude: 40, longitude: 10, width: width, height: height)

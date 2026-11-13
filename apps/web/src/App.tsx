@@ -3765,7 +3765,7 @@ export default function ClaritasDashboard() {
   ]);
 
 
-  const handleOpenIntelligence = useCallback((eventId?: string | null) => {
+  const handleOpenIntelligence = useCallback((eventId?: string | null, options?: { focus?: boolean }) => {
     if (eventId) {
       setSelectedIntelligenceEventId(eventId);
       const nextUrl = new URL(window.location.href);
@@ -3783,6 +3783,7 @@ export default function ClaritasDashboard() {
     }
     setActiveView("dashboard");
     setMapExpanded(false);
+    if (options?.focus === false) return;
     window.setTimeout(() => {
       const context = document.getElementById(eventId ? "overview-event-context" : "world-event-stream");
       context?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });

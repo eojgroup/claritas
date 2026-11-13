@@ -5226,6 +5226,7 @@ struct WorldMapWorkspace: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.scenePhase) private var scenePhase
     @State private var panelStop = 1
+    @State private var wideContext = false
     @GestureState private var panelDrag: CGFloat = 0
     @State private var profileCountry: String?
     var refreshesAutomatically = true
@@ -5257,18 +5258,23 @@ struct WorldMapWorkspace: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let wide = geometry.size.width >= 760
-            let sideWidth = min(400.0, geometry.size.width * 0.42)
+            let wide = SignalMapLayout.usesSidebar(width: Double(geometry.size.width), height: Double(geometry.size.height))
+            let sideWidth = wideContext ? min(680.0, geometry.size.width * 0.55) : min(480.0, geometry.size.width * 0.38)
             let stops: [CGFloat] = [112, geometry.size.height * 0.46, geometry.size.height - 12]
             let panelHeight = min(stops[2], max(stops[0], stops[panelStop] - panelDrag))
             ZStack(alignment: wide ? .topLeading : .bottom) {
                 Color(hex: "#0C2230").ignoresSafeArea()
                 NativeSignalMap(points: points, events: events, mode: .signals, mapRegion: .global,
-                    compactPresentation: !wide, selectedCountry: model.selectedCountry,
+                    compactPresentation: geometry.size.width < 600, selectedCountry: model.selectedCountry,
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: points.first?.iso,
                     transportEntities: [], resetToken: 0, onSelectCountry: selectCountry,
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
                     immersive: true)
+                    .overlay(alignment: .bottomLeading) {
+                        OverviewMapImageStrip(events: model.intelligenceOverview?.visual_events ?? []) { event in
+                            model.selectIntelligenceEvent(event); revealContext()
+                        }.padding(.bottom, 70)
+                    }
                     // Fit the geography to the unobstructed area. Opening context
                     // leaves this map instance (and its camera) mounted.
                     .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
@@ -5353,9 +5359,17 @@ struct WorldMapWorkspace: View {
                     .accessibilityLabel("Clear country focus")
                 }
                 if wide {
+                    Button { withAnimation { wideContext.toggle() } } label: {
+                        Image(systemName: wideContext ? "arrow.left.and.right.righttriangle.left.righttriangle.right.fill" : "arrow.left.and.right")
+                            .frame(width: 44, height: 44)
+                    }.accessibilityLabel(wideContext ? "Narrow context" : "Widen context")
                     Button { withAnimation { panelStop = panelStop == 0 ? 1 : 0 } } label: {
                         Image(systemName: "sidebar.left").frame(width: 44, height: 44)
-                    }.accessibilityLabel("Toggle context details")
+                    }.accessibilityLabel(panelStop == 0 ? "Show context" : "Show more map")
+                } else {
+                    Button { withAnimation(.easeInOut(duration: 0.22)) { panelStop = panelStop == 0 ? 1 : 0 } } label: {
+                        Image(systemName: panelStop == 0 ? "chevron.up" : "chevron.down").frame(width: 44, height: 44)
+                    }.accessibilityLabel(panelStop == 0 ? "Show context" : "Show more map")
                 }
             }
             .padding(.horizontal, 18).padding(.top, wide ? 12 : 28).padding(.bottom, 10)
@@ -5364,16 +5378,20 @@ struct WorldMapWorkspace: View {
             if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
                 IntelligenceWorkspaceView(contextualEventID: id)
             } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        SignalMapInteractionKey()
-                        if let profileCountry {
-                            CountryProfileView(selectedCountry: profileCountry)
-                        }
-                        IntelligenceOverviewPanel(automaticallyRefresh: false, embedded: true)
-                        BriefingOverviewCard(briefing: model.dailyBriefing, onOpen: onOpenBriefing)
-                    }.padding(14)
-                }.refreshable { await model.refreshIntelligenceOverview(force: true) }
+                ScrollViewReader { reader in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            Color.clear.frame(height: 0).id("context-top")
+                            if let profileCountry {
+                                CountryProfileView(selectedCountry: profileCountry)
+                            }
+                            SignalMapInteractionKey()
+                            IntelligenceOverviewPanel(automaticallyRefresh: false, embedded: true)
+                            BriefingOverviewCard(briefing: model.dailyBriefing, onOpen: onOpenBriefing)
+                        }.padding(14)
+                    }.refreshable { await model.refreshIntelligenceOverview(force: true) }
+                    .onChange(of: profileCountry) { _ in reader.scrollTo("context-top", anchor: .top) }
+                }
             }
             }
             .opacity(panelStop == 0 ? 0 : 1)
@@ -5393,6 +5411,39 @@ struct WorldMapWorkspace: View {
         revealContext()
     }
     private func countryName(_ code: String) -> String { Locale.current.localizedString(forRegionCode: code) ?? code }
+}
+
+private struct OverviewMapImageStrip: View {
+    let events: [IntelligenceEvent]
+    let onSelect: (IntelligenceEvent) -> Void
+    private var images: [IntelligenceEvent] { Array(events.filter { $0.imagery != nil }.prefix(4)) }
+    var body: some View {
+        if !images.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(images) { event in
+                        if let image = event.imagery {
+                            Button { onSelect(event) } label: {
+                                AuthenticatedEarthImage(path: image.preview_url, compact: true)
+                                    .frame(width: 100, height: 76).clipped()
+                                    .overlay(alignment: .bottom) {
+                                        Text(label(for: event)).font(.system(size: 9, weight: .medium))
+                                            .foregroundStyle(.white).frame(maxWidth: .infinity)
+                                            .padding(.vertical, 3).background(.black.opacity(0.8))
+                                    }.clipShape(RoundedRectangle(cornerRadius: 10))
+                            }.buttonStyle(.plain).accessibilityLabel("Open image context: \(event.translated_title ?? event.title)")
+                        }
+                    }
+                }.padding(.horizontal, 10)
+            }.accessibilityLabel("Images on the map")
+        }
+    }
+    private func label(for event: IntelligenceEvent) -> String {
+        let flag = event.primary_country_iso2.map { code in
+            String(String.UnicodeScalarView(code.uppercased().unicodeScalars.compactMap { UnicodeScalar(127397 + $0.value) }))
+        } ?? ""
+        return "\(flag) \(event.imagery?.source_kind == "publisher" ? "News photo" : "Satellite")"
+    }
 }
 
 private struct NativeSignalMap: View {
@@ -5684,6 +5735,7 @@ private struct InteractiveCountryBubbleMap: View {
     @State private var userAdjustedViewport = false
     @State private var committedScale: CGFloat = 1
     @State private var committedOffset: CGSize = .zero
+    @State private var previousViewportSize: CGSize?
 
     var body: some View {
         GeometryReader { proxy in
@@ -5751,7 +5803,17 @@ private struct InteractiveCountryBubbleMap: View {
                 }
             }
             .clipped()
-            .onAppear { resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
+            .onAppear { previousViewportSize = proxy.size; resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
+            .onChange(of: proxy.size) { next in
+                if let previous = previousViewportSize {
+                    let camera = projection.resizedViewport(width: Double(previous.width), height: Double(previous.height),
+                        newWidth: Double(next.width), newHeight: Double(next.height), zoom: Double(committedScale),
+                        offsetX: Double(committedOffset.width), offsetY: Double(committedOffset.height))
+                    committedScale = CGFloat(camera.zoom)
+                    committedOffset = CGSize(width: camera.offsetX, height: camera.offsetY)
+                }
+                previousViewportSize = next
+            }
             .onChange(of: mapRegion) { _ in resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
             .onChange(of: resetToken) { _ in resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
             .onChange(of: selectedCountry) { next in

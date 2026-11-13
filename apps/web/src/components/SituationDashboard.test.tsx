@@ -63,3 +63,26 @@ it("puts a directly opened event before the general overview controls", async ()
   const overview = screen.getByRole("region", { name: "Situation overview" });
   expect(detail.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
+
+it("puts a selected country before controls and offers more reading space without remounting the map", () => {
+  render(<Workspace />);
+  const map = screen.getByTestId("map-camera");
+  fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
+  const profile = screen.getByRole("region", { name: "Country profile" });
+  const controls = screen.getByRole("region", { name: "Situation overview" });
+  expect(profile.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Widen context" }));
+  expect(screen.getByRole("button", { name: "Narrow context" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByTestId("map-camera")).toBe(map);
+});
+
+it("leaves country focus to the profile instead of scheduling an overview scroll", () => {
+  const onSelect = vi.fn();
+  render(<SituationDashboard overview={overviewFixture("all")} loading={false} error={null}
+    hours={24} topic={null} priority="all" country={null} selectedId={null} dark
+    briefing={null} briefingError={null} onHoursChange={vi.fn()} onTopicChange={vi.fn()}
+    onPriorityChange={vi.fn()} onCountryChange={vi.fn()} onSelect={onSelect}
+    onOpenImagery={vi.fn()} onRefresh={vi.fn()} onRefreshBriefing={async () => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
+  expect(onSelect).toHaveBeenCalledWith(null, { focus: false });
+});

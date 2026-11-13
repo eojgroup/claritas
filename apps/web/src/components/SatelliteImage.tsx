@@ -3,6 +3,7 @@ import { ImageOff, RotateCcw } from "lucide-react";
 import { imageProxy } from "../lib/api";
 
 type Props = {
+  compact?: boolean;
   sources: Array<string | null | undefined>;
   alt: string;
   className?: string;
@@ -20,6 +21,7 @@ function displayUrl(source: string, retry: number) {
 
 export default function SatelliteImage({
   sources,
+  compact = false,
   alt,
   className = "h-full w-full object-cover",
   fallbackClassName = "flex h-full w-full items-center justify-center bg-slate-900/20",
@@ -43,6 +45,7 @@ export default function SatelliteImage({
 
   const source = available[sourceIndex];
   if (!source || failed) {
+    if (compact) return <span className={`${className} flex items-center justify-center bg-slate-900/20`} style={style} title="Image unavailable"><ImageOff aria-label="Image unavailable" className="h-4 w-4" /></span>;
     return (
       <div
         className={`${fallbackClassName} overflow-hidden text-[color:var(--shell-muted)]`}

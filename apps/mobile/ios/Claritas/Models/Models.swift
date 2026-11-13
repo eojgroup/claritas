@@ -1,5 +1,12 @@
 import Foundation
 
+enum SignalMapLayout {
+    /// Use the space available to the map, including iPad Split View.
+    static func usesSidebar(width: Double, height: Double) -> Bool {
+        width >= 980 && width >= height * 1.12
+    }
+}
+
 /// Natural Earth 1, matching the web map. A single scale preserves country
 /// proportions on both a narrow phone and a wide iPad; viewport zoom never
 /// changes label or touch-target size. Coefficients follow d3-geo (ISC).
@@ -31,6 +38,20 @@ struct SignalMapProjection {
         let scale = min(max(1, width - 24) / max(0.001, maxX - minX), max(1, height - 24) / max(0.001, maxY - minY))
         return SignalMapTransform(scale: scale * zoom, rawCenterX: (minX + maxX) / 2, rawCenterY: (minY + maxY) / 2,
                                   centerX: width / 2 + offsetX, centerY: height / 2 + offsetY)
+    }
+
+    /// Keep the same geographic center and pixel scale when a panel moves or
+    /// the device rotates. The world/minimum and maximum zoom limits still apply.
+    func resizedViewport(width: Double, height: Double, newWidth: Double, newHeight: Double,
+                         zoom: Double, offsetX: Double, offsetY: Double) -> (zoom: Double, offsetX: Double, offsetY: Double) {
+        guard width > 0, height > 0, newWidth > 0, newHeight > 0 else { return (zoom, offsetX, offsetY) }
+        let old = fitted(width: width, height: height, zoom: zoom, offsetX: offsetX, offsetY: offsetY)
+        let anchorX = old.rawCenterX + (width / 2 - old.centerX) / old.scale
+        let anchorY = old.rawCenterY - (height / 2 - old.centerY) / old.scale
+        let base = fitted(width: newWidth, height: newHeight)
+        let nextZoom = min(10, max(1, old.scale / base.scale))
+        let next = fitted(width: newWidth, height: newHeight, zoom: nextZoom).point(rawX: anchorX, rawY: anchorY)
+        return (nextZoom, newWidth / 2 - next.x, newHeight / 2 - next.y)
     }
 }
 

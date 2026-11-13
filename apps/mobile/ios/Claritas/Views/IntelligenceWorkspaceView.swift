@@ -1761,6 +1761,7 @@ private struct EarthComparisonView: View {
 struct AuthenticatedEarthImage: View {
     @EnvironmentObject private var model: AppModel
     let path: String
+    var compact = false
     var contentMode: ContentMode = .fill
     var unavailableLabel = "Observation image unavailable"
     @State private var image: UIImage?
@@ -1772,6 +1773,11 @@ struct AuthenticatedEarthImage: View {
             if let image {
                 Image(uiImage: image).resizable().aspectRatio(contentMode: contentMode)
             } else if let loadError {
+                if compact {
+                    Image(systemName: "photo.badge.exclamationmark").font(.caption)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(.secondary.opacity(0.08))
+                        .accessibilityLabel("Image unavailable")
+                } else {
                 VStack(spacing: 8) {
                     Label(unavailableLabel, systemImage: "photo.badge.exclamationmark")
                         .font(.caption.weight(.semibold))
@@ -1787,6 +1793,7 @@ struct AuthenticatedEarthImage: View {
                 .padding(12)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .background(.secondary.opacity(0.08))
+                }
             } else {
                 ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(.secondary.opacity(0.08))

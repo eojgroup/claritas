@@ -2,38 +2,45 @@ import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { fetchCountryLeadership, fetchCountryMarketDetail, fetchCountryWeather,
   type CountryLeadership, type CountryMarketDetail, type CountryWeather, type IntelligenceOverview } from "../lib/api";
+import { readWithDeadline } from "../lib/readDeadline";
 import CountryFlag from "./CountryFlag";
 import CountryFacts from "./CountryFacts";
 
 // Opened country context is optional work. Reuse the shared lists across taps
-// and load one resource at a time instead of restoring the startup fan-out.
-let reference: { at: number; leadership: CountryLeadership[]; weather: CountryWeather[] } | null = null;
+// without adding any work to startup. Each selected-country resource publishes
+// independently, so one slow provider cannot hold the entire profile hostage.
+const reference: { leadership?: { at: number; value: CountryLeadership[] }; weather?: { at: number; value: CountryWeather[] } } = {};
 export default function OverviewCountryProfile({ country, overview, onClose }: {
   country: string; overview: IntelligenceOverview | null; onClose: () => void;
 }) {
   const panel = useRef<HTMLElement>(null);
   const [state, setState] = useState<{ country: string; leadership?: CountryLeadership; weather?: CountryWeather; market?: CountryMarketDetail; loading: boolean; error: boolean }>({ country, loading: true, error: false });
   useEffect(() => {
-    let active = true;
+    const controller = new AbortController();
+    const active = () => !controller.signal.aborted;
     panel.current?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
     panel.current?.focus({ preventScroll: true });
     setState({ country, loading: true, error: false });
-    void (async () => {
-      let failed = false;
-      let refs = reference;
-      if (!refs || Date.now() - refs.at > 600_000) {
-        const leadership = await fetchCountryLeadership().catch(() => { failed = true; return []; });
-        if (!active) return;
-        const weather = await fetchCountryWeather().catch(() => { failed = true; return []; });
-        refs = { at: Date.now(), leadership, weather };
-        if (!failed) reference = refs;
-      }
-      if (!active) return;
-      setState({ country, leadership: refs.leadership.find((item) => item.country === country), weather: refs.weather.find((item) => item.country === country), loading: true, error: failed });
-      const market = await fetchCountryMarketDetail(country).catch(() => { failed = true; return undefined; });
-      if (active) setState({ country, leadership: refs.leadership.find((item) => item.country === country), weather: refs.weather.find((item) => item.country === country), market, loading: false, error: failed });
-    })();
-    return () => { active = false; };
+    const update = (patch: Partial<{ leadership: CountryLeadership; weather: CountryWeather; market: CountryMarketDetail; loading: boolean; error: boolean }>) => {
+      if (active()) setState((current) => current.country === country ? { ...current, ...patch } : current);
+    };
+    const leadership = reference.leadership && Date.now() - reference.leadership.at < 600_000
+      ? Promise.resolve(reference.leadership.value)
+      : readWithDeadline(fetchCountryLeadership, controller.signal, 8_000).then((value) => {
+          if (active()) reference.leadership = { at: Date.now(), value }; return value;
+        });
+    const weather = reference.weather && Date.now() - reference.weather.at < 600_000
+      ? Promise.resolve(reference.weather.value)
+      : readWithDeadline(fetchCountryWeather, controller.signal, 8_000).then((value) => {
+          if (active()) reference.weather = { at: Date.now(), value }; return value;
+        });
+    void Promise.allSettled([
+      leadership.then((items) => update({ leadership: items.find((item) => item.country === country) })),
+      weather.then((items) => update({ weather: items.find((item) => item.country === country) })),
+      readWithDeadline((signal) => fetchCountryMarketDetail(country, signal), controller.signal, 8_000)
+        .then((market) => update({ market })),
+    ]).then((results) => update({ loading: false, error: results.some((result) => result.status === "rejected") }));
+    return () => controller.abort();
   }, [country]);
   const data = state.country === country ? state : null;
   const name = new Intl.DisplayNames(undefined, { type: "region" }).of(country) || country;

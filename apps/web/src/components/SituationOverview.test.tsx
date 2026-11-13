@@ -50,6 +50,20 @@ it("shows the full activity history without implying that clicking a bar can loa
   expect(screen.queryByText("Select an interval to explore")).toBeNull();
   expect(screen.queryByRole("button", { name: /: 4 updates/ })).toBeNull();
 });
+it("keeps priority and history visible while grouping the detailed filters", () => {
+  const onPriorityChange = vi.fn();
+  render(<SituationOverview {...props} compact onPriorityChange={onPriorityChange} />);
+  expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
+  expect(screen.queryByRole("combobox", { name: "Period" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "High priority" }));
+  expect(onPriorityChange).toHaveBeenCalledWith("high");
+  fireEvent.click(screen.getByText("Filters"));
+  fireEvent.change(screen.getByRole("combobox", { name: "Period" }), { target: { value: "72" } });
+  expect(props.onHoursChange).toHaveBeenCalledWith(72);
+  fireEvent.change(screen.getByRole("combobox", { name: "Topic" }), { target: { value: "transport" } });
+  expect(props.onTopicChange).toHaveBeenCalledWith("transport");
+  expect(screen.getByRole("option", { name: "Transport (8)" })).toBeTruthy();
+});
 it("changes server scope explicitly and never labels a previous scope as current", () => {
   const view = render(<SituationOverview {...props} />);
   fireEvent.change(screen.getByRole("combobox", { name: "Topic" }), { target: { value: "weather" } });
