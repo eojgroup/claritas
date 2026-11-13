@@ -10,9 +10,9 @@ vi.mock("./OverviewCountryProfile", () => ({ default: () => <section aria-label=
 vi.mock("./IntelligenceWorkspace", () => ({ default: () => <h3>Selected event evidence</h3> }));
 afterEach(cleanup);
 
-function Workspace() {
+function Workspace({ initialEventID = null }: { initialEventID?: string | null }) {
   const [country, setCountry] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialEventID);
   return <SituationDashboard overview={overviewFixture("all", country)} loading={false} error={null}
     hours={24} topic={null} priority="all" country={country} selectedId={selectedId} dark
     briefing={null} briefingError={null} onHoursChange={vi.fn()} onTopicChange={vi.fn()}
@@ -54,4 +54,12 @@ it("lets keyboard users resize context without unmounting the map or its timelin
   expect(document.getElementById("world-map-context")?.hasAttribute("inert")).toBe(false);
   expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
+});
+
+it("puts a directly opened event before the general overview controls", async () => {
+  render(<Workspace initialEventID={event.id} />);
+  await screen.findByRole("heading", { name: "Selected event evidence" });
+  const detail = screen.getByRole("region", { name: "Selected development" });
+  const overview = screen.getByRole("region", { name: "Situation overview" });
+  expect(detail.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });

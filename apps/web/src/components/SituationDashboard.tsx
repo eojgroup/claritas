@@ -67,6 +67,15 @@ export default function SituationDashboard(props: Props) {
     legendLabel={mapMetric === "priority" ? "High-priority developments" : "Developments in selected period"} />;
   const stops = ["peek", "half", "full"] as const;
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
+  const overviewControls = <>
+        <div className="situation-map-tools"><label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "activity" | "priority")}><option value="activity">All selected activity</option><option value="priority">High-priority activity</option></select></label>{country && <button type="button" onClick={() => { setProfileCountry(null); changeScope(props.onCountryChange)(null); }}>Clear {country} ×</button>}</div>
+        <p className="situation-map-key"><span><i />Event · colour = priority</span><span><i />Image available</span></p>
+          <div id="world-event-stream" tabIndex={-1}>
+            <SituationOverview variant="summary" {...props} selectedId={selectedId}
+              onHoursChange={changeScope(props.onHoursChange)} onTopicChange={changeScope(props.onTopicChange)}
+              onPriorityChange={changeScope(props.onPriorityChange)} onCountryChange={changeScope(props.onCountryChange)} />
+          </div>
+  </>;
   const workspace = <div className={`situation-workspace situation-map-workspace panel-${panelStop}`}>
     <section className="situation-map-canvas" aria-label="Development map">
       {map}
@@ -103,21 +112,15 @@ export default function SituationDashboard(props: Props) {
         <button type="button" className="situation-panel-toggle" onClick={() => setPanelStop(panelStop === "peek" ? "half" : "peek")} aria-label={panelStop === "peek" ? "Show context" : "Show more map"} aria-expanded={panelStop !== "peek"} aria-controls="world-map-context">{panelStop === "peek" ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</button>
       </header>
       <div id="world-map-context" className="situation-context-scroll" inert={panelStop === "peek"}>
-        <div className="situation-map-tools"><label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "activity" | "priority")}><option value="activity">All selected activity</option><option value="priority">High-priority activity</option></select></label>{country && <button type="button" onClick={() => { setProfileCountry(null); changeScope(props.onCountryChange)(null); }}>Clear {country} ×</button>}</div>
-        <p className="situation-map-key"><span><i />Event · colour = priority</span><span><i />Image available</span></p>
-          <div id="world-event-stream" tabIndex={-1}>
-            <SituationOverview variant="summary" {...props} selectedId={selectedId}
-              onHoursChange={changeScope(props.onHoursChange)} onTopicChange={changeScope(props.onTopicChange)}
-              onPriorityChange={changeScope(props.onPriorityChange)} onCountryChange={changeScope(props.onCountryChange)} />
-          </div>
-        {selectedId ? <section id="overview-event-context" tabIndex={-1} className="situation-detail" aria-label="Selected development">
+        {!selectedId && overviewControls}
+        {selectedId ? <><section id="overview-event-context" tabIndex={-1} className="situation-detail" aria-label="Selected development">
           <header><span>Event context</span><button type="button" onClick={() => onSelect(null)}><X size={16} />Back to developments</button></header>
           <Suspense fallback={<p role="status">Loading development…</p>}>
             <IntelligenceWorkspace embedded initialEventId={selectedId}
               refreshVersion={events.find((event) => event.id === selectedId)?.last_activity_time}
               onEventLoaded={setSelectedEvent} onSelectEvent={selectEvent} onOpenImagery={props.onOpenImagery} />
           </Suspense>
-        </section> : <>
+        </section>{overviewControls}</> : <>
           {profileCountry && <OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setProfileCountry(null)} />}
           <SituationOverview variant="history" {...props} selectedId={selectedId} />
           <section className="situation-briefing" aria-label="Daily briefing">
