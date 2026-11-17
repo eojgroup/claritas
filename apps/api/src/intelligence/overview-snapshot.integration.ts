@@ -24,7 +24,8 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     const source = (await client.query("INSERT INTO source(name,api_base_url) VALUES($1,'https://example.org') RETURNING id", [`snapshot-${fixture}`])).rows[0].id;
     const item = (await client.query(`INSERT INTO item(source_id,kind,title,url,event_time,payload)
       VALUES($1,'news_article','Saved report','https://example.org/report',$2,'{"quality_status":"accepted"}') RETURNING id`, [source, now])).rows[0].id;
-    const records = [...Array.from({ length: 301 }, () => ({ id: randomUUID(), age: 1, country: "SE", type: "security_incident", severity: "high", score: .8 })),
+    // Exceed the per-topic card pool: graph totals and other topics must survive.
+    const records = [...Array.from({ length: 401 }, () => ({ id: randomUUID(), age: 1, country: "SE", type: "security_incident", severity: "high", score: .8 })),
       { id: randomUUID(), age: 23, country: "SE", type: "security_incident", severity: "high", score: .8 },
       { id: randomUUID(), age: 47, country: "SE", type: "security_incident", severity: "high", score: .8 },
       { id: randomUUID(), age: 25, country: "SE", type: "security_incident", severity: "high", score: .8 },
@@ -60,16 +61,17 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     const statements: string[] = [];
     const measured: OverviewQuery = async (sql, params) => { statements.push(sql); return read(sql, params); };
     const high = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions(), measured);
-    assert.equal(high.summary.event_count, 305);
+    assert.equal(high.summary.event_count, 405);
     assert.equal(high.summary.previous_event_count, 1);
     assert.equal(high.events.length, 40);
+    assert.equal(high.events.filter((event) => event.event_type === "aviation_disruption").length, 2, "a busy topic must not crowd other topics out of key developments");
     assert.ok(!high.events.some((event) => event.id === olderLocated.id));
     assert.ok(high.map_events.some((event) => event.id === olderLocated.id), "older located events survive bursts of newer unlocated cards");
     assert.equal(high.countries.reduce((sum, country) => sum + country.event_count, 0), high.summary.event_count);
     assert.equal(high.timeline.length, 24);
     assert.equal(high.buckets[0].event_count, 2);
-    assert.equal(high.buckets.at(-1)?.event_count, 301);
-    assert.equal(high.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0), 305);
+    assert.equal(high.buckets.at(-1)?.event_count, 401);
+    assert.equal(high.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0), 405);
     assert.equal(high.coverage.truncated, false);
     assert.equal(high.coverage.full_window, true);
     assert.equal(typeof high.coverage.sample_limit, "number", "already-installed clients require a numeric coverage limit");
@@ -97,16 +99,16 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     const expiredImages = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ country: "SE", topic: "transport" }), measured);
     assert.equal(expiredImages.visual_events.length, 0);
     const threeDays = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ hours: 72 }), measured);
-    assert.equal(threeDays.summary.event_count, 307);
+    assert.equal(threeDays.summary.event_count, 407);
     assert.equal(threeDays.summary.previous_event_count, 1);
     assert.equal(threeDays.buckets[0].event_count, 1);
     const week = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ hours: 168 }), measured);
-    assert.equal(week.summary.event_count, 309);
+    assert.equal(week.summary.event_count, 409);
     assert.equal(week.summary.previous_event_count, 2);
     assert.ok(week.buckets[0].event_count > 0);
-    assert.equal(week.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0), 309);
+    assert.equal(week.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0), 409);
     const all = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ priority: "all" }), measured);
-    assert.equal(all.summary.event_count, 306);
+    assert.equal(all.summary.event_count, 406);
     // An interrupted refresh rolls back both snapshot and state publication.
     await client.query("SAVEPOINT failed_refresh");
     await client.query("UPDATE intelligence_overview_snapshot SET payload='{}'::jsonb");
@@ -115,7 +117,7 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     await client.query("UPDATE intelligence_overview_state SET generated_at=$1", [new Date(now.getTime() - 600_000)]);
     const stale = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions(), measured);
     assert.equal(stale.snapshot.status, "stale");
-    assert.equal(stale.summary.event_count, 305);
+    assert.equal(stale.summary.event_count, 405);
     assert.equal(stale.events.length, 40);
     // Quality changes and event deletion enqueue exact indexed source matches.
     await client.query("UPDATE item SET payload=jsonb_build_object('quality_status','rejected') WHERE id=$1", [item]);

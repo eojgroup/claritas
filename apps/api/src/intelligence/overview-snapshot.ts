@@ -79,17 +79,33 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const statement = buildSavedOverviewAggregateQuery(state, options);
   const aggregate = (await read<{ aggregate: Aggregate }>(statement.sql, statement.params)).rows[0].aggregate;
   const params = scopeParams(state, options);
-  const { rows: cards } = await read<SavedCard>(`WITH candidates AS (
-      SELECT sample,event,id,last_activity_time,topic,${prioritySql} AS attention,
-        row_number() OVER (PARTITION BY CASE WHEN topic='transport' THEN concat('transport:',event->>'title',':',COALESCE(location_key,''))
-          ELSE COALESCE(NULLIF(lower(regexp_replace(event->>'title','[^[:alnum:]]','','g')),''),id::text) END
-          ORDER BY last_activity_time DESC,id) AS duplicate_rank
+  // Bound JSON/title processing independently for each topic. Full-period
+  // counts and map coverage above/below still use every eligible saved event.
+  const { rows: cards } = await read<SavedCard>(`WITH ranked AS (
+      SELECT id,last_activity_time,topic,${prioritySql} AS attention,
+        row_number() OVER (PARTITION BY topic ORDER BY ${prioritySql} DESC,last_activity_time DESC,id) AS topic_rank
       FROM intelligence_overview_projection WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz
+    ), pool AS MATERIALIZED (
+      SELECT id,last_activity_time,topic,attention FROM ranked WHERE topic_rank<=400
+    ), candidates AS (
+      SELECT pool.*,COALESCE(projection.sample->'metadata'->>'origin_domain','news') AS origin_domain,
+        row_number() OVER (PARTITION BY CASE WHEN pool.topic='transport' THEN concat('transport:',event->>'title',':',COALESCE(location_key,''))
+          ELSE COALESCE(NULLIF(lower(regexp_replace(event->>'title','[^[:alnum:]]','','g')),''),pool.id::text) END
+          ORDER BY pool.last_activity_time DESC,pool.id) AS duplicate_rank
+      FROM pool CROSS JOIN LATERAL (
+        SELECT sample,event,location_key FROM intelligence_overview_projection
+        WHERE generation_id=$1::uuid AND id=pool.id LIMIT 1
+      ) projection
     ), diverse AS (
-      SELECT *,row_number() OVER (PARTITION BY COALESCE(sample->'metadata'->>'origin_domain','news'),topic
+      SELECT id,last_activity_time,attention,row_number() OVER (PARTITION BY origin_domain,topic
         ORDER BY attention DESC,last_activity_time DESC,id) AS family_rank
       FROM candidates WHERE duplicate_rank=1
-    ) SELECT sample,event FROM diverse ORDER BY (family_rank>2),attention DESC,last_activity_time DESC,id LIMIT ${OVERVIEW_EVENT_LIMIT}`, params.slice(0, 7));
+    ), selected AS MATERIALIZED (
+      SELECT id,last_activity_time,attention,(family_rank>2) AS deferred
+      FROM diverse ORDER BY (family_rank>2),attention DESC,last_activity_time DESC,id LIMIT ${OVERVIEW_EVENT_LIMIT}
+    ) SELECT projection.sample,projection.event FROM selected
+      JOIN intelligence_overview_projection projection ON projection.generation_id=$1::uuid AND projection.id=selected.id
+      ORDER BY selected.deferred,selected.attention DESC,selected.last_activity_time DESC,selected.id`, params.slice(0, 7));
   // Geography must come from the full selected window, not the latest cards:
   // a burst of unlocated reporting must not erase every known map position.
   const { rows: mapped } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
