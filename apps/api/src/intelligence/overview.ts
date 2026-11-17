@@ -77,6 +77,7 @@ export type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
   location_name: string | null; location_type: string | null; latitude: number | null; longitude: number | null;
   monitoring_tier: number | null; evidence_count: number; signal_domains: string[];
   earth_observation_available: boolean; origin_domain: string;
+  news_category?: string;
   signal_visual?: OverviewSignalVisual | null;
   source_refs: OverviewSourceRef[]; imagery: OverviewImageryRef | null;
 };
@@ -90,7 +91,7 @@ export function buildOverviewEventQuery(ids: string[]) {
       location.canonical_name AS location_name,location.location_type,location.monitoring_tier,
       COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_Y(ST_PointOnSurface(event.geography)) END,location.latitude) AS latitude,
       COALESCE(CASE WHEN event.geography IS NULL THEN NULL ELSE ST_X(ST_PointOnSurface(event.geography)) END,location.longitude) AS longitude,
-      coverage.evidence_count,coverage.signal_domains,
+      coverage.evidence_count,coverage.signal_domains,coverage.news_category,
       EXISTS(SELECT 1 FROM earth_observation available_observation
         JOIN earth_observation_asset available_asset ON available_asset.observation_id=available_observation.id
         WHERE available_observation.event_id=event.id AND available_observation.status='available'
@@ -104,6 +105,7 @@ export function buildOverviewEventQuery(ids: string[]) {
     LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
     CROSS JOIN LATERAL (
       SELECT count(*)::int AS evidence_count,
+        (array_agg(assessment.primary_category ORDER BY assessment.score DESC NULLS LAST) FILTER (WHERE assessment.item_id IS NOT NULL))[1] AS news_category,
         COALESCE(array_agg(DISTINCT CASE
           WHEN evidence.relationship='model_interpretation' AND evidence.domain<>'podcast' THEN 'model_interpretation'
           WHEN evidence.domain='disaster' THEN 'earth_observation'
@@ -112,6 +114,7 @@ export function buildOverviewEventQuery(ids: string[]) {
       FROM intelligence_event_evidence evidence
       LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
       LEFT JOIN item article ON article.id=${sourceRecordBigintSql("evidence", "item")}
+      LEFT JOIN news_item_assessment assessment ON assessment.item_id=article.id
       WHERE evidence.event_id=event.id AND ${acceptedEvidenceSql("article", "evidence_source")}
     ) coverage
     LEFT JOIN LATERAL (
@@ -164,7 +167,7 @@ export function buildOverviewProjectionQuery(now: Date, cursor?: { time: string;
         AND (COALESCE(projection.metadata->>'canonical_evidence_key','') NOT LIKE 'social:social_signal:%'
           OR EXISTS(SELECT 1 FROM social_signal retained WHERE retained.id=${canonicalSocialSignalBigintSql("projection")} AND retained.expires_at>now()))
         AND coverage.evidence_count>0) AS displayable,
-      coverage.evidence_count,coverage.signal_domains,coverage.source_refs,
+      coverage.evidence_count,coverage.signal_domains,coverage.source_refs,coverage.news_category,
       ${signalVisualSql("projection")} AS signal_visual,
       COALESCE((SELECT max(assessment.score)/100.0 FROM intelligence_event_evidence report
         JOIN news_item_assessment assessment ON assessment.item_id=${sourceRecordBigintSql("report", "item")}
@@ -179,6 +182,7 @@ export function buildOverviewProjectionQuery(now: Date, cursor?: { time: string;
     LEFT JOIN country ON country.iso2=projection.primary_country_iso2
     CROSS JOIN LATERAL (
       SELECT count(*)::int AS evidence_count,
+        (array_agg(assessment.primary_category ORDER BY assessment.score DESC NULLS LAST) FILTER (WHERE assessment.item_id IS NOT NULL))[1] AS news_category,
         COALESCE(array_agg(DISTINCT CASE
           WHEN evidence.relationship='model_interpretation' AND evidence.domain<>'podcast' THEN 'model_interpretation'
           WHEN evidence.domain='disaster' THEN 'earth_observation'
@@ -193,6 +197,7 @@ export function buildOverviewProjectionQuery(now: Date, cursor?: { time: string;
       FROM intelligence_event_evidence evidence
       LEFT JOIN source evidence_source ON evidence_source.id=evidence.source_id
       LEFT JOIN item article ON article.id=${sourceRecordBigintSql("evidence", "item")}
+      LEFT JOIN news_item_assessment assessment ON assessment.item_id=article.id
       WHERE evidence.event_id=projection.id AND ${acceptedEvidenceSql("article", "evidence_source")}
     ) coverage
     ORDER BY projection.last_activity_time DESC,projection.id DESC`,
@@ -222,7 +227,7 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
   });
   const timeline = events.slice(0, OVERVIEW_TIMELINE_LIMIT).map((event) => {
     const row = byId.get(event.id)!;
-    const topic = overviewTopic(event.event_type);
+    const topic = overviewTopic(event.event_type, row.news_category);
     return { ...headlineTranslationFields(event), event_id: event.id, occurred_at: event.last_activity_time, title: event.title, topic: topic.key, topic_label: topic.label,
       location_name: event.location_name, country_iso2: event.primary_country_iso2, severity: event.severity,
       priority_score: Math.round(event.priority_score * 100), priority_reasons: event.priority_reasons,

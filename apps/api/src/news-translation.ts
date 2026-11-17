@@ -511,7 +511,7 @@ export function buildNewsTranslationCandidateQuery(
 /** Exact headline reuse is local work and remains available when free quota runs out. */
 export async function reuseCachedNewsTranslationHeadlines(targetLanguage: string): Promise<number> {
   const { rows } = await query<{ count: number }>(`WITH recent AS MATERIALIZED (
-      SELECT id,title,summary FROM item i WHERE kind='news_article' AND title IS NOT NULL
+      SELECT id,title,summary,lower(COALESCE(language_code,'und')) AS source_language FROM item i WHERE kind='news_article' AND title IS NOT NULL
         AND COALESCE(event_time,created_at)>=now()-interval '48 hours'
         AND COALESCE(payload->>'quality_status','accepted')='accepted'
         AND NOT EXISTS(SELECT 1 FROM item_translation existing WHERE existing.item_id=i.id
@@ -519,15 +519,18 @@ export async function reuseCachedNewsTranslationHeadlines(targetLanguage: string
           AND existing.source_summary_hash IS NOT DISTINCT FROM md5(i.summary))
       ORDER BY id DESC LIMIT 1000
     ), cached AS MATERIALIZED (
-      SELECT DISTINCT ON(source_title_hash) * FROM item_translation
-      WHERE target_language_code=$1 ORDER BY source_title_hash,title_generated_at DESC,item_id
+      SELECT DISTINCT ON(translation.source_title_hash,lower(COALESCE(original.language_code,'und')))
+        translation.*,lower(COALESCE(original.language_code,'und')) AS source_language
+      FROM item_translation translation JOIN item original ON original.id=translation.item_id
+      WHERE translation.target_language_code=$1
+      ORDER BY translation.source_title_hash,lower(COALESCE(original.language_code,'und')),translation.title_generated_at DESC,translation.item_id
     ), reused AS (
       INSERT INTO item_translation(item_id,target_language_code,translated_title,generated_summary,summary_status,
         source_title_hash,source_summary_hash,provider,model,generation_metadata,title_generated_at,summary_generated_at)
       SELECT recent.id,$1,cached.translated_title,NULL,'not_requested',md5(recent.title),md5(recent.summary),
         cached.provider,cached.model,jsonb_build_object('reused_from_item_id',cached.item_id,'content_scope','headline_only',
         'source_content_preserved',true),cached.title_generated_at,NULL
-      FROM recent JOIN cached ON cached.source_title_hash=md5(recent.title)
+      FROM recent JOIN cached ON cached.source_title_hash=md5(recent.title) AND cached.source_language=recent.source_language
       ON CONFLICT(item_id,target_language_code) DO UPDATE SET translated_title=EXCLUDED.translated_title,
         generated_summary=NULL,summary_status='not_requested',source_title_hash=EXCLUDED.source_title_hash,
         source_summary_hash=EXCLUDED.source_summary_hash,provider=EXCLUDED.provider,model=EXCLUDED.model,
@@ -1080,7 +1083,10 @@ async function runPendingNewsHeadlineTranslationsInternal(options: {
     };
   }
   const limit = Math.min(Math.max(options.limit ?? intFromEnv("NEWS_TRANSLATION_BATCH_SIZE", 100, 1, 100), 1), 100);
-  if (!options.llmClient) await reuseCachedNewsTranslationHeadlines(targetLanguage);
+  if (!options.llmClient) {
+    const reused = await reuseCachedNewsTranslationHeadlines(targetLanguage);
+    if (reused) console.info(JSON.stringify({ event: "news_translation_cache_reused", target_language: targetLanguage, translated: reused }));
+  }
   const candidates = await loadPendingCandidates(targetLanguage, limit);
   if (candidates.length === 0) {
     return {

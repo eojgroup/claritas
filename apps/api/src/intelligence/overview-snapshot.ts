@@ -82,7 +82,7 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const { rows: cards } = await read<SavedCard>(`WITH candidates AS (
       SELECT sample,event,id,last_activity_time,topic,${prioritySql} AS attention,
         row_number() OVER (PARTITION BY CASE WHEN topic='transport' THEN concat('transport:',event->>'title',':',COALESCE(location_key,''))
-          ELSE lower(regexp_replace(event->>'title','[^[:alnum:]]','','g')) END
+          ELSE COALESCE(NULLIF(lower(regexp_replace(event->>'title','[^[:alnum:]]','','g')),''),id::text) END
           ORDER BY last_activity_time DESC,id) AS duplicate_rank
       FROM intelligence_overview_projection WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz
     ), diverse AS (
@@ -177,7 +177,7 @@ export async function readIntelligenceOverviewSnapshot(options: Required<Overvie
 
 const projectionRecords = (rows: ProjectionRow[], generation: string) => rows.filter((row) => row.displayable).map((row) => {
   const sample: OverviewSample = { id: row.id, event_type: row.event_type, status: row.status, severity: row.severity,
-    news_priority: Number(row.news_priority ?? 0), relevance_score: Number(row.relevance_score), urgency_score: Number(row.urgency_score), materiality_score: Number(row.materiality_score),
+    news_category: row.news_category, news_priority: Number(row.news_priority ?? 0), relevance_score: Number(row.relevance_score), urgency_score: Number(row.urgency_score), materiality_score: Number(row.materiality_score),
     source_diversity: row.source_diversity, domain_count: row.domain_count, last_activity_time: row.last_activity_time,
     primary_location_id: row.primary_location_id, primary_country_iso2: row.primary_country_iso2, location_name: row.location_name,
     country_name: row.country_name, metadata: row.metadata, period: "current", displayable: true };
@@ -186,7 +186,7 @@ const projectionRecords = (rows: ProjectionRow[], generation: string) => rows.fi
   // Do not duplicate feed metadata and cursor internals inside every card.
   const { metadata: _metadata, period: _period, displayable: _displayable, country_name: _country, ...card } = event as HydratedOverviewRow & OverviewSample;
   return { generation_id: generation, id: row.id, last_activity_time: row.last_activity_time, country_iso2: row.primary_country_iso2,
-    topic: overviewTopic(row.event_type).key, location_key: row.primary_location_id ? `location:${row.primary_location_id}` : row.primary_country_iso2 ? `country:${row.primary_country_iso2}` : null,
+    topic: overviewTopic(row.event_type, row.news_category).key, location_key: row.primary_location_id ? `location:${row.primary_location_id}` : row.primary_country_iso2 ? `country:${row.primary_country_iso2}` : null,
     location_name: row.location_name || row.country_name || row.primary_country_iso2, severity: row.severity,
     priority_base: .55 * Math.max(Number(row.relevance_score), Number(row.news_priority ?? 0)) + .2 * Number(row.urgency_score) + .15 * Number(row.materiality_score),
     priority_cap: ["social", "podcast"].includes(origin) && !Number(row.source_diversity) ? .6 : 1,

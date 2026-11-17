@@ -15,3 +15,9 @@ BEGIN
 END $$;
 CREATE TRIGGER overview_news_assessment_dirty AFTER INSERT OR UPDATE ON news_item_assessment
   FOR EACH ROW EXECUTE FUNCTION queue_overview_news_assessment();
+
+-- Refresh today's saved cards for the added publisher categories and visuals.
+-- Readers continue using their published snapshot during this background work.
+INSERT INTO intelligence_overview_dirty(id)
+  SELECT id FROM intelligence_event_feed WHERE last_activity_time>=now()-interval '24 hours'
+  ON CONFLICT(id) DO UPDATE SET queued_at=clock_timestamp();

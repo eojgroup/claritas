@@ -14,6 +14,7 @@ export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet
 export type OverviewSample = {
   id: string; event_type: string; status: string; severity: string;
   news_priority?: number;
+  news_category?: string;
   relevance_score: number; urgency_score: number; materiality_score: number;
   source_diversity: number; domain_count: number;
   last_activity_time: string | Date; primary_location_id: string | null; primary_country_iso2: string | null;
@@ -36,7 +37,8 @@ export function normalizeOverviewOptions(input: { hours?: unknown; country?: unk
   return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, priority, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
 }
 
-export function overviewTopic(eventType: string) {
+export function overviewTopic(eventType: string, newsCategory?: string) {
+  if (eventType === "reported_development" && ["markets", "economy", "companies", "energy"].includes(newsCategory ?? "")) return OVERVIEW_TOPICS[4];
   const normalized = eventType.toLowerCase();
   return OVERVIEW_TOPICS.find((topic) => topic.pattern && new RegExp(topic.pattern).test(normalized)) ?? OVERVIEW_TOPICS[6];
 }
@@ -95,7 +97,7 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       const belongs = row.period === "current" ? time >= end - duration && time <= end : time >= end - duration * 2 && time < end - duration;
       if (!belongs || row.displayable === false || row.status === "dismissed" || seen.has(row.id)) return false;
       if (options.country && row.primary_country_iso2 !== options.country) return false;
-      if (options.topic && overviewTopic(row.event_type).key !== options.topic) return false;
+      if (options.topic && overviewTopic(row.event_type, row.news_category).key !== options.topic) return false;
       if (options.priority === "high" && !overviewHighPriority(row, now)) return false;
       seen.add(row.id);
       return true;
@@ -111,7 +113,7 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       priority_score: currentMembers.length ? Math.max(...currentMembers.map((row) => overviewPriority(row, now))) : 0,
       event_ids: [...currentMembers].sort((a, b) => overviewPriority(b, now) - overviewPriority(a, now)).slice(0, 3).map((row) => row.id) };
   };
-  const topics = OVERVIEW_TOPICS.map((topic) => pulse(topic.key, topic.label, rows.filter((row) => overviewTopic(row.event_type).key === topic.key)))
+  const topics = OVERVIEW_TOPICS.map((topic) => pulse(topic.key, topic.label, rows.filter((row) => overviewTopic(row.event_type, row.news_category).key === topic.key)))
     .filter((topic) => topic.event_count || topic.previous_event_count)
     .sort((a, b) => b.event_count - a.event_count || b.priority_score - a.priority_score || a.key.localeCompare(b.key));
   const locationsByKey = new Map<string, OverviewSample[]>();

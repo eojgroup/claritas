@@ -105,3 +105,11 @@ test("publisher importance contributes to overview priority and the high-priorit
   assert.equal(result.summary.event_count, 1);
   assert.ok(overviewPriorityReasons(sample).some((reason) => /publisher/.test(reason)));
 });
+
+test("financial publisher categories connect reporting to the market overview", () => {
+  const sample = event("market-report", 1, { event_type: "reported_development", news_category: "markets" });
+  const result = buildOverviewAnalytics([sample], normalizeOverviewOptions({ priority: "all", topic: "markets" }), now);
+  assert.equal(result.summary.event_count, 1);
+  assert.equal(result.topics[0].key, "markets");
+  assert.equal(overviewTopic("earthquake", "markets").key, "disasters");
+});
