@@ -535,6 +535,8 @@ export async function reuseCachedNewsTranslationHeadlines(targetLanguage: string
         generated_summary=NULL,summary_status='not_requested',source_title_hash=EXCLUDED.source_title_hash,
         source_summary_hash=EXCLUDED.source_summary_hash,provider=EXCLUDED.provider,model=EXCLUDED.model,
         generation_metadata=EXCLUDED.generation_metadata,title_generated_at=EXCLUDED.title_generated_at,summary_generated_at=NULL
+      WHERE item_translation.source_title_hash<>EXCLUDED.source_title_hash
+        OR item_translation.source_summary_hash IS DISTINCT FROM EXCLUDED.source_summary_hash
       RETURNING item_id
     ) SELECT count(*)::int AS count FROM reused`, [targetLanguage]);
   return rows[0]?.count ?? 0;

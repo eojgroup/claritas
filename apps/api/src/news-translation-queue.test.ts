@@ -296,6 +296,7 @@ test("exact cached headlines are reusable without reserving provider requests or
     assert.match(sql, /cached\.source_title_hash=md5\(recent\.title\)/);
     assert.match(sql, /cached\.translated_title,NULL,'not_requested'/);
     assert.match(sql, /cached\.title_generated_at,NULL/);
+    assert.match(sql, /WHERE item_translation\.source_title_hash<>EXCLUDED\.source_title_hash/);
     assert.doesNotMatch(sql, /news_translation_usage/);
     assert.equal(values[0], "en");
     return [{ count: 12 }];
