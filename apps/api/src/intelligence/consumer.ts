@@ -1,3 +1,4 @@
+import { isMajorServiceDisruption } from "../news-significance";
 import { attachAirportTransportContext } from "./airport-transport-context";
 import { query, withTransaction } from "../db";
 import worldCountries from "world-countries";
@@ -121,6 +122,7 @@ export function classifyEventType(text: string) {
   // bounded-input guarantee without letting a long summary hide a clear
   // earthquake headline at the start of the record.
   if (hasEarthquakeHeadlineSignal(text.slice(0, 1_000))) return "earthquake";
+  if (isMajorServiceDisruption(normalized)) return "service_disruption";
   const mappings: Array<[RegExp, string]> = [
     [/wildfire|forest fire|bushfire|active fire/, "wildfire"],
     [/flood|inundation|flash flood/, "flood"],

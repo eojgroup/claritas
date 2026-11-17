@@ -3895,6 +3895,17 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
     }
 }
 
+struct OverviewSignalVisual: Codable {
+    let kind: String
+    let observed_at: Date
+    let current: Double?
+    let baseline: Double?
+    let temp_c: Double?
+    let precipitation_mm: Double?
+    let wind_speed: Double?
+    let label: String
+}
+
 struct IntelligenceOverview: Codable {
     struct Window: Codable {
         let hours: Int
@@ -3999,6 +4010,7 @@ struct IntelligenceOverview: Codable {
         let priority_reasons: [String]
         let source_refs: [Source]
         let imagery: Imagery?
+        var signal_visual: OverviewSignalVisual? = nil
         var original_title: String? = nil
         var original_summary: String? = nil
         var language_code: String? = nil

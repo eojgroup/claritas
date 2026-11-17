@@ -5777,3 +5777,12 @@ body {
 
 .event-location-canvas { height: 20rem; min-height: 16rem; }
 .event-location-canvas > .world-map { height: 100%; border-radius: .75rem; }
+
+.development-signal-visual { margin-top: .7rem; padding: .7rem; border: 1px solid var(--shell-border); border-radius: .65rem; max-width: 32rem; }
+.development-signal-visual figcaption { font-size: .7rem; font-weight: 650; margin-bottom: .5rem; }
+.development-signal-visual div > div { display: flex; align-items: center; gap: .5rem; font-size: .65rem; margin-top: .35rem; }
+.development-signal-visual div > div > span { flex: 0 0 4rem; color: var(--shell-muted); }
+.development-signal-visual i { display: block; height: .5rem; background: var(--shell-accent-2); border-radius: 3px; min-width: 1px; }
+.development-signal-visual div > div:last-child i { background: var(--shell-muted); }
+.development-signal-visual p { display: flex; flex-wrap: wrap; gap: 1rem; font-size: .8rem; }
+.development-signal-visual small { display: block; margin-top: .5rem; color: var(--shell-muted); font-size: .6rem; }

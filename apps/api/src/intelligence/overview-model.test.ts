@@ -98,3 +98,10 @@ test("high priority is the default and filters the same map, cards and chart coh
   assert.equal(buildOverviewAnalytics(rows, normalizeOverviewOptions({ priority: "all" }), now).summary.event_count, 3);
   assert.throws(() => normalizeOverviewOptions({ priority: "urgent" }), /priority/);
 });
+
+test("publisher importance contributes to overview priority and the high-priority cohort", () => {
+  const sample = event("major-service", 1, { relevance_score: .2, news_priority: .65, severity: "medium" });
+  const result = buildOverviewAnalytics([sample], normalizeOverviewOptions({ priority: "high" }), now);
+  assert.equal(result.summary.event_count, 1);
+  assert.ok(overviewPriorityReasons(sample).some((reason) => /publisher/.test(reason)));
+});

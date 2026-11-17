@@ -1,6 +1,7 @@
+import { isMajorServiceDisruption } from "./news-significance";
 import { createHash } from "node:crypto";
 
-export const NEWS_ASSESSMENT_METHODOLOGY = "trader-news-priority-v3";
+export const NEWS_ASSESSMENT_METHODOLOGY = "trader-news-priority-v4";
 
 export const NEWS_CATEGORIES = [
   "markets",
@@ -133,6 +134,7 @@ const CATEGORY_RULES: Array<{ category: Exclude<NewsCategory, "other">; pattern:
 ];
 
 const EVENT_CATEGORY: Record<string, NewsCategory[]> = {
+  service_disruption: ["technology"],
   market_move: ["markets"],
   transport_disruption: ["transport"],
   aviation_disruption: ["transport"],
@@ -418,6 +420,7 @@ export function classifyNewsItem(input: NewsAssessmentInput): Classification {
   for (const category of EVENT_CATEGORY[eventType] ?? []) add(category, 4, "event", eventType);
 
   const itemText = `${normalizedText(input.title, 500) ?? ""} ${normalizedText(input.summary, 1_200) ?? ""}`;
+  if (isMajorServiceDisruption(itemText)) add("technology", 4, "lexical", "major_service_disruption");
   const structuredSignals = structuredClassificationEvidence(input.payload);
   for (const { signal, scope } of structuredSignals) {
     for (const rule of CATEGORY_RULES) {
@@ -568,7 +571,7 @@ export function assessNewsItem(input: NewsAssessmentInput, now = new Date()): Ne
   const evidenceConfidence = event ? finiteUnit(event.confidence) * evidenceFactor : 0;
   const distinctPublishers = event ? finiteCount(event.distinct_publisher_count) : 0;
   const publisherDiversity = publisherDiversityScore(distinctPublishers);
-  const score = Math.round(Math.max(0, Math.min(100,
+  const baseScore = Math.round(Math.max(0, Math.min(100,
     eventRelevance * 23
     + materiality * 14
     + urgency * 12
@@ -578,8 +581,13 @@ export function assessNewsItem(input: NewsAssessmentInput, now = new Date()): Ne
     + publisherDiversity * 5
     + sourceQuality * 4,
   )));
+  const majorService = isMajorServiceDisruption(`${input.title ?? ""} ${input.summary ?? ""}`);
+  const recentService = majorService && freshness.valid && freshness.ageHours != null && freshness.ageHours <= 72;
+  const score = Math.max(baseScore, recentService ? 65 : 0);
+
 
   const reasons: NewsAssessmentReason[] = [];
+  if (recentService) reasons.push({ code: "major_service_disruption", label: "Recent reporting of a broad service disruption" });
   if (eventRelevance >= 0.7) reasons.push({ code: "high_event_relevance", label: "High-relevance linked event" });
   if (materiality >= 0.65) reasons.push({ code: "material_event_context", label: "Material linked-event context" });
   if (urgency >= 0.65) reasons.push({ code: "urgent_event_context", label: "Urgent linked-event context" });

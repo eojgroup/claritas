@@ -4,7 +4,6 @@ import type { DailySignalBriefing, IntelligenceEvent, IntelligenceOverview, Over
 import SituationOverview from "./SituationOverview";
 import WorldMapBubbles from "./WorldMapBubbles";
 import { eventCoordinateContext, presentEvent } from "./eventPresentation";
-import SatelliteImage from "./SatelliteImage";
 import OverviewCountryProfile from "./OverviewCountryProfile";
 import CountryFlag from "./CountryFlag";
 import ModalSurface from "./ModalSurface";
@@ -37,11 +36,14 @@ export default function SituationDashboard(props: Props) {
     && (overview.filters.priority ?? props.priority) === props.priority;
   const events = useMemo(() => {
     if (!scopeMatches || !overview) return [];
-    return overview.map_events ?? overview.events;
+    const mapped = new Map((overview.map_events ?? overview.events).map((event) => [event.id, event]));
+    for (const event of overview.visual_events ?? []) if (eventCoordinateContext(event)) mapped.set(event.id, event);
+    return [...mapped.values()];
   }, [scopeMatches, overview]);
   const points = useMemo(() => (selectedEvent?.id === selectedId && !events.some((event) => event.id === selectedId) ? [...events, selectedEvent] : events).filter((event) => eventCoordinateContext(event)).map((event) => ({
     id: event.id, latitude: Number(event.latitude), longitude: Number(event.longitude),
-    title: presentEvent(event).headline, subtitle: event.location_name || event.primary_country_iso2 || undefined,
+    title: presentEvent(event).headline, subtitle: [event.location_name || event.primary_country_iso2, new Date(event.last_activity_time).toLocaleString()].filter(Boolean).join(" · "),
+    imageUrl: event.imagery?.preview_url,
     label: event.location_name ? (event.location_name.length > 18 ? `${event.location_name.slice(0, 17)}…` : event.location_name) : undefined,
     severity: event.severity, selected: event.id === selectedId, hasImagery: event.earth_observation_available || Boolean(event.imagery),
   })), [events, selectedId, selectedEvent]);
@@ -56,7 +58,6 @@ export default function SituationDashboard(props: Props) {
     }
     return [...counts].map(([iso, count]) => ({ country: iso, count }));
   }, [events, overview, scopeMatches, mapMetric]);
-  const visuals = scopeMatches ? (overview?.visual_events ?? overview?.events.filter((event) => event.imagery) ?? []) : [];
   const revealContext = () => setPanelStop((stop) => stop === "peek" ? "half" : stop);
   const selectEvent = (id: string | null) => { onSelect(id); if (id) { setProfileCountry(null); revealContext(); } };
   const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
@@ -82,12 +83,6 @@ export default function SituationDashboard(props: Props) {
     <section className="situation-map-canvas" aria-label="Development map">
       {map}
       <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span></div>
-      {visuals.some((event) => event.imagery) && <section className="situation-map-images" aria-label="Images on the map">
-        {visuals.filter((event) => event.imagery).slice(0, 4).map((event) => <button type="button" key={event.id} onClick={() => selectEvent(event.id)} aria-label={`Open image context: ${presentEvent(event).headline}`}>
-          <SatelliteImage compact sources={[event.imagery!.preview_url]} alt="" className="situation-map-image" />
-          <span><CountryFlag country={event.primary_country_iso2} />{event.imagery!.source_kind === "publisher" ? "News photo" : "Satellite"}</span>
-        </button>)}
-      </section>}
       <div className="situation-map-actions">
         <button type="button" onClick={() => setExpandedMap(!expandedMap)} aria-label={expandedMap ? "Close expanded map" : "Expand map"}>{expandedMap ? <X size={18} /> : <Maximize2 size={18} />}</button>
       </div>
@@ -133,10 +128,6 @@ export default function SituationDashboard(props: Props) {
         </section>{overviewControls}</> : <>
           {profileCountry && <><OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setProfileCountry(null)} />{overviewControls}</>}
           <SituationOverview variant="history" {...props} selectedId={selectedId} />
-          {visuals.length > 0 && <section className="overview-visuals" aria-label="Images from this period"><h3>Images & location context</h3><div>{visuals.map((event) => event.imagery && <button type="button" key={event.id} onClick={() => selectEvent(event.id)}>
-            <SatelliteImage compact sources={[event.imagery.preview_url]} alt={presentEvent(event).headline} className="overview-visual-image" />
-            <strong>{presentEvent(event).headline}</strong><small>{event.imagery.source_kind === "publisher" ? "Publisher photo · capture unverified" : "Satellite context"} · {event.imagery.attribution}</small>
-          </button>)}</div></section>}
           <section className="situation-briefing" aria-label="Daily briefing">
             <div className="situation-briefing-label"><FileText size={16} /><strong>Daily briefing</strong>{props.briefing?.published_at && <time dateTime={props.briefing.published_at}>{new Date(props.briefing.published_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>}</div>
             {props.briefing ? <>

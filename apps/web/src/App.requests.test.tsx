@@ -44,9 +44,9 @@ it("loads the overview and briefing without an optional-feed request burst and s
   expect(await screen.findByRole("button", { name: event.title })).toBeTruthy();
   expect(requests.sort()).toEqual(["/api/auth/me", "/api/auth/providers", "/api/briefings/daily/latest", "/api/intelligence/overview?hours=24&priority=all"].sort());
   expect(peak).toBeLessThanOrEqual(3);
-  expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("2");
+  expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("3");
   expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("1000");
-  expect(screen.getByRole("region", { name: "Images from this period" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Images from this period" })).toBeNull();
   fireEvent.click(screen.getByText("Filters"));
   fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "priority" } });
   expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("20");

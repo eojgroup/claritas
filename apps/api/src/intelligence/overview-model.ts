@@ -13,6 +13,7 @@ export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?:
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type OverviewSample = {
   id: string; event_type: string; status: string; severity: string;
+  news_priority?: number;
   relevance_score: number; urgency_score: number; materiality_score: number;
   source_diversity: number; domain_count: number;
   last_activity_time: string | Date; primary_location_id: string | null; primary_country_iso2: string | null;
@@ -53,18 +54,19 @@ export function overviewPriority(event: OverviewSample, now: Date) {
   const clamp = (value: number) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(1, Number(value))) : 0;
   const age = Math.max(0, now.getTime() - new Date(event.last_activity_time).getTime());
   const recency = Number.isFinite(age) ? Math.max(0, 1 - age / (72 * 3_600_000)) : 0;
-  const score = .55 * clamp(event.relevance_score) + .2 * clamp(event.urgency_score)
+  const score = .55 * Math.max(clamp(event.relevance_score), clamp(event.news_priority ?? 0)) + .2 * clamp(event.urgency_score)
     + .15 * clamp(event.materiality_score) + .1 * recency;
   const cap = ["social", "podcast"].includes(event.metadata?.origin_domain ?? "") && !Number(event.source_diversity) ? .6 : 1;
   return Math.round(Math.min(cap, score) * 100);
 }
 
 export const overviewHighPriority = (event: OverviewSample, now: Date) =>
-  ["high", "critical"].includes(event.severity) || overviewPriority(event, now) >= 70;
+  ["high", "critical"].includes(event.severity) || Number(event.news_priority ?? 0) >= .6 || overviewPriority(event, now) >= 70;
 
 export function overviewPriorityReasons(event: OverviewSample) {
   const reasons: string[] = [];
   if (["high", "critical"].includes(event.severity)) reasons.push(`${event.severity === "critical" ? "Critical" : "High"} reported severity`);
+  if (Number(event.news_priority ?? 0) >= .6) reasons.push("High-importance publisher reporting");
   if (Number(event.relevance_score) >= .65) reasons.push("High recorded relevance");
   if (Number(event.urgency_score) >= .65) reasons.push("Time-sensitive development");
   if (Number(event.source_diversity) > 1) reasons.push(`${event.source_diversity} source identities`);

@@ -1758,6 +1758,38 @@ private struct EarthComparisonView: View {
     }
 }
 
+private struct DevelopmentSignalVisual: View {
+    let visual: OverviewSignalVisual
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            if visual.kind == "transport", let current = visual.current, let baseline = visual.baseline,
+               current.isFinite, baseline.isFinite, current >= 0, baseline >= 0 {
+                Text("Transport activity").font(.caption.weight(.semibold))
+                GeometryReader { geometry in
+                    VStack(alignment: .leading, spacing: 6) {
+                        bar("Observed", value: current, maximum: max(1, max(current, baseline)), width: geometry.size.width, color: .orange)
+                        bar("Baseline", value: baseline, maximum: max(1, max(current, baseline)), width: geometry.size.width, color: .secondary)
+                    }
+                }.frame(height: 36)
+            } else if visual.kind == "weather" {
+                HStack {
+                    if let temperature = visual.temp_c { Label(String(format: "%.1f°C", temperature), systemImage: "thermometer.medium") }
+                    if let rain = visual.precipitation_mm { Text(String(format: "%.1f mm", rain)) }
+                    if let wind = visual.wind_speed { Text(String(format: "%.1f m/s", wind)) }
+                }.font(.caption.weight(.semibold))
+            }
+            Text("\(visual.label) · \(visual.observed_at.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary)
+        }.padding(8).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+    }
+    private func bar(_ label: String, value: Double, maximum: Double, width: CGFloat, color: Color) -> some View {
+        HStack(spacing: 6) {
+            Text(label).frame(width: 56, alignment: .leading)
+            Capsule().fill(color).frame(width: max(1, max(1, width - 116) * CGFloat(value / maximum)), height: 5)
+            Text(value.formatted()).lineLimit(1)
+        }.font(.system(size: 10))
+    }
+}
+
 struct AuthenticatedEarthImage: View {
     @EnvironmentObject private var model: AppModel
     let path: String
@@ -2052,27 +2084,6 @@ struct IntelligenceOverviewPanel: View {
                     }
                     activityChart(overview)
                     if embedded { topics(overview) }
-                    if let images = overview.visual_events, !images.isEmpty {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            LazyHStack(alignment: .top, spacing: 10) {
-                                ForEach(images) { event in
-                                    if let image = event.imagery {
-                                        Button {
-                                            model.selectIntelligenceEvent(event)
-                                        } label: {
-                                            VStack(alignment: .leading, spacing: 5) {
-                                                AuthenticatedEarthImage(path: image.preview_url)
-                                                    .frame(width: 180, height: 110).clipped().cornerRadius(10)
-                                                Text(event.translated_title ?? event.title).font(.caption.weight(.semibold)).lineLimit(2)
-                                                Text(image.source_kind == "publisher" ? "Publisher photo · capture unverified" : "Satellite context")
-                                                    .font(.caption2).foregroundStyle(.secondary)
-                                            }.frame(width: 180, alignment: .leading)
-                                        }.buttonStyle(.plain)
-                                    }
-                                }
-                            }
-                        }.accessibilityLabel("Images from this period")
-                    }
                     Divider().padding(.vertical, 4)
                     timeline(overview)
                 }
@@ -2291,7 +2302,7 @@ struct IntelligenceOverviewPanel: View {
 
     private func timeline(_ overview: IntelligenceOverview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Latest developments").font(.subheadline.weight(.semibold))
+            Text("Key developments").font(.subheadline.weight(.semibold))
             if overview.timeline.isEmpty {
                 Text(model.overviewPriority == "high" ? "No high priority developments here. Try All events or a wider window." : "No developments in this scope.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -2333,6 +2344,12 @@ struct IntelligenceOverviewPanel: View {
                     }
                     Text([entry.topic_label, entry.location_name ?? entry.country_iso2.map(countryName)].compactMap { $0 }.joined(separator: " · "))
                         .font(.caption).foregroundStyle(.secondary)
+                    if let image = entry.imagery {
+                        AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(height: 125).clipped().cornerRadius(8)
+                        Text("\(image.source_kind == "satellite" ? "Satellite captured" : "Publisher photo · report updated") · \((image.captured_at ?? entry.occurred_at).formatted(date: .abbreviated, time: .shortened)) · \(image.attribution)")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if let visual = entry.signal_visual { DevelopmentSignalVisual(visual: visual) }
                     HStack(spacing: 8) {
                         if let source = entry.source_refs.first {
                             Label(source.label, systemImage: "link").lineLimit(1)

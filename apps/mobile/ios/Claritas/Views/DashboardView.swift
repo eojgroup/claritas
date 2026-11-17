@@ -5244,6 +5244,9 @@ struct WorldMapWorkspace: View {
     private var events: [IntelligenceEvent] {
         let overview = model.intelligenceOverview
         var candidates = overview?.map_events ?? overview?.events ?? []
+        for event in overview?.visual_events ?? [] where !candidates.contains(where: { $0.id == event.id }) {
+            candidates.append(event)
+        }
         if let event = model.selectedIntelligenceEvent, !candidates.contains(where: { $0.id == event.id }) {
             candidates.append(event)
         }
@@ -5270,11 +5273,6 @@ struct WorldMapWorkspace: View {
                     transportEntities: [], resetToken: 0, onSelectCountry: selectCountry,
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
                     immersive: true)
-                    .overlay(alignment: .bottomLeading) {
-                        OverviewMapImageStrip(events: model.intelligenceOverview?.visual_events ?? []) { event in
-                            model.selectIntelligenceEvent(event); revealContext()
-                        }.padding(.bottom, 70)
-                    }
                     // Fit the geography to the unobstructed area. Opening context
                     // leaves this map instance (and its camera) mounted.
                     .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
@@ -5411,39 +5409,6 @@ struct WorldMapWorkspace: View {
         revealContext()
     }
     private func countryName(_ code: String) -> String { Locale.current.localizedString(forRegionCode: code) ?? code }
-}
-
-private struct OverviewMapImageStrip: View {
-    let events: [IntelligenceEvent]
-    let onSelect: (IntelligenceEvent) -> Void
-    private var images: [IntelligenceEvent] { Array(events.filter { $0.imagery != nil }.prefix(4)) }
-    var body: some View {
-        if !images.isEmpty {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(images) { event in
-                        if let image = event.imagery {
-                            Button { onSelect(event) } label: {
-                                AuthenticatedEarthImage(path: image.preview_url, compact: true)
-                                    .frame(width: 100, height: 76).clipped()
-                                    .overlay(alignment: .bottom) {
-                                        Text(label(for: event)).font(.system(size: 9, weight: .medium))
-                                            .foregroundStyle(.white).frame(maxWidth: .infinity)
-                                            .padding(.vertical, 3).background(.black.opacity(0.8))
-                                    }.clipShape(RoundedRectangle(cornerRadius: 10))
-                            }.buttonStyle(.plain).accessibilityLabel("Open image context: \(event.translated_title ?? event.title)")
-                        }
-                    }
-                }.padding(.horizontal, 10)
-            }.accessibilityLabel("Images on the map")
-        }
-    }
-    private func label(for event: IntelligenceEvent) -> String {
-        let flag = event.primary_country_iso2.map { code in
-            String(String.UnicodeScalarView(code.uppercased().unicodeScalars.compactMap { UnicodeScalar(127397 + $0.value) }))
-        } ?? ""
-        return "\(flag) \(event.imagery?.source_kind == "publisher" ? "News photo" : "Satellite")"
-    }
 }
 
 private struct NativeSignalMap: View {
@@ -5928,6 +5893,17 @@ private struct InteractiveCountryBubbleMap: View {
                 if group.eventIDs.count > 1 { Text("\(group.eventIDs.count)").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: "#102535")) }
             }.frame(width: 44, height: 44).contentShape(Circle())
         }.buttonStyle(.plain)
+                .overlay(alignment: .bottom) {
+                    if group.eventIDs.count == 1, let event = events.first(where: { $0.id == group.id }), let image = event.imagery {
+                        Button { onSelectEvent(event) } label: {
+                            VStack(spacing: 2) {
+                                AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width: 64, height: 42).clipped().cornerRadius(5)
+                                Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.system(size: 8, weight: .semibold)).lineLimit(1)
+                            }.frame(width: 80).padding(3).background(Color(hex: "#102535"), in: RoundedRectangle(cornerRadius: 7))
+                        }.buttonStyle(.plain).offset(y: -36)
+                        .accessibilityLabel("Image at \(event.location_name ?? "event location"), updated \(event.last_activity_time.formatted()): \(event.title)")
+                    }
+                }
         .accessibilityLabel(group.eventIDs.count > 1 ? "\(group.eventIDs.count) nearby developments\(group.hasImagery ? ", images available" : "")" : events.first(where: { $0.id == group.id })?.title ?? "Development")
         .accessibilityHint(group.eventIDs.count > 1 ? "Open list of nearby developments" : "Open event context")
     }

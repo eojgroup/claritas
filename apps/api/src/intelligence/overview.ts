@@ -47,6 +47,26 @@ export function buildOverviewSampleQuery(options: Required<OverviewOptions>, now
     params: [window.start, window.end, window.previous_start, options.country || null, options.topic || null] };
 }
 
+export type OverviewSignalVisual = {
+  kind: "transport" | "weather"; observed_at: string; current?: number; baseline?: number;
+  temp_c?: number; precipitation_mm?: number; wind_speed?: number; label: string;
+};
+const signalVisualSql = (alias: string) => `(SELECT jsonb_strip_nulls(jsonb_build_object(
+    'kind',CASE WHEN visual.domain='transport' THEN 'transport' ELSE 'weather' END,
+    'observed_at',visual.observed_at,
+    'current',CASE WHEN visual.domain='transport' THEN visual.metadata->'current' END,
+    'baseline',CASE WHEN visual.domain='transport' THEN visual.metadata->'baseline' END,
+    'temp_c',CASE WHEN visual.domain='weather' THEN visual.metadata->'temp_c' END,
+    'precipitation_mm',CASE WHEN visual.domain='weather' THEN visual.metadata->'precipitation_mm' END,
+    'wind_speed',CASE WHEN visual.domain='weather' THEN visual.metadata->'wind_speed' END,
+    'label',CASE WHEN visual.domain='transport' THEN 'Observed movements · same completed UTC hours' ELSE 'Country weather reference · model conditions' END))
+  FROM intelligence_event_evidence visual WHERE visual.event_id=${alias}.id AND visual.observed_at IS NOT NULL
+    AND visual.observed_at BETWEEN ${alias}.last_activity_time-interval '24 hours' AND ${alias}.last_activity_time+interval '24 hours'
+    AND ((visual.domain='transport' AND visual.evidence_type='rolling_baseline_anomaly'
+      AND jsonb_typeof(visual.metadata->'current')='number' AND jsonb_typeof(visual.metadata->'baseline')='number')
+      OR (visual.domain='weather' AND visual.evidence_type='nearby_model_conditions'
+        AND jsonb_typeof(visual.metadata->'temp_c')='number'))
+  ORDER BY visual.observed_at DESC,visual.id LIMIT 1)`;
 export type OverviewSourceRef = Partial<HeadlineTranslationPresentation> & { label: string; url: string; domain: string; item_id?: string | null };
 export type OverviewImageryRef = { preview_url: string; captured_at: string | null; attribution: string; source_kind?: string };
 export type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
@@ -57,11 +77,12 @@ export type HydratedOverviewRow = Partial<HeadlineTranslationPresentation> & {
   location_name: string | null; location_type: string | null; latitude: number | null; longitude: number | null;
   monitoring_tier: number | null; evidence_count: number; signal_domains: string[];
   earth_observation_available: boolean; origin_domain: string;
+  signal_visual?: OverviewSignalVisual | null;
   source_refs: OverviewSourceRef[]; imagery: OverviewImageryRef | null;
 };
 
 export function buildOverviewEventQuery(ids: string[]) {
-  return { sql: `SELECT event.id,event.event_type,event.title,left(event.summary,500) AS summary,event.status,event.severity,event.confidence,
+  return { sql: `SELECT ${signalVisualSql("event")} AS signal_visual,event.id,event.event_type,event.title,left(event.summary,500) AS summary,event.status,event.severity,event.confidence,
       event.start_time,event.last_activity_time,event.primary_location_id,event.primary_country_iso2,
       event.source_diversity,event.domain_count,event.relevance_score,event.urgency_score,event.materiality_score,
       ${intelligenceEventExpiresAtSql("event")} AS expires_at,
@@ -144,6 +165,10 @@ export function buildOverviewProjectionQuery(now: Date, cursor?: { time: string;
           OR EXISTS(SELECT 1 FROM social_signal retained WHERE retained.id=${canonicalSocialSignalBigintSql("projection")} AND retained.expires_at>now()))
         AND coverage.evidence_count>0) AS displayable,
       coverage.evidence_count,coverage.signal_domains,coverage.source_refs,
+      ${signalVisualSql("projection")} AS signal_visual,
+      COALESCE((SELECT max(assessment.score)/100.0 FROM intelligence_event_evidence report
+        JOIN news_item_assessment assessment ON assessment.item_id=${sourceRecordBigintSql("report", "item")}
+        WHERE report.event_id=projection.id AND report.domain='news'),0) AS news_priority,
       event.title,left(event.summary,500) AS summary,event.confidence,event.start_time,
       ${intelligenceEventExpiresAtSql("event")} AS expires_at,
       location.location_type,location.monitoring_tier,
@@ -179,10 +204,12 @@ const safeSourceRefs = (refs: OverviewSourceRef[]) => (Array.isArray(refs) ? ref
   try { const url = new URL(ref.url); return ["https:", "http:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; }
 }).map((ref) => ({ ...ref, label: ref.label.slice(0, 180) }));
 
-export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRows: HydratedOverviewRow[], options: Required<OverviewOptions>, now: Date) {
+export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRows: HydratedOverviewRow[], options: Required<OverviewOptions>, now: Date, rankedIds?: string[]) {
   const { current, ...analytics } = buildOverviewAnalytics(rawRows, options, now);
   const byId = new Map(eventRows.map((row) => [row.id, row]));
-  const events = current.slice(0, OVERVIEW_EVENT_LIMIT).flatMap((sample) => {
+  const samples = new Map(current.map((sample) => [sample.id, sample]));
+  const ordered = rankedIds ? rankedIds.flatMap((id) => samples.get(id) ?? []) : current;
+  const events = ordered.slice(0, OVERVIEW_EVENT_LIMIT).flatMap((sample) => {
     const row = byId.get(sample.id);
     if (!row) return [];
     const { source_refs: _sourceRefs, ...event } = row;
@@ -199,6 +226,7 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
     return { ...headlineTranslationFields(event), event_id: event.id, occurred_at: event.last_activity_time, title: event.title, topic: topic.key, topic_label: topic.label,
       location_name: event.location_name, country_iso2: event.primary_country_iso2, severity: event.severity,
       priority_score: Math.round(event.priority_score * 100), priority_reasons: event.priority_reasons,
+      signal_visual: row.signal_visual ?? null,
       source_refs: safeSourceRefs(row.source_refs), imagery: row.imagery ? { ...row.imagery, captured_at: row.imagery.captured_at ? iso(row.imagery.captured_at) : null } : null };
   });
   const map_events: Omit<HydratedOverviewRow, "source_refs">[] = events.filter((event) => event.latitude != null && event.longitude != null && event.location_type !== 'country');
