@@ -54,6 +54,7 @@ export type WorldMapPoint = {
   label?: string;
   severity?: "low" | "medium" | "high" | "critical";
   hasImagery?: boolean;
+  imageUrl?: string;
   selected?: boolean;
 };
 
@@ -1207,9 +1208,14 @@ export default memo(function WorldMapBubbles({
                   stroke={isDark ? "#fff7ed" : "#ffffff"}
                   strokeWidth={1.4 / view.scale}
                 />
+                {eventPoint.imageUrl && eventPoints.filter((point) => point.imageUrl).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
+                  <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
+                  <rect x={-23 / view.scale} y={-51 / view.scale} width={46 / view.scale} height={34 / view.scale} rx={4 / view.scale} fill={color} />
+                  <image href={eventPoint.imageUrl} x={-21 / view.scale} y={-49 / view.scale} width={42 / view.scale} height={30 / view.scale} preserveAspectRatio="xMidYMid slice" />
+                </g>}
                 {showPointLabel && (
                   <text
-                    y={-(radius + 6 / view.scale)}
+                    y={eventPoint.imageUrl ? -55 / view.scale : -(radius + 6 / view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
                     stroke={isDark ? "#07121a" : "#eef2f3"}
@@ -1289,7 +1295,7 @@ export default memo(function WorldMapBubbles({
         >
           <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
             {hoveredPoint.point.severity ?? "low"} event
-            {hoveredPoint.point.hasImagery ? " · satellite available" : " · reported location"}
+            {hoveredPoint.point.hasImagery ? " · image available" : " · reported location"}
           </span>
           <strong className="mt-1 line-clamp-2 block text-xs leading-5 text-[color:var(--shell-ink)]">
             {hoveredPoint.point.title}

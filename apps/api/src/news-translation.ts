@@ -458,24 +458,29 @@ export function buildNewsTranslationCandidateQuery(
     AND COALESCE(i.event_time, i.created_at) >= now() - interval '48 hours'
     AND COALESCE(i.event_time, i.created_at) <= now() + interval '5 minutes'`;
   if (ids.length > 0) params.push(ids);
-  return { sql: `WITH priority_heads AS MATERIALIZED (
+  return { sql: `WITH visible_events AS MATERIALIZED (
+       SELECT DISTINCT visible->>'event_id' AS id FROM intelligence_overview_snapshot saved,
+         jsonb_array_elements(saved.payload->'timeline') visible
+     ), priority_heads AS MATERIALIZED (
        SELECT DISTINCT ON (recent_heads.canonical_key) recent_heads.canonical_key,canonical.title
        FROM (SELECT event.id,event.metadata->>'canonical_evidence_key' AS canonical_key,event.last_activity_time
-         FROM intelligence_event_feed event
+         FROM intelligence_event_feed event LEFT JOIN visible_events viewed ON viewed.id=event.id::text
          WHERE event.status IN ('emerging','active','monitoring')
            AND event.last_activity_time >= now()-interval '48 hours'
            AND ${intelligenceEventExpiresAtSql("event")} > now()
            AND event.metadata->>'canonical_evidence_key' LIKE 'news:item:%'
-         ORDER BY event.last_activity_time DESC,event.id LIMIT 200) recent_heads
+         ORDER BY (viewed.id IS NOT NULL) DESC,
+             event.last_activity_time DESC,event.id LIMIT 200) recent_heads
        JOIN intelligence_event canonical ON canonical.id=recent_heads.id
        ORDER BY recent_heads.canonical_key,recent_heads.last_activity_time DESC
      ), pending AS (SELECT i.id, i.title, i.summary, COALESCE(NULLIF(lower(i.language_code), ''), 'und') AS language_code,
        COALESCE(i.event_time, i.created_at) AS news_time,
-       CASE WHEN priority.canonical_key IS NULL THEN 1 ELSE 0 END AS attention_priority,
-       row_number() OVER (PARTITION BY CASE WHEN priority.canonical_key IS NULL THEN 1 ELSE 0 END,
+       CASE WHEN priority.canonical_key IS NOT NULL THEN 0 WHEN assessment.score>=60 THEN 1 ELSE 2 END AS attention_priority,
+       row_number() OVER (PARTITION BY CASE WHEN priority.canonical_key IS NOT NULL THEN 0 WHEN assessment.score>=60 THEN 1 ELSE 2 END,
          COALESCE(NULLIF(lower(i.language_code), ''), 'und')
-         ORDER BY COALESCE(i.event_time, i.created_at) DESC, i.id DESC) AS language_position
+         ORDER BY COALESCE(assessment.score,0) DESC, COALESCE(i.event_time, i.created_at) DESC, i.id DESC) AS language_position
      FROM item i
+     LEFT JOIN news_item_assessment assessment ON assessment.item_id=i.id
      LEFT JOIN priority_heads priority ON priority.canonical_key='news:item:'||i.id::text
        AND btrim(priority.title)=btrim(i.title)
      LEFT JOIN item_translation translation
@@ -503,10 +508,45 @@ export function buildNewsTranslationCandidateQuery(
      LIMIT $2`, params };
 }
 
+/** Exact headline reuse is local work and remains available when free quota runs out. */
+export async function reuseCachedNewsTranslationHeadlines(targetLanguage: string): Promise<number> {
+  const { rows } = await query<{ count: number }>(`WITH recent AS MATERIALIZED (
+      SELECT id,title,summary,lower(COALESCE(language_code,'und')) AS source_language FROM item i WHERE kind='news_article' AND title IS NOT NULL
+        AND COALESCE(event_time,created_at)>=now()-interval '48 hours'
+        AND COALESCE(payload->>'quality_status','accepted')='accepted'
+        AND NOT EXISTS(SELECT 1 FROM item_translation existing WHERE existing.item_id=i.id
+          AND existing.target_language_code=$1 AND existing.source_title_hash=md5(i.title)
+          AND existing.source_summary_hash IS NOT DISTINCT FROM md5(i.summary))
+      ORDER BY id DESC LIMIT 1000
+    ), cached AS MATERIALIZED (
+      SELECT DISTINCT ON(translation.source_title_hash,lower(COALESCE(original.language_code,'und')))
+        translation.*,lower(COALESCE(original.language_code,'und')) AS source_language
+      FROM item_translation translation JOIN item original ON original.id=translation.item_id
+      WHERE translation.target_language_code=$1
+      ORDER BY translation.source_title_hash,lower(COALESCE(original.language_code,'und')),translation.title_generated_at DESC,translation.item_id
+    ), reused AS (
+      INSERT INTO item_translation(item_id,target_language_code,translated_title,generated_summary,summary_status,
+        source_title_hash,source_summary_hash,provider,model,generation_metadata,title_generated_at,summary_generated_at)
+      SELECT recent.id,$1,cached.translated_title,NULL,'not_requested',md5(recent.title),md5(recent.summary),
+        cached.provider,cached.model,jsonb_build_object('reused_from_item_id',cached.item_id,'content_scope','headline_only',
+        'source_content_preserved',true),cached.title_generated_at,NULL
+      FROM recent JOIN cached ON cached.source_title_hash=md5(recent.title) AND cached.source_language=recent.source_language
+      ON CONFLICT(item_id,target_language_code) DO UPDATE SET translated_title=EXCLUDED.translated_title,
+        generated_summary=NULL,summary_status='not_requested',source_title_hash=EXCLUDED.source_title_hash,
+        source_summary_hash=EXCLUDED.source_summary_hash,provider=EXCLUDED.provider,model=EXCLUDED.model,
+        generation_metadata=EXCLUDED.generation_metadata,title_generated_at=EXCLUDED.title_generated_at,summary_generated_at=NULL
+      WHERE item_translation.source_title_hash<>EXCLUDED.source_title_hash
+        OR item_translation.source_summary_hash IS DISTINCT FROM EXCLUDED.source_summary_hash
+      RETURNING item_id
+    ) SELECT count(*)::int AS count FROM reused`, [targetLanguage]);
+  return rows[0]?.count ?? 0;
+}
+
 async function loadPendingCandidates(targetLanguage: string, limit: number, itemIds?: number[]): Promise<NewsTranslationCandidate[]> {
   const statement = buildNewsTranslationCandidateQuery(targetLanguage, limit, itemIds);
   const { rows } = await query<NewsTranslationCandidate>(statement.sql, statement.params);
-  return rows;
+  const seen = new Set<string>();
+  return rows.filter((row) => { const hash = md5(row.title); if (seen.has(hash!)) return false; seen.add(hash!); return true; });
 }
 
 /** Controlled categories only: provider payloads can echo source text or keys. */
@@ -1045,6 +1085,10 @@ async function runPendingNewsHeadlineTranslationsInternal(options: {
     };
   }
   const limit = Math.min(Math.max(options.limit ?? intFromEnv("NEWS_TRANSLATION_BATCH_SIZE", 100, 1, 100), 1), 100);
+  if (!options.llmClient) {
+    const reused = await reuseCachedNewsTranslationHeadlines(targetLanguage);
+    if (reused) console.info(JSON.stringify({ event: "news_translation_cache_reused", target_language: targetLanguage, translated: reused }));
+  }
   const candidates = await loadPendingCandidates(targetLanguage, limit);
   if (candidates.length === 0) {
     return {

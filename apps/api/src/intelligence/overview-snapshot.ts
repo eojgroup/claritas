@@ -25,7 +25,7 @@ const WINDOWS = [24, 72, 168] as const;
 const PRIORITIES = ["high", "all"] as const;
 const socialIdText = "split_part(sample->'metadata'->>'canonical_evidence_key',':',3)";
 const prioritySql = `round((LEAST(priority_cap,priority_base+0.1*GREATEST(0,1-GREATEST(0,extract(epoch FROM ($2::timestamptz-last_activity_time)))/259200))*100)::numeric)::int`;
-const highSql = `(severity IN ('high','critical') OR ${prioritySql}>=70)`;
+const highSql = `(severity IN ('high','critical') OR COALESCE((sample->>'news_priority')::numeric,0)>=0.6 OR ${prioritySql}>=70)`;
 const scopeSql = `generation_id=$1::uuid AND last_activity_time>=$3::timestamptz AND last_activity_time<=$2::timestamptz
   AND ($4::text IS NULL OR country_iso2=$4) AND ($5::text IS NULL OR topic=$5) AND ($6::text='all' OR ${highSql})`;
 const scopeParams = (state: State, options: Required<OverviewOptions>) => {
@@ -79,8 +79,17 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const statement = buildSavedOverviewAggregateQuery(state, options);
   const aggregate = (await read<{ aggregate: Aggregate }>(statement.sql, statement.params)).rows[0].aggregate;
   const params = scopeParams(state, options);
-  const { rows: cards } = await read<SavedCard>(`SELECT sample,event FROM intelligence_overview_projection
-    WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz ORDER BY last_activity_time DESC,id LIMIT ${OVERVIEW_EVENT_LIMIT}`, params.slice(0, 7));
+  const { rows: cards } = await read<SavedCard>(`WITH candidates AS (
+      SELECT sample,event,id,last_activity_time,topic,${prioritySql} AS attention,
+        row_number() OVER (PARTITION BY CASE WHEN topic='transport' THEN concat('transport:',event->>'title',':',COALESCE(location_key,''))
+          ELSE COALESCE(NULLIF(lower(regexp_replace(event->>'title','[^[:alnum:]]','','g')),''),id::text) END
+          ORDER BY last_activity_time DESC,id) AS duplicate_rank
+      FROM intelligence_overview_projection WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz
+    ), diverse AS (
+      SELECT *,row_number() OVER (PARTITION BY COALESCE(sample->'metadata'->>'origin_domain','news'),topic
+        ORDER BY attention DESC,last_activity_time DESC,id) AS family_rank
+      FROM candidates WHERE duplicate_rank=1
+    ) SELECT sample,event FROM diverse ORDER BY (family_rank>2),attention DESC,last_activity_time DESC,id LIMIT ${OVERVIEW_EVENT_LIMIT}`, params.slice(0, 7));
   // Geography must come from the full selected window, not the latest cards:
   // a burst of unlocated reporting must not erase every known map position.
   const { rows: mapped } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
@@ -93,7 +102,7 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     ORDER BY last_activity_time DESC,id LIMIT 8`, params.slice(0, 7));
   const now = new Date(state.generated_at);
   const samples = cards.map(({ sample }) => ({ ...sample, period: "current" as const }));
-  const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now);
+  const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now, cards.map(({ event }) => event.id));
   const change = (current: number, previous: number) => ({ change: current - previous, change_percent: previous ? Math.round((current - previous) / previous * 100) : null,
     direction: (!current && !previous ? "quiet" : !previous ? "new" : current > previous ? "rising" : current < previous ? "falling" : "steady") as "quiet" | "new" | "rising" | "falling" | "steady" });
   const decorate = (row: Record<string, any>) => ({ ...row, event_ids: row.event_ids ?? [], ...change(row.event_count, row.previous_event_count) });
@@ -106,7 +115,7 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations,
     countries: aggregate.countries, map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
     visual_events: visual.map(({ event: { source_refs: _refs, ...event } }) => event), buckets,
-    coverage: { ...base.coverage, sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),
+    coverage: { ...base.coverage, notice: "Key developments balance importance, recency and source/topic variety. Repeated updates are grouped in the list; chart totals cover every eligible saved investigation.", sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),
       sampled_events: aggregate.summary.event_count + aggregate.summary.previous_event_count } };
 }
 const overviewTopicLabel = (key: string) => OVERVIEW_TOPICS.find((topic) => topic.key === key)?.label ?? key;
@@ -168,7 +177,7 @@ export async function readIntelligenceOverviewSnapshot(options: Required<Overvie
 
 const projectionRecords = (rows: ProjectionRow[], generation: string) => rows.filter((row) => row.displayable).map((row) => {
   const sample: OverviewSample = { id: row.id, event_type: row.event_type, status: row.status, severity: row.severity,
-    relevance_score: Number(row.relevance_score), urgency_score: Number(row.urgency_score), materiality_score: Number(row.materiality_score),
+    news_category: row.news_category, news_priority: Number(row.news_priority ?? 0), relevance_score: Number(row.relevance_score), urgency_score: Number(row.urgency_score), materiality_score: Number(row.materiality_score),
     source_diversity: row.source_diversity, domain_count: row.domain_count, last_activity_time: row.last_activity_time,
     primary_location_id: row.primary_location_id, primary_country_iso2: row.primary_country_iso2, location_name: row.location_name,
     country_name: row.country_name, metadata: row.metadata, period: "current", displayable: true };
@@ -177,9 +186,9 @@ const projectionRecords = (rows: ProjectionRow[], generation: string) => rows.fi
   // Do not duplicate feed metadata and cursor internals inside every card.
   const { metadata: _metadata, period: _period, displayable: _displayable, country_name: _country, ...card } = event as HydratedOverviewRow & OverviewSample;
   return { generation_id: generation, id: row.id, last_activity_time: row.last_activity_time, country_iso2: row.primary_country_iso2,
-    topic: overviewTopic(row.event_type).key, location_key: row.primary_location_id ? `location:${row.primary_location_id}` : row.primary_country_iso2 ? `country:${row.primary_country_iso2}` : null,
+    topic: overviewTopic(row.event_type, row.news_category).key, location_key: row.primary_location_id ? `location:${row.primary_location_id}` : row.primary_country_iso2 ? `country:${row.primary_country_iso2}` : null,
     location_name: row.location_name || row.country_name || row.primary_country_iso2, severity: row.severity,
-    priority_base: .55 * Number(row.relevance_score) + .2 * Number(row.urgency_score) + .15 * Number(row.materiality_score),
+    priority_base: .55 * Math.max(Number(row.relevance_score), Number(row.news_priority ?? 0)) + .2 * Number(row.urgency_score) + .15 * Number(row.materiality_score),
     priority_cap: ["social", "podcast"].includes(origin) && !Number(row.source_diversity) ? .6 : 1,
     sample, event: card };
 });
@@ -216,7 +225,7 @@ export async function publishOverviewSnapshots(state: State, read: OverviewQuery
       const enriched = overview.events.flatMap((event) => enrichedById.get(event.id) ?? []);
       const samples = (await read<{ sample: OverviewSample }>(`SELECT sample FROM intelligence_overview_projection WHERE generation_id=$1 AND id=ANY($2::uuid[])`,
         [state.generation_id, overview.events.map((event) => event.id)])).rows.map(({ sample }) => ({ ...sample, period: "current" as const }));
-      const presentation = assembleIntelligenceOverview(samples, enriched, options, new Date(state.generated_at));
+      const presentation = assembleIntelligenceOverview(samples, enriched, options, new Date(state.generated_at), overview.events.map((event) => event.id));
       overview = { ...overview, events: presentation.events, timeline: presentation.timeline };
     }
     await read(`INSERT INTO intelligence_overview_snapshot(hours,priority,generation_id,generated_at,payload) VALUES($1,$2,$3,$4,$5::jsonb)

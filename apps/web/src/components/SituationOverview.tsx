@@ -1,3 +1,4 @@
+import DevelopmentVisual from "./DevelopmentVisual";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowUpRight, MapPin, RefreshCw, SlidersHorizontal } from "lucide-react";
 import type { IntelligenceOverview, OverviewTopic } from "../lib/api";
@@ -91,13 +92,16 @@ export default function SituationOverview({ variant = "all", compact = false, fi
       {data.snapshot?.status === "stale" && <p className="situation-snapshot-state">Showing the latest available overview. A fresh update is being prepared.</p>}
       {data.snapshot?.status === "warming" && <p role="status" className="situation-snapshot-state">Preparing the first overview. It will appear here automatically.</p>}
       </>}
+      {showSummary && data.topics.some((entry) => entry.key === "markets") && <button type="button" className="situation-market-pulse" onClick={() => { resetTimeline(); onTopicChange(topic === "markets" ? null : "markets"); }} aria-pressed={topic === "markets"}>
+        Markets & economy <strong>{data.topics.find((entry) => entry.key === "markets")!.event_count.toLocaleString()} developments</strong><ArrowUpRight size={14} />
+      </button>}
       {showHistory && data.buckets.length > 0 && <section className="situation-activity-chart" aria-label="Activity over time"><div className="situation-timeline">
         <div className="situation-timeline-heading"><h3>Activity over time</h3><span><i />This period {data.coverage.comparison_available && <><i />Previous period</>}{priority === "all" && <><i className="situation-legend-high" />High priority</>}</span></div>
         <div className="situation-bars" role="group" aria-label="Development activity over the full period">{data.buckets.map((item) => <div key={item.start} role="img" aria-label={`${timeLabel(item.start)} to ${timeLabel(item.end)}: ${item.event_count} updates${data.coverage.comparison_available ? `; previous period ${item.previous_event_count}` : "; comparison unavailable"}; ${item.high_priority_count} high priority`}><span className="situation-bar-track">{data.coverage.comparison_available && <span className="situation-bar-previous" style={{ height: `${item.previous_event_count / maximum * 100}%` }} />}<span className="situation-bar-current" style={{ height: `${item.event_count / maximum * 100}%` }} />{priority === "all" && <span className="situation-bar-high" style={{ height: `${Math.min(item.event_count, item.high_priority_count) / maximum * 100}%` }} />}</span></div>)}</div>
         <div className="situation-timeline-ends"><time dateTime={data.window.start}>{timeLabel(data.window.start)}</time><span>Full selected period</span><time dateTime={data.window.end}>{timeLabel(data.window.end)}</time></div>
       </div></section>}
       {showDevelopments && <>
-      <div className="situation-activity-heading"><div><h3>Latest developments</h3><p>Select a development to see its sources and context.</p></div></div>
+      <div className="situation-activity-heading"><div><h3>Key developments</h3><p>Important updates across topics. Open a development for its evidence.</p></div></div>
       <ol className="situation-activity">{visible.map((item) => {
         const event = data.events.find((event) => event.id === item.event_id);
         const archived = event && isHistoricalEvent(event);
@@ -112,9 +116,10 @@ export default function SituationOverview({ variant = "all", compact = false, fi
             {description && description !== item.title && <p className="situation-event-summary">{description.length > 180 ? `${description.slice(0, 177)}…` : description}</p>}
             {(item.location_name || item.country_iso2) && <p className="situation-event-place"><MapPin size={13} /><CountryFlag country={item.country_iso2} />{item.location_name || item.country_iso2}</p>}
             {item.source_refs.length > 0 && <details><summary>{item.source_refs.length} source{item.source_refs.length === 1 ? "" : "s"}</summary><div className="situation-event-sources">{item.source_refs.slice(0, 3).map((source, index) => <div key={`${source.domain}-${index}`}>{source.url && /^https?:\/\//i.test(source.url) ? <a dir="auto" href={source.url} target="_blank" rel="noreferrer">{displayHeadline(source, source.label)}</a> : <span dir="auto">{displayHeadline(source, source.label)}</span>}<HeadlineTranslation value={source} /></div>)}</div></details>}
+            {(item.signal_visual ?? event?.signal_visual) && <DevelopmentVisual visual={(item.signal_visual ?? event?.signal_visual)!} />}
             {item.priority_reasons.length > 0 && <details><summary>Why this needs attention</summary><ul>{item.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details>}
           </div>
-          {item.imagery && <button type="button" className="situation-event-image" onClick={() => onSelect(item.event_id)} aria-label={`Inspect imagery for ${item.title}`}><SatelliteImage sources={[item.imagery.preview_url]} alt={`Visual context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Captured ${new Date(item.imagery.captured_at).toLocaleDateString()}` : "Publisher context"}<small>{item.imagery.attribution}</small></span></button>}
+          {item.imagery && <button type="button" className="situation-event-image" onClick={() => onSelect(item.event_id)} aria-label={`Inspect imagery for ${item.title}`}><SatelliteImage compact sources={[item.imagery.preview_url]} alt={`Visual context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Satellite · ${timeLabel(item.imagery.captured_at)}` : `Publisher photo · report updated ${timeLabel(item.occurred_at)}`}<small>{item.imagery.attribution}</small></span></button>}
         </li>;
       })}</ol>
       {!timeline.length && <p className="situation-message">{data.snapshot?.status === "warming" ? "Preparing developments…" : priority === "high" ? "No high-priority developments in this selection. Choose All developments to broaden the view." : "No developments in this selection."}</p>}

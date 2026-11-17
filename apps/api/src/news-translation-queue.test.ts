@@ -261,7 +261,7 @@ test("omitted attempted outputs enter a source-aware durable retry while success
     if (sql.includes("INSERT INTO background_worker_lease")) return [{ acquired: true }];
     if (sql.includes("SELECT id,title,summary,language_code FROM pending")) {
       assert.match(sql, /event\.status IN \('emerging','active','monitoring'\)/);
-      assert.match(sql, /ORDER BY event\.last_activity_time DESC,event\.id LIMIT 200/);
+      assert.match(sql, /event\.last_activity_time DESC,event\.id LIMIT 200/);
       assert.match(sql, /priority\.canonical_key='news:item:'\|\|i\.id::text/);
       assert.match(sql, /btrim\(priority\.title\)=btrim\(i\.title\)/);
       assert.match(sql, /ORDER BY attention_priority ASC, language_position ASC, news_time DESC/);
@@ -288,4 +288,18 @@ test("omitted attempted outputs enter a source-aware durable retry while success
     assert.match(String(retried[0][2]), /^[0-9a-f]{32}$/);
     assert.equal(paced, true);
   }));
+});
+
+test("exact cached headlines are reusable without reserving provider requests or reusing article summaries", async () => {
+  const { reuseCachedNewsTranslationHeadlines } = await subject;
+  const count = await withMockQueries((sql, values) => {
+    assert.match(sql, /cached\.source_title_hash=md5\(recent\.title\)/);
+    assert.match(sql, /cached\.translated_title,NULL,'not_requested'/);
+    assert.match(sql, /cached\.title_generated_at,NULL/);
+    assert.match(sql, /WHERE item_translation\.source_title_hash<>EXCLUDED\.source_title_hash/);
+    assert.doesNotMatch(sql, /news_translation_usage/);
+    assert.equal(values[0], "en");
+    return [{ count: 12 }];
+  }, () => reuseCachedNewsTranslationHeadlines("en"));
+  assert.equal(count, 12);
 });

@@ -417,3 +417,20 @@ test("structured topic materiality ignores generic institutional metadata", () =
     document_type: "press_release",
   }), { score: 0, codes: [], signals: [] });
 });
+
+test("major service outages reach high importance without promoting financial outlook commentary", () => {
+  const assessment = assessNewsItem({ itemId: 99, title: "Widespread Microsoft 365 outage disrupts Outlook worldwide",
+    eventTime: "2026-08-21T11:00:00Z", payload: { quality_status: "accepted", publication_time_verified: true } }, NOW);
+  assert.ok(assessment.score >= 60);
+  assert.equal(assessment.tier, "high");
+  const routine = assessNewsItem({ itemId: 100, title: "Gold price outlook for next week", eventTime: "2026-08-21T11:00:00Z",
+    payload: { publication_time_verified: true } }, NOW);
+  assert.ok(routine.score < assessment.score);
+});
+
+test("service importance works before French publisher reporting is translated", () => {
+  const assessment = assessNewsItem({ itemId: 101, title: "Une panne mondiale majeure touche la messagerie Outlook de Microsoft",
+    eventTime: "2026-08-21T11:00:00Z", payload: { quality_status: "accepted", time_basis: "provider_first_seen" } }, NOW);
+  assert.ok(assessment.score >= 60);
+  assert.equal(assessment.primaryCategory, "technology");
+});

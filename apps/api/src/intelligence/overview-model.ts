@@ -13,6 +13,8 @@ export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?:
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type OverviewSample = {
   id: string; event_type: string; status: string; severity: string;
+  news_priority?: number;
+  news_category?: string;
   relevance_score: number; urgency_score: number; materiality_score: number;
   source_diversity: number; domain_count: number;
   last_activity_time: string | Date; primary_location_id: string | null; primary_country_iso2: string | null;
@@ -35,7 +37,8 @@ export function normalizeOverviewOptions(input: { hours?: unknown; country?: unk
   return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, priority, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
 }
 
-export function overviewTopic(eventType: string) {
+export function overviewTopic(eventType: string, newsCategory?: string) {
+  if (eventType === "reported_development" && ["markets", "economy", "companies", "energy"].includes(newsCategory ?? "")) return OVERVIEW_TOPICS[4];
   const normalized = eventType.toLowerCase();
   return OVERVIEW_TOPICS.find((topic) => topic.pattern && new RegExp(topic.pattern).test(normalized)) ?? OVERVIEW_TOPICS[6];
 }
@@ -53,18 +56,19 @@ export function overviewPriority(event: OverviewSample, now: Date) {
   const clamp = (value: number) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(1, Number(value))) : 0;
   const age = Math.max(0, now.getTime() - new Date(event.last_activity_time).getTime());
   const recency = Number.isFinite(age) ? Math.max(0, 1 - age / (72 * 3_600_000)) : 0;
-  const score = .55 * clamp(event.relevance_score) + .2 * clamp(event.urgency_score)
+  const score = .55 * Math.max(clamp(event.relevance_score), clamp(event.news_priority ?? 0)) + .2 * clamp(event.urgency_score)
     + .15 * clamp(event.materiality_score) + .1 * recency;
   const cap = ["social", "podcast"].includes(event.metadata?.origin_domain ?? "") && !Number(event.source_diversity) ? .6 : 1;
   return Math.round(Math.min(cap, score) * 100);
 }
 
 export const overviewHighPriority = (event: OverviewSample, now: Date) =>
-  ["high", "critical"].includes(event.severity) || overviewPriority(event, now) >= 70;
+  ["high", "critical"].includes(event.severity) || Number(event.news_priority ?? 0) >= .6 || overviewPriority(event, now) >= 70;
 
 export function overviewPriorityReasons(event: OverviewSample) {
   const reasons: string[] = [];
   if (["high", "critical"].includes(event.severity)) reasons.push(`${event.severity === "critical" ? "Critical" : "High"} reported severity`);
+  if (Number(event.news_priority ?? 0) >= .6) reasons.push("High-importance publisher reporting");
   if (Number(event.relevance_score) >= .65) reasons.push("High recorded relevance");
   if (Number(event.urgency_score) >= .65) reasons.push("Time-sensitive development");
   if (Number(event.source_diversity) > 1) reasons.push(`${event.source_diversity} source identities`);
@@ -93,7 +97,7 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       const belongs = row.period === "current" ? time >= end - duration && time <= end : time >= end - duration * 2 && time < end - duration;
       if (!belongs || row.displayable === false || row.status === "dismissed" || seen.has(row.id)) return false;
       if (options.country && row.primary_country_iso2 !== options.country) return false;
-      if (options.topic && overviewTopic(row.event_type).key !== options.topic) return false;
+      if (options.topic && overviewTopic(row.event_type, row.news_category).key !== options.topic) return false;
       if (options.priority === "high" && !overviewHighPriority(row, now)) return false;
       seen.add(row.id);
       return true;
@@ -109,7 +113,7 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       priority_score: currentMembers.length ? Math.max(...currentMembers.map((row) => overviewPriority(row, now))) : 0,
       event_ids: [...currentMembers].sort((a, b) => overviewPriority(b, now) - overviewPriority(a, now)).slice(0, 3).map((row) => row.id) };
   };
-  const topics = OVERVIEW_TOPICS.map((topic) => pulse(topic.key, topic.label, rows.filter((row) => overviewTopic(row.event_type).key === topic.key)))
+  const topics = OVERVIEW_TOPICS.map((topic) => pulse(topic.key, topic.label, rows.filter((row) => overviewTopic(row.event_type, row.news_category).key === topic.key)))
     .filter((topic) => topic.event_count || topic.previous_event_count)
     .sort((a, b) => b.event_count - a.event_count || b.priority_score - a.priority_score || a.key.localeCompare(b.key));
   const locationsByKey = new Map<string, OverviewSample[]>();
@@ -149,6 +153,6 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
     coverage: { sample_limit: Math.max(current.length, previous.length), full_window: true, sampled_events: rows.length, truncated: false, comparison_available: true,
       notice: "Counts cover all eligible saved investigations in the selected window. The latest-development cards are limited to 40; chart counts are not limited by the cards. Investigations are not a count of real-world incidents or articles.",
       comparison_notice: "Comparison uses each investigation's latest recorded update, not historical activity totals. Later updates can move an investigation between windows. Source coverage and ingestion delays can change the result; this is a reporting pulse, not proof of escalation.",
-      priority_notice: "Overview priority is a navigation score: 55% recorded relevance, 20% urgency, 15% materiality and 10% recency over 72 hours. Uncorroborated social/podcast leads are capped at 60. High-priority updates have high/critical severity or a score of at least 70. It is not a probability, verified impact or independent assessment." },
+      priority_notice: "Overview priority is a navigation score: 55% of the higher recorded relevance or publisher assessment, 20% urgency, 15% materiality and 10% recency over 72 hours. Uncorroborated social/podcast leads are capped at 60. High-priority updates have high/critical severity, a navigation score of at least 70, or a publisher importance assessment of at least 60/100. It is not a probability, verified impact or independent assessment." },
     current: [...current].sort((a, b) => new Date(b.last_activity_time).getTime() - new Date(a.last_activity_time).getTime() || a.id.localeCompare(b.id)) };
 }

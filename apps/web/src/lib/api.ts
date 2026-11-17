@@ -1212,7 +1212,12 @@ export type AdminIngestionProviderCapabilities = {
 
 export type IntelligenceSeverity = "low" | "medium" | "high" | "critical";
 
+export type OverviewSignalVisual = {
+  kind: "transport" | "weather"; observed_at: string; current?: number; baseline?: number;
+  temp_c?: number; precipitation_mm?: number; wind_speed?: number; label: string;
+};
 export type IntelligenceEvent = HeadlineTranslationPresentation & {
+  signal_visual?: OverviewSignalVisual | null;
   imagery?: { preview_url: string; captured_at: string | null; attribution: string; source_kind?: string } | null;
   origin_domain?: string;
   signal_domains?: string[];
@@ -2520,7 +2525,8 @@ export type IntelligenceOverview = {
     location_name: string | null; country_iso2: string | null; severity: IntelligenceSeverity;
     priority_score: number; priority_reasons: string[];
     source_refs: Array<HeadlineTranslationPresentation & { label: string; url: string | null; domain: string }>;
-    imagery: { preview_url: string; captured_at: string | null; attribution: string } | null;
+    signal_visual?: OverviewSignalVisual | null;
+    imagery: { preview_url: string; captured_at: string | null; attribution: string; source_kind?: string } | null;
   }>;
   coverage: { sample_limit: number | null; sampled_events: number; truncated: boolean; comparison_available: boolean; notice: string; comparison_notice: string; priority_notice: string };
 };
