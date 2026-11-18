@@ -22,7 +22,9 @@ concurrency:
 jobs:
   build:
     name: Compile iPhone, iPad, and Watch
-    runs-on: macos-15
+    # Keep the standard Intel pool available while ARM runner allocation is
+    # constrained. Both hosts cross-compile the same device archive.
+    runs-on: ${{ vars.APPLE_RUNNER || 'macos-15-intel' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -78,7 +80,7 @@ jobs:
     # delivery path as a push to main; compiling alone is a false green.
     if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     needs: build
-    runs-on: macos-15
+    runs-on: ${{ vars.APPLE_RUNNER || 'macos-15-intel' }}
     env:
       APP_BUNDLE_ID: com.eojgroup.claritas
       TESTFLIGHT_GROUP_NAME: Claritas Test Group
