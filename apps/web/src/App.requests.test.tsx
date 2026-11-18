@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import App from "./App";
 import { event, overviewFixture } from "./test/situationFixture";
@@ -82,6 +82,6 @@ it("loads the overview and briefing without an optional-feed request burst and s
   await waitFor(() => expect(requests).toContain("/api/intelligence/overview?hours=24&country=SE&priority=high"));
   expect(await screen.findByRole("button", { name: "Clear SE ×" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Weather" }));
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Main navigation" })).getByRole("button", { name: "Weather" }));
   await waitFor(() => expect(requests).toContain("/api/weather/country-latest"));
 });

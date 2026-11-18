@@ -56,6 +56,11 @@ it("requests the selected interval while retaining full chart context, and clear
   expect(screen.getByRole("button", { name: /: 4 updates; previous period 2/ }).getAttribute("aria-pressed")).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: "Full period ×" }));
   expect(props.onBucketChange).toHaveBeenLastCalledWith(null);
+  view.rerender(<SituationOverview {...props} bucket={0} error="Unavailable" />);
+  expect(screen.getByText("Selected interval unavailable.")).toBeTruthy();
+  expect(screen.queryByText("Loading selected interval…")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry interval" }));
+  expect(props.onRefresh).toHaveBeenCalled();
 });
 it("keeps every topic available through the same controls after selecting a category", () => {
   const view = render(<SituationOverview {...props} compact />);

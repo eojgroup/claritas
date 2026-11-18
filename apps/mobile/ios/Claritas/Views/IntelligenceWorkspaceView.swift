@@ -2291,7 +2291,7 @@ struct IntelligenceOverviewPanel: View {
                     Text("\(selection.event_count) updates · \(selection.start.formatted(date: .abbreviated, time: .shortened)) – \(selection.end.formatted(date: .omitted, time: .shortened))")
                         .font(.caption2).foregroundStyle(.secondary)
                 } else {
-                    Text(model.overviewBucket == nil ? "Tap an interval to explore the map and developments" : "Loading selected interval…")
+                    Text(model.overviewBucket == nil ? "Tap an interval to explore the map and developments" : model.intelligenceOverviewError == nil ? "Loading selected interval…" : "Selected interval unavailable")
                         .font(.caption2).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 4)
@@ -2338,7 +2338,8 @@ struct IntelligenceOverviewPanel: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Key developments").font(.subheadline.weight(.semibold))
             if overview.filters.bucket != model.overviewBucket {
-                ProgressView("Loading selected interval…").font(.caption)
+                if model.intelligenceOverviewError == nil { ProgressView("Loading selected interval…").font(.caption) }
+                else { Text("Selected interval unavailable. Retry below or return to the full period.").font(.caption).foregroundStyle(.secondary) }
             } else if overview.timeline.isEmpty {
                 Text(model.overviewPriority == "high" ? "No high priority developments here. Try All events or a wider window." : "No developments in this scope.")
                     .font(.caption).foregroundStyle(.secondary)
@@ -2371,7 +2372,8 @@ struct IntelligenceOverviewPanel: View {
                             .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                         if let disclosure = entry.headlineTranslationDisclosure { Text(disclosure).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
                         HStack(spacing: 5) {
-                            Text("\(entry.source_refs.count) sources")
+                            if !entry.source_refs.isEmpty { Text("\(entry.source_refs.count) source\(entry.source_refs.count == 1 ? "" : "s")") }
+                            else if let visual = entry.signal_visual { Text(visual.kind == "transport" ? "Transport data" : "Weather reference") }
                             if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true { Text("· Archived") }
                             Spacer(minLength: 2)
                             Image(systemName: "chevron.right")

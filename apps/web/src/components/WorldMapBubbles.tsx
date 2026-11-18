@@ -1376,8 +1376,8 @@ export default memo(function WorldMapBubbles({
               }}
             />
             <div className="mt-1 flex justify-between gap-4 text-[10px]">
-              <span>{dataValueDomain[0].toFixed(1)}{valueUnit}</span>
-              <span>{dataValueDomain[1].toFixed(1)}{valueUnit}</span>
+              <span>{dataValueDomain[0].toLocaleString(undefined, { maximumFractionDigits: 1 })}{valueUnit}</span>
+              <span>{dataValueDomain[1].toLocaleString(undefined, { maximumFractionDigits: 1 })}{valueUnit}</span>
             </div>
           </div>}
           {fillMode === "default" && <div className="mt-0.5 flex justify-between gap-4 text-[10px]">

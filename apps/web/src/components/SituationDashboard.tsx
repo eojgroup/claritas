@@ -65,6 +65,7 @@ export default function SituationDashboard(props: Props) {
   const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
+  const mappedHighlight = events.find((event) => ["critical", "high"].includes(event.severity)) ?? events[0];
   const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country} allowsSingleFingerPan
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale="log" featuredCountry={leadingCountries[0]?.country} focusOnActivity
     featuredLabel={mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
@@ -88,6 +89,7 @@ export default function SituationDashboard(props: Props) {
       <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span>
         {!intervalMatches && <p className="situation-map-narrative">{props.error ? "Interval unavailable. Showing the previous map." : "Loading the selected interval. Showing the previous map."}</p>}
         {intervalMatches && leadingCountries[0] && <p className="situation-map-narrative">Most {mapMetric === "priority" ? "high-priority " : ""}updates: {new Intl.DisplayNames(undefined, { type: "region" }).of(leadingCountries[0].country)} · {leadingCountries[0].count.toLocaleString()}{overview?.selection ? " in this interval" : " in this period"}</p>}
+        {intervalMatches && mappedHighlight && <button type="button" className="situation-map-story" onClick={() => selectEvent(mappedHighlight.id)} aria-label={`Open mapped development: ${presentEvent(mappedHighlight).headline}`}>On the map: {presentEvent(mappedHighlight).headline}</button>}
       </div>
       <div className="situation-map-actions">
         <button type="button" onClick={() => setExpandedMap(!expandedMap)} aria-label={expandedMap ? "Close expanded map" : "Expand map"}>{expandedMap ? <X size={18} /> : <Maximize2 size={18} />}</button>

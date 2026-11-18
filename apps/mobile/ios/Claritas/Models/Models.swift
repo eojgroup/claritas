@@ -3893,10 +3893,11 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
     var requestKey: String { "\(baseRequestKey)|\(bucket.map(String.init) ?? "all")" }
     var windowLabel: String { hours == 24 ? "24 hours" : hours == 72 ? "3 days" : "7 days" }
     var queryItems: [URLQueryItem] {
-        [URLQueryItem(name: "hours", value: String(hours)), URLQueryItem(name: "priority", value: priority)]
-            + (country.map { [URLQueryItem(name: "country", value: $0)] } ?? [])
-            + (topic.map { [URLQueryItem(name: "topic", value: $0)] } ?? [])
-            + (bucket.map { [URLQueryItem(name: "bucket", value: String($0))] } ?? [])
+        var items = [URLQueryItem(name: "hours", value: String(hours)), URLQueryItem(name: "priority", value: priority)]
+        if let country { items.append(URLQueryItem(name: "country", value: country)) }
+        if let topic { items.append(URLQueryItem(name: "topic", value: topic)) }
+        if let bucket { items.append(URLQueryItem(name: "bucket", value: String(bucket))) }
+        return items
     }
 }
 

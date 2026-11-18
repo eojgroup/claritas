@@ -5475,12 +5475,23 @@ private struct NativeSignalMap: View {
 private struct SignalMapInteractionKey: View {
     @EnvironmentObject private var model: AppModel
     @State private var expanded = false
+    private var mappedStory: IntelligenceEvent? {
+        model.intelligenceOverview?.map_events?.first {
+            $0.latitude != nil && $0.longitude != nil && !["country", "country_centroid", "admin", "admin1", "administrative_area"].contains($0.location_type ?? "")
+        }
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if model.intelligenceOverview?.filters.bucket == model.overviewBucket,
                let country = model.intelligenceOverview?.countries?.max(by: { $0.event_count < $1.event_count }) {
                 Text("Most updates: \(Locale.current.localizedString(forRegionCode: country.country_iso2) ?? country.country_iso2) · \(country.event_count)\(model.overviewBucket == nil ? " in this period" : " in this interval")")
                     .font(.caption2).foregroundStyle(.secondary)
+            }
+            if let event = mappedStory {
+                Button { model.selectIntelligenceEvent(event) } label: {
+                    Label("On the map: \(event.title)", systemImage: "mappin.and.ellipse").lineLimit(1)
+                        .font(.caption2).frame(minHeight: 44, alignment: .leading)
+                }.buttonStyle(.plain).accessibilityLabel("Open mapped development: \(event.title)")
             }
             DisclosureGroup(isExpanded: $expanded) {
                 Text("Warmer country colours mean more reported updates. Tap a country for its profile. Pins mark precise event locations; tap a pin to open the story. Red/orange pins have critical/high reported severity, gold medium and blue low. A number groups nearby events. A teal ring or photo indicates imagery linked to that event. Reports with only a country still contribute to country shading.")

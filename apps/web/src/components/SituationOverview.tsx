@@ -103,7 +103,8 @@ export default function SituationOverview({ variant = "all", compact = false, fi
         <div className="situation-timeline-ends"><time dateTime={data.window.start}>{timeLabel(data.window.start)}</time><span>{bucket == null ? "Select an interval to explore" : "Selected interval highlighted"}</span><time dateTime={data.window.end}>{timeLabel(data.window.end)}</time></div>
       </div></section>}
       {showHistory && bucket != null && <div className="situation-interval-selection" role="status">
-        <span>{intervalMatches && data.selection ? <><strong>{data.selection.event_count.toLocaleString()} updates</strong> · {timeLabel(data.selection.start)} – {timeLabel(data.selection.end)}</> : "Loading selected interval…"}</span>
+        <span>{intervalMatches && data.selection ? <><strong>{data.selection.event_count.toLocaleString()} updates</strong> · {timeLabel(data.selection.start)} – {timeLabel(data.selection.end)}</> : error ? "Selected interval unavailable." : "Loading selected interval…"}</span>
+        {!intervalMatches && error && <button type="button" onClick={onRefresh}>Retry interval</button>}
         <button type="button" onClick={() => onBucketChange?.(null)}>Full period ×</button>
       </div>}
       {showDevelopments && <>
@@ -114,20 +115,22 @@ export default function SituationOverview({ variant = "all", compact = false, fi
         const description = event?.summary?.split(/(?<=[.!?])\s/)[0];
         return <li key={item.event_id} className={selectedId === item.event_id ? "is-selected" : ""}>
           <div className="situation-event">
-            <div className="situation-event-tags"><span className={`event-severity-${item.severity}`}>{item.severity}</span><span>{item.topic_label}</span>{archived && <span>Archived</span>}<time dateTime={item.occurred_at}>{timeLabel(item.occurred_at)}</time></div>
-            <button type="button" className="situation-event-title" dir="auto" onClick={() => onSelect(item.event_id)} aria-pressed={selectedId === item.event_id}><span>{displayHeadline(item, item.title)}</span><ArrowUpRight size={15} /></button>
+
+            <button type="button" className="situation-event-title" dir="auto" onClick={() => onSelect(item.event_id)} aria-label={displayHeadline(item, item.title)} aria-pressed={selectedId === item.event_id}><span className="situation-event-tags"><span className={`event-severity-${item.severity}`}>{item.severity}</span><span>{item.topic_label}</span>{archived && <span>Archived</span>}<time dateTime={item.occurred_at}>{timeLabel(item.occurred_at)}</time></span><span className="situation-event-headline"><span>{displayHeadline(item, item.title)}</span><ArrowUpRight size={15} /></span></button>
             <HeadlineTranslation value={item} />
-            {description && description !== item.title && <p className="situation-event-summary" title={description}>{description.length > 180 ? `${description.slice(0, 177)}…` : description}</p>}
-            {(item.location_name || item.country_iso2) && <p className="situation-event-place"><MapPin size={13} /><CountryFlag country={item.country_iso2} />{item.location_name || item.country_iso2}</p>}
-            {(item.signal_visual ?? event?.signal_visual) && <DevelopmentVisual compact visual={(item.signal_visual ?? event?.signal_visual)!} />}
+            {!item.signal_visual && !event?.signal_visual && description && description !== item.title && <p className="situation-event-summary" title={description}>{description.length > 180 ? `${description.slice(0, 177)}…` : description}</p>}
+<div className="situation-event-meta">            {(item.location_name || item.country_iso2) && <p className="situation-event-place"><MapPin size={13} /><CountryFlag country={item.country_iso2} />{item.location_name || item.country_iso2}</p>}
+
             {(item.source_refs.length > 0 || item.priority_reasons.length > 0) && <details className="situation-event-context"><summary><span>{item.source_refs.length ? `${item.source_refs.length} source${item.source_refs.length === 1 ? "" : "s"}` : "Context"}</span>{item.priority_reasons.length > 0 && <span> · why prioritized</span>}</summary>
               {event?.signal_domains?.length ? <p>Linked signals: {event.signal_domains.join(", ")}</p> : null}
               {event?.summary && <p dir="auto">{event.summary}</p>}
               <div className="situation-event-sources">{item.source_refs.slice(0, 3).map((source, index) => <div key={`${source.domain}-${index}`}>{source.url && /^https?:\/\//i.test(source.url) ? <a dir="auto" href={source.url} target="_blank" rel="noreferrer">{displayHeadline(source, source.label)}</a> : <span dir="auto">{displayHeadline(source, source.label)}</span>}<HeadlineTranslation value={source} /></div>)}</div>
               {item.priority_reasons.length > 0 && <ul>{item.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
             </details>}
+            </div>
+            {(item.signal_visual ?? event?.signal_visual) && <DevelopmentVisual compact visual={(item.signal_visual ?? event?.signal_visual)!} />}
           </div>
-          {item.imagery && <button type="button" className="situation-event-image" onClick={() => onSelect(item.event_id)} aria-label={`Inspect imagery for ${item.title}`}><SatelliteImage compact sources={[item.imagery.preview_url]} alt={`Visual context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Satellite · ${timeLabel(item.imagery.captured_at)}` : `Publisher photo · report updated ${timeLabel(item.occurred_at)}`}<small>{item.imagery.attribution}</small></span></button>}
+          {item.imagery && <button type="button" className="situation-event-image" onClick={() => onSelect(item.event_id)} aria-label={`Inspect imagery for ${item.title}`} title={`${item.imagery.attribution} · ${item.imagery.captured_at ? `Acquired ${timeLabel(item.imagery.captured_at)}` : `Report updated ${timeLabel(item.occurred_at)}`}`}><SatelliteImage compact sources={[item.imagery.preview_url]} alt={`Visual context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Satellite · ${new Date(item.imagery.captured_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Publisher photo"}<small>{item.imagery.attribution}</small></span></button>}
         </li>;
       })}</ol>
       {!timeline.length && intervalMatches && <p className="situation-message">{data.snapshot?.status === "warming" ? "Preparing developments…" : priority === "high" ? "No high-priority developments in this selection. Choose All developments to broaden the view." : "No developments in this selection."}</p>}
