@@ -25,7 +25,7 @@ const overview: IntelligenceOverview = {
   })),
   coverage: { sample_limit: 300, sampled_events: 8, truncated: false, comparison_available: true, notice: "Counts cover sampled investigations, not all reporting.", comparison_notice: "Comparison uses latest recorded updates in adjacent periods.", priority_notice: "Attention priority is not a probability or confirmation." },
 };
-const props = { overview, loading: false, error: null, hours: 24 as const, topic: null, priority: "all" as const, onHoursChange: vi.fn(), onTopicChange: vi.fn(), onCountryChange: vi.fn(), onSelect: vi.fn(), onOpenImagery: vi.fn(), onRefresh: vi.fn() };
+const props = { overview, loading: false, error: null, hours: 24 as const, topic: null, priority: "all" as const, onBucketChange: vi.fn(), onHoursChange: vi.fn(), onTopicChange: vi.fn(), onCountryChange: vi.fn(), onSelect: vi.fn(), onOpenImagery: vi.fn(), onRefresh: vi.fn() };
 
 it("explains changes as investigation updates and opens exact evidence and imagery", () => {
   render(<SituationOverview {...props} />);
@@ -41,15 +41,39 @@ it("explains changes as investigation updates and opens exact evidence and image
   fireEvent.click(screen.getByText("Coverage and how to read this"));
   expect(screen.getByText(overview.coverage.priority_notice)).toBeTruthy();
 });
-it("shows the full activity history without implying that clicking a bar can load interval developments", () => {
-  render(<SituationOverview {...props} />);
-  expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
-  const bar = screen.getByRole("img", { name: /: 4 updates; previous period 2/ });
+it("requests the selected interval while retaining full chart context, and clears it", () => {
+  const view = render(<SituationOverview {...props} />);
+  const bar = screen.getByRole("button", { name: /: 4 updates; previous period 2/ });
   fireEvent.click(bar);
-  expect(screen.getByRole("button", { name: "Port development 0" })).toBeTruthy();
-  expect(screen.queryByText("Select an interval to explore")).toBeNull();
-  expect(screen.queryByRole("button", { name: /: 4 updates/ })).toBeNull();
+  expect(props.onBucketChange).toHaveBeenLastCalledWith(0);
+  view.rerender(<SituationOverview {...props} bucket={0} loading />);
+  expect(screen.getByText("Loading selected interval…")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Port development 0" })).toBeNull();
+  const scoped = { ...overview, filters: { ...overview.filters, bucket: 0 }, selection: { bucket: 0, ...overview.buckets[0] }, timeline: [overview.timeline[4]] };
+  view.rerender(<SituationOverview {...props} bucket={0} overview={scoped} />);
+  expect(screen.getByRole("button", { name: "Port development 4" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Port development 0" })).toBeNull();
+  expect(screen.getByRole("button", { name: /: 4 updates; previous period 2/ }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "Full period ×" }));
+  expect(props.onBucketChange).toHaveBeenLastCalledWith(null);
+  view.rerender(<SituationOverview {...props} bucket={0} error="Unavailable" />);
+  expect(screen.getByText("Selected interval unavailable.")).toBeTruthy();
+  expect(screen.queryByText("Loading selected interval…")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Retry interval" }));
+  expect(props.onRefresh).toHaveBeenCalled();
 });
+it("keeps every topic available through the same controls after selecting a category", () => {
+  const view = render(<SituationOverview {...props} compact />);
+  fireEvent.click(screen.getByRole("button", { name: "Markets & economy" }));
+  expect(props.onTopicChange).toHaveBeenLastCalledWith("markets");
+  view.rerender(<SituationOverview {...props} compact topic="transport" overview={{ ...overview, filters: { ...overview.filters, topic: "transport" } }} />);
+  for (const label of ["Security", "Disasters", "Weather", "Transport 8", "Markets & economy", "Agriculture", "Other developments", "All topics"]) {
+    expect(screen.getByRole("button", { name: label })).toBeTruthy();
+  }
+  fireEvent.click(screen.getByRole("button", { name: "Weather" }));
+  expect(props.onTopicChange).toHaveBeenLastCalledWith("weather");
+});
+
 it("keeps priority and history visible while grouping the detailed filters", () => {
   const onPriorityChange = vi.fn();
   render(<SituationOverview {...props} compact onPriorityChange={onPriorityChange} />);

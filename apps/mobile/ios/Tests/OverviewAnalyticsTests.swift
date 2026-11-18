@@ -3,6 +3,22 @@ import XCTest
 @testable import ClaritasAppleModels
 
 final class OverviewAnalyticsTests: XCTestCase {
+    func testTimeIntervalScopesHaveDistinctRequestsAndRejectOutOfWindowBuckets() throws {
+        let full = IntelligenceOverviewScope()
+        let selected = IntelligenceOverviewScope(bucket: 0)
+        XCTAssertNotEqual(full.requestKey, selected.requestKey)
+        XCTAssertEqual(full.baseRequestKey, selected.baseRequestKey)
+        XCTAssertTrue(selected.queryItems.contains(URLQueryItem(name: "bucket", value: "0")))
+        XCTAssertNil(IntelligenceOverviewScope(bucket: 12).bucket)
+        XCTAssertEqual(IntelligenceOverviewScope(hours: 168, bucket: 13).bucket, 13)
+        XCTAssertFalse(try decode(payload()).matches(scope: selected), "an unscoped response must not masquerade as the chosen interval")
+        var raw = payload()
+        raw["filters"] = ["country": NSNull(), "topic": NSNull(), "bucket": 0]
+        raw["selection"] = ["bucket": 0, "start": "2026-11-02T12:00:00Z", "end": "2026-11-02T14:00:00Z", "event_count": 33, "high_priority_count": 5]
+        let decoded = try decode(raw)
+        XCTAssertTrue(decoded.matches(scope: selected))
+        XCTAssertEqual(decoded.selection?.event_count, 33)
+    }
     func testScopeBoundsAndKeysSeparateWindowsTopicsAndLocations() {
         let scope = IntelligenceOverviewScope(hours: 72, country: " uk ", topic: "security")
         XCTAssertEqual(scope.hours, 72)

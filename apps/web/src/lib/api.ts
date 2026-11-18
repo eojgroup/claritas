@@ -2513,7 +2513,8 @@ export type IntelligenceOverview = {
   visual_events?: IntelligenceEvent[];
   generated_at: string;
   window: { hours: number; start: string; end: string; previous_start: string; previous_end: string; bucket_hours: number };
-  filters: { country: string | null; topic: OverviewTopic | null; priority?: "high" | "all" };
+  filters: { country: string | null; topic: OverviewTopic | null; priority?: "high" | "all"; bucket?: number | null };
+  selection?: { bucket: number; start: string; end: string; event_count: number; high_priority_count: number } | null;
   snapshot?: { status: "fresh" | "stale" | "warming"; generated_at: string | null; age_seconds: number | null };
   summary: { event_count: number; previous_event_count: number; change: number; change_percent: number | null; direction: OverviewDirection; high_priority_count: number; location_count: number };
   topics: Array<{ key: OverviewTopic; label: string; event_count: number; previous_event_count: number; change: number; direction: OverviewDirection; priority_score: number; event_ids: string[] }>;
@@ -2531,10 +2532,11 @@ export type IntelligenceOverview = {
   coverage: { sample_limit: number | null; sampled_events: number; truncated: boolean; comparison_available: boolean; notice: string; comparison_notice: string; priority_notice: string };
 };
 
-export async function fetchIntelligenceOverview(params: { hours: 24 | 72 | 168; country?: string; topic?: OverviewTopic; priority?: "high" | "all" }, signal?: AbortSignal): Promise<IntelligenceOverview> {
+export async function fetchIntelligenceOverview(params: { hours: 24 | 72 | 168; country?: string; topic?: OverviewTopic; priority?: "high" | "all"; bucket?: number | null }, signal?: AbortSignal): Promise<IntelligenceOverview> {
   const search = new URLSearchParams({ hours: String(params.hours) });
   if (params.country) search.set("country", params.country);
   if (params.topic) search.set("topic", params.topic);
+  if (params.bucket != null) search.set("bucket", String(params.bucket));
   search.set("priority", params.priority ?? "high");
   return readWithDeadline(async (requestSignal) => {
     const response = await fetch(`${API_BASE}/api/intelligence/overview?${search}`, { credentials: "include", signal: requestSignal });

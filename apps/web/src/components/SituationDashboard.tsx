@@ -12,6 +12,7 @@ const IntelligenceWorkspace = lazy(() => import("./IntelligenceWorkspace"));
 type Props = {
   overview: IntelligenceOverview | null; loading: boolean; error: string | null;
   hours: 24 | 72 | 168; topic: OverviewTopic | null; priority: "high" | "all";
+  bucket?: number | null; onBucketChange?: (bucket: number | null) => void;
   country: string | null; selectedId: string | null; dark: boolean;
   briefing: DailySignalBriefing | null; briefingError: string | null;
   onHoursChange: (hours: 24 | 72 | 168) => void; onTopicChange: (topic: OverviewTopic | null) => void;
@@ -34,6 +35,7 @@ export default function SituationDashboard(props: Props) {
   const scopeMatches = overview?.window.hours === props.hours && (overview.filters.topic ?? null) === props.topic
     && (overview.filters.country ?? "").toUpperCase() === (country ?? "").toUpperCase()
     && (overview.filters.priority ?? props.priority) === props.priority;
+  const intervalMatches = (overview?.filters.bucket ?? null) === (props.bucket ?? null);
   const events = useMemo(() => {
     if (!scopeMatches || !overview) return [];
     const mapped = new Map((overview.map_events ?? overview.events).map((event) => [event.id, event]));
@@ -63,15 +65,17 @@ export default function SituationDashboard(props: Props) {
   const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
+  const mappedHighlight = events.find((event) => ["critical", "high"].includes(event.severity)) ?? events[0];
   const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country} allowsSingleFingerPan
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale="log" featuredCountry={leadingCountries[0]?.country} focusOnActivity
     featuredLabel={mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
     onSelectPoint={(point) => selectEvent(point.id)} showBubbles={false} showLabels legend
-    legendLabel={mapMetric === "priority" ? "High-priority developments" : "Developments in selected period"} />;
+    legendLabel={!intervalMatches ? "Previous selection · updating" : mapMetric === "priority" ? "High-priority developments" : props.bucket != null ? "Updates in selected interval" : "Developments in selected period"}
+    legendDescription="Warmer country colours mean more reported updates, not greater danger. Pins mark precise event locations; photo markers belong to those events. Select a country for its profile or a pin for the story." />;
   const stops = ["peek", "half", "full"] as const;
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
   const overviewControls = <>
-        <p className="situation-map-key"><span><i />Event · colour = priority</span><span><i />Image available</span></p>
+        <p className="situation-map-key"><span><i />Pin = located event · colour = severity</span><span><i />Ring = image available</span></p>
           <div id="world-event-stream" tabIndex={-1}>
             <SituationOverview variant="summary" compact {...props} selectedId={selectedId}
               filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "activity" | "priority")}><option value="activity">All selected activity</option><option value="priority">High-priority activity</option></select></label>}
@@ -80,9 +84,13 @@ export default function SituationDashboard(props: Props) {
           </div>
   </>;
   const workspace = <div className={`situation-workspace situation-map-workspace panel-${panelStop}${wideContext ? " context-wide" : ""}`}>
-    <section className="situation-map-canvas" aria-label="Development map">
+    <section className={`situation-map-canvas${!intervalMatches ? " is-updating" : ""}`} aria-busy={!intervalMatches} aria-label="Development map">
       {map}
-      <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span></div>
+      <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span>
+        {!intervalMatches && <p className="situation-map-narrative">{props.error ? "Interval unavailable. Showing the previous map." : "Loading the selected interval. Showing the previous map."}</p>}
+        {intervalMatches && leadingCountries[0] && <p className="situation-map-narrative">Most {mapMetric === "priority" ? "high-priority " : ""}updates: {new Intl.DisplayNames(undefined, { type: "region" }).of(leadingCountries[0].country)} · {leadingCountries[0].count.toLocaleString()}{overview?.selection ? " in this interval" : " in this period"}</p>}
+        {intervalMatches && mappedHighlight && <button type="button" className="situation-map-story" onClick={() => selectEvent(mappedHighlight.id)} aria-label={`Open mapped development: ${presentEvent(mappedHighlight).headline}`}>On the map: {presentEvent(mappedHighlight).headline}</button>}
+      </div>
       <div className="situation-map-actions">
         <button type="button" onClick={() => setExpandedMap(!expandedMap)} aria-label={expandedMap ? "Close expanded map" : "Expand map"}>{expandedMap ? <X size={18} /> : <Maximize2 size={18} />}</button>
       </div>
@@ -127,7 +135,7 @@ export default function SituationDashboard(props: Props) {
           </Suspense>
         </section>{overviewControls}</> : <>
           {profileCountry && <><OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setProfileCountry(null)} />{overviewControls}</>}
-          <SituationOverview variant="history" {...props} selectedId={selectedId} />
+          <SituationOverview variant="history" {...props} onBucketChange={props.onBucketChange ? changeScope(props.onBucketChange) : undefined} selectedId={selectedId} />
           <section className="situation-briefing" aria-label="Daily briefing">
             <div className="situation-briefing-label"><FileText size={16} /><strong>Daily briefing</strong>{props.briefing?.published_at && <time dateTime={props.briefing.published_at}>{new Date(props.briefing.published_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>}</div>
             {props.briefing ? <>
@@ -139,7 +147,7 @@ export default function SituationDashboard(props: Props) {
           </section>
           <SituationOverview variant="developments" {...props} onSelect={selectEvent} selectedId={selectedId} />
           {leadingCountries.length > 0 && <div className="situation-country-pulse" aria-label="Leading country activity">{leadingCountries.map((item) => <button type="button" key={item.country} onClick={() => selectCountry(item.country)}><CountryFlag country={item.country} /><span>{new Intl.DisplayNames(undefined, { type: "region" }).of(item.country) || item.country}</span><strong>{item.count.toLocaleString()}</strong></button>)}</div>}
-          <p className="situation-map-coverage">Country shading covers the full period. Pins show located events; country-only reports stay in the heatmap.</p>
+          <p className="situation-map-coverage">Country shading and pins follow your topic, priority, country and time selection. Reports without precise coordinates contribute to country shading. A dark country means no located reporting in this selection, not that nothing happened.</p>
         </>}
       </div>
     </aside>

@@ -75,6 +75,7 @@ export type WorldMapBubblesProps = {
   scale?: "linear" | "log";
   showLabels?: boolean;
   legendLabel?: string;
+  legendDescription?: string;
   fillMode?:
     | "default"
     | "temperature"
@@ -353,6 +354,7 @@ export default memo(function WorldMapBubbles({
   scale = "linear",
   showLabels = true,
   legendLabel = "Relative intensity",
+  legendDescription,
   fillMode = "default",
   valueDomain,
   valueUnit = "",
@@ -1374,8 +1376,8 @@ export default memo(function WorldMapBubbles({
               }}
             />
             <div className="mt-1 flex justify-between gap-4 text-[10px]">
-              <span>{dataValueDomain[0].toFixed(1)}{valueUnit}</span>
-              <span>{dataValueDomain[1].toFixed(1)}{valueUnit}</span>
+              <span>{dataValueDomain[0].toLocaleString(undefined, { maximumFractionDigits: 1 })}{valueUnit}</span>
+              <span>{dataValueDomain[1].toLocaleString(undefined, { maximumFractionDigits: 1 })}{valueUnit}</span>
             </div>
           </div>}
           {fillMode === "default" && <div className="mt-0.5 flex justify-between gap-4 text-[10px]">
@@ -1385,6 +1387,7 @@ export default memo(function WorldMapBubbles({
           <div className="map-legend-coverage mt-1 border-t border-current/15 pt-1 text-[10px] opacity-75">
             {markers.length} mapped · select country for profile
           </div>
+          {legendDescription && <details className="map-legend-explanation"><summary>How to read the map</summary><p>{legendDescription}</p><p>Reported severity: red = critical, orange = high, gold = medium, blue = low. Rings and thumbnails indicate imagery linked to that event.</p></details>}
         </div>
       )}
 

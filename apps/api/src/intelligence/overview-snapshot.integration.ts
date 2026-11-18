@@ -79,6 +79,14 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     await readIntelligenceOverviewSnapshot(normalizeOverviewOptions(), measured);
     assert.equal(statements.length, 2);
     assert.ok(statements.every((sql) => !/intelligence_event(?:\s|_)|\bitem\b/.test(sql)), "Repeated global reads use only saved snapshot tables");
+    const interval = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ bucket: 0 }), measured);
+    assert.equal(interval.selection?.event_count, 2);
+    assert.equal(interval.summary.event_count, high.summary.event_count, "the full chart remains available while an interval is selected");
+    assert.equal(interval.events.length, 2, "interval selection retrieves older developments outside the initial card page");
+    assert.ok(interval.events.some((event) => event.id === olderLocated.id));
+    assert.equal(interval.countries.reduce((sum, entry) => sum + entry.event_count, 0), 2);
+    assert.ok(interval.events.every((event) => event.last_activity_time >= interval.selection!.start && event.last_activity_time < interval.selection!.end));
+    assert.ok(interval.map_events.some((event) => event.id === olderLocated.id));
     const scoped = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ country: "SE", topic: "transport" }), measured);
     assert.equal(scoped.summary.event_count, 1);
     assert.equal(scoped.events.length, 1);

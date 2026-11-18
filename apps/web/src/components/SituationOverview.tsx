@@ -11,7 +11,7 @@ import { displayHeadline } from "../lib/headlineTranslation";
 const OVERVIEW_TOPICS: Array<{ key: OverviewTopic; label: string }> = [
   { key: "security", label: "Security" }, { key: "disasters", label: "Disasters" },
   { key: "weather", label: "Weather" }, { key: "transport", label: "Transport" },
-  { key: "markets", label: "Markets" }, { key: "agriculture", label: "Agriculture" },
+  { key: "markets", label: "Markets & economy" }, { key: "agriculture", label: "Agriculture" },
   { key: "developments", label: "Other developments" },
 ];
 type Props = {
@@ -23,6 +23,8 @@ type Props = {
   error: string | null;
   hours: 24 | 72 | 168;
   topic: OverviewTopic | null;
+  bucket?: number | null;
+  onBucketChange?: (bucket: number | null) => void;
   priority?: "high" | "all";
   onPriorityChange?: (priority: "high" | "all") => void;
   country?: string | null;
@@ -40,7 +42,7 @@ function timeLabel(value: string, day = true) {
 function periodLabel(hours: number) { return hours === 24 ? "24 hours" : `${hours / 24} days`; }
 function changeLabel(change: number) { return change === 0 ? "the same as" : `${Math.abs(change)} ${change > 0 ? "more" : "fewer"} than`; }
 
-export default function SituationOverview({ variant = "all", compact = false, filterExtras, overview, loading, error, hours, topic, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
+export default function SituationOverview({ variant = "all", compact = false, filterExtras, overview, loading, error, hours, topic, bucket = null, onBucketChange, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterId = useId();
@@ -49,8 +51,9 @@ export default function SituationOverview({ variant = "all", compact = false, fi
     && (overview.filters.priority ?? priority) === priority
     && (overview.filters.country ?? "").toUpperCase() === (country ?? "").toUpperCase();
   const data = scopeMatches ? overview : null;
-  const timeline = useMemo(() => data?.timeline ?? [], [data]);
-  const visible = expanded ? timeline : timeline.slice(0, 6);
+  const intervalMatches = (data?.filters.bucket ?? null) === bucket;
+  const timeline = useMemo(() => intervalMatches ? data?.timeline ?? [] : [], [data, intervalMatches]);
+  const visible = expanded ? timeline : timeline.slice(0, 8);
   const maximum = Math.max(1, ...(data?.buckets ?? []).flatMap((item) => [item.event_count, ...(data?.coverage.comparison_available ? [item.previous_event_count] : [])]));
   const leadingTopic = data?.topics.reduce<IntelligenceOverview["topics"][number] | null>((largest, item) => item.event_count > (largest?.event_count ?? 0) ? item : largest, null);
   const resetTimeline = () => setExpanded(false);
@@ -87,19 +90,23 @@ export default function SituationOverview({ variant = "all", compact = false, fi
         <p>{priority === "all" && <>{data.summary.high_priority_count} high-priority · </>}{data.summary.location_count} {data.summary.location_count === 1 ? "place" : "places"}{!compact && leadingTopic && !topic ? ` · Most updates: ${leadingTopic.label.toLowerCase()}` : ""}</p>
       </div>}
       {country && <div className="situation-places"><button type="button" onClick={() => { resetTimeline(); onCountryChange(null); }}>All countries ×</button></div>}
-      {compact && topic && <button type="button" className="situation-active-topic" onClick={() => onTopicChange(null)}>{OVERVIEW_TOPICS.find((item) => item.key === topic)?.label} ×</button>}
-      {!compact && data.topics.length > 0 && <div className="situation-topic-pulse" role="group" aria-label="Topics in this period">{data.topics.map((item) => <button type="button" key={item.key} aria-pressed={topic === item.key} onClick={() => { resetTimeline(); onTopicChange(topic === item.key ? null : item.key); }}><span>{item.label}</span><strong>{item.event_count.toLocaleString()}</strong></button>)}</div>}
+      <div className="situation-topic-pulse" role="group" aria-label="Topics in this period">
+        <button type="button" aria-pressed={!topic} onClick={() => { resetTimeline(); onTopicChange(null); }}>All topics</button>
+        {OVERVIEW_TOPICS.map((item) => { const count = data.topics.find((entry) => entry.key === item.key)?.event_count; return <button type="button" key={item.key} aria-pressed={topic === item.key} onClick={() => { resetTimeline(); onTopicChange(topic === item.key ? null : item.key); }}><span>{item.label}</span>{count != null && <strong>{count.toLocaleString()}</strong>}</button>; })}
+      </div>
       {data.snapshot?.status === "stale" && <p className="situation-snapshot-state">Showing the latest available overview. A fresh update is being prepared.</p>}
       {data.snapshot?.status === "warming" && <p role="status" className="situation-snapshot-state">Preparing the first overview. It will appear here automatically.</p>}
       </>}
-      {showSummary && data.topics.some((entry) => entry.key === "markets") && <button type="button" className="situation-market-pulse" onClick={() => { resetTimeline(); onTopicChange(topic === "markets" ? null : "markets"); }} aria-pressed={topic === "markets"}>
-        Markets & economy <strong>{data.topics.find((entry) => entry.key === "markets")!.event_count.toLocaleString()} developments</strong><ArrowUpRight size={14} />
-      </button>}
       {showHistory && data.buckets.length > 0 && <section className="situation-activity-chart" aria-label="Activity over time"><div className="situation-timeline">
         <div className="situation-timeline-heading"><h3>Activity over time</h3><span><i />This period {data.coverage.comparison_available && <><i />Previous period</>}{priority === "all" && <><i className="situation-legend-high" />High priority</>}</span></div>
-        <div className="situation-bars" role="group" aria-label="Development activity over the full period">{data.buckets.map((item) => <div key={item.start} role="img" aria-label={`${timeLabel(item.start)} to ${timeLabel(item.end)}: ${item.event_count} updates${data.coverage.comparison_available ? `; previous period ${item.previous_event_count}` : "; comparison unavailable"}; ${item.high_priority_count} high priority`}><span className="situation-bar-track">{data.coverage.comparison_available && <span className="situation-bar-previous" style={{ height: `${item.previous_event_count / maximum * 100}%` }} />}<span className="situation-bar-current" style={{ height: `${item.event_count / maximum * 100}%` }} />{priority === "all" && <span className="situation-bar-high" style={{ height: `${Math.min(item.event_count, item.high_priority_count) / maximum * 100}%` }} />}</span></div>)}</div>
-        <div className="situation-timeline-ends"><time dateTime={data.window.start}>{timeLabel(data.window.start)}</time><span>Full selected period</span><time dateTime={data.window.end}>{timeLabel(data.window.end)}</time></div>
+        <div className="situation-bars" role="group" aria-label="Development activity over the full period">{data.buckets.map((item, index) => <button type="button" key={item.start} disabled={!onBucketChange} aria-pressed={bucket === index} title={`${timeLabel(item.start)} – ${timeLabel(item.end)} · ${item.event_count.toLocaleString()} updates`} aria-label={`${timeLabel(item.start)} to ${timeLabel(item.end)}: ${item.event_count} updates${data.coverage.comparison_available ? `; previous period ${item.previous_event_count}` : "; comparison unavailable"}; ${item.high_priority_count} high priority`} onClick={() => { resetTimeline(); onBucketChange?.(bucket === index ? null : index); }}><span className="situation-bar-track">{data.coverage.comparison_available && <span className="situation-bar-previous" style={{ height: `${item.previous_event_count / maximum * 100}%` }} />}<span className="situation-bar-current" style={{ height: `${item.event_count / maximum * 100}%` }} />{priority === "all" && <span className="situation-bar-high" style={{ height: `${Math.min(item.event_count, item.high_priority_count) / maximum * 100}%` }} />}</span></button>)}</div>
+        <div className="situation-timeline-ends"><time dateTime={data.window.start}>{timeLabel(data.window.start)}</time><span>{bucket == null ? "Select an interval to explore" : "Selected interval highlighted"}</span><time dateTime={data.window.end}>{timeLabel(data.window.end)}</time></div>
       </div></section>}
+      {showHistory && bucket != null && <div className="situation-interval-selection" role="status">
+        <span>{intervalMatches && data.selection ? <><strong>{data.selection.event_count.toLocaleString()} updates</strong> · {timeLabel(data.selection.start)} – {timeLabel(data.selection.end)}</> : error ? "Selected interval unavailable." : "Loading selected interval…"}</span>
+        {!intervalMatches && error && <button type="button" onClick={onRefresh}>Retry interval</button>}
+        <button type="button" onClick={() => onBucketChange?.(null)}>Full period ×</button>
+      </div>}
       {showDevelopments && <>
       <div className="situation-activity-heading"><div><h3>Key developments</h3><p>Important updates across topics. Open a development for its evidence.</p></div></div>
       <ol className="situation-activity">{visible.map((item) => {
@@ -107,24 +114,28 @@ export default function SituationOverview({ variant = "all", compact = false, fi
         const archived = event && isHistoricalEvent(event);
         const description = event?.summary?.split(/(?<=[.!?])\s/)[0];
         return <li key={item.event_id} className={selectedId === item.event_id ? "is-selected" : ""}>
-          <time dateTime={item.occurred_at}>Updated {timeLabel(item.occurred_at)}</time>
           <div className="situation-event">
-            <div className="situation-event-tags"><span className={`event-severity-${item.severity}`}>{item.severity}</span><span>{item.topic_label}</span>{archived && <span>Archived</span>}</div>
-            {event?.signal_domains?.length ? <div className="situation-signal-types" aria-label="Linked signal types">{event.signal_domains.map((domain) => <span key={domain}>{domain.replace(/_/g, " ")}</span>)}</div> : null}
-            <button type="button" className="situation-event-title" dir="auto" onClick={() => onSelect(item.event_id)} aria-pressed={selectedId === item.event_id}>{displayHeadline(item, item.title)}<ArrowUpRight size={15} /></button>
+
+            <button type="button" className="situation-event-title" dir="auto" onClick={() => onSelect(item.event_id)} aria-label={displayHeadline(item, item.title)} aria-pressed={selectedId === item.event_id}><span className="situation-event-tags"><span className={`event-severity-${item.severity}`}>{item.severity}</span><span>{item.topic_label}</span>{archived && <span>Archived</span>}<time dateTime={item.occurred_at}>{timeLabel(item.occurred_at)}</time></span><span className="situation-event-headline"><span>{displayHeadline(item, item.title)}</span><ArrowUpRight size={15} /></span></button>
             <HeadlineTranslation value={item} />
-            {description && description !== item.title && <p className="situation-event-summary">{description.length > 180 ? `${description.slice(0, 177)}…` : description}</p>}
-            {(item.location_name || item.country_iso2) && <p className="situation-event-place"><MapPin size={13} /><CountryFlag country={item.country_iso2} />{item.location_name || item.country_iso2}</p>}
-            {item.source_refs.length > 0 && <details><summary>{item.source_refs.length} source{item.source_refs.length === 1 ? "" : "s"}</summary><div className="situation-event-sources">{item.source_refs.slice(0, 3).map((source, index) => <div key={`${source.domain}-${index}`}>{source.url && /^https?:\/\//i.test(source.url) ? <a dir="auto" href={source.url} target="_blank" rel="noreferrer">{displayHeadline(source, source.label)}</a> : <span dir="auto">{displayHeadline(source, source.label)}</span>}<HeadlineTranslation value={source} /></div>)}</div></details>}
-            {(item.signal_visual ?? event?.signal_visual) && <DevelopmentVisual visual={(item.signal_visual ?? event?.signal_visual)!} />}
-            {item.priority_reasons.length > 0 && <details><summary>Why this needs attention</summary><ul>{item.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details>}
+            {!item.signal_visual && !event?.signal_visual && description && description !== item.title && <p className="situation-event-summary" title={description}>{description.length > 180 ? `${description.slice(0, 177)}…` : description}</p>}
+<div className="situation-event-meta">            {(item.location_name || item.country_iso2) && <p className="situation-event-place"><MapPin size={13} /><CountryFlag country={item.country_iso2} />{item.location_name || item.country_iso2}</p>}
+
+            {(item.source_refs.length > 0 || item.priority_reasons.length > 0) && <details className="situation-event-context"><summary><span>{item.source_refs.length ? `${item.source_refs.length} source${item.source_refs.length === 1 ? "" : "s"}` : "Context"}</span>{item.priority_reasons.length > 0 && <span> · why prioritized</span>}</summary>
+              {event?.signal_domains?.length ? <p>Linked signals: {event.signal_domains.join(", ")}</p> : null}
+              {event?.summary && <p dir="auto">{event.summary}</p>}
+              <div className="situation-event-sources">{item.source_refs.slice(0, 3).map((source, index) => <div key={`${source.domain}-${index}`}>{source.url && /^https?:\/\//i.test(source.url) ? <a dir="auto" href={source.url} target="_blank" rel="noreferrer">{displayHeadline(source, source.label)}</a> : <span dir="auto">{displayHeadline(source, source.label)}</span>}<HeadlineTranslation value={source} /></div>)}</div>
+              {item.priority_reasons.length > 0 && <ul>{item.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+            </details>}
+            </div>
+            {(item.signal_visual ?? event?.signal_visual) && <DevelopmentVisual compact visual={(item.signal_visual ?? event?.signal_visual)!} />}
           </div>
-          {item.imagery && <button type="button" className="situation-event-image" onClick={() => onSelect(item.event_id)} aria-label={`Inspect imagery for ${item.title}`}><SatelliteImage compact sources={[item.imagery.preview_url]} alt={`Visual context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Satellite · ${timeLabel(item.imagery.captured_at)}` : `Publisher photo · report updated ${timeLabel(item.occurred_at)}`}<small>{item.imagery.attribution}</small></span></button>}
+          {item.imagery && <button type="button" className="situation-event-image" onClick={() => onSelect(item.event_id)} aria-label={`Inspect imagery for ${item.title}`} title={`${item.imagery.attribution} · ${item.imagery.captured_at ? `Acquired ${timeLabel(item.imagery.captured_at)}` : `Report updated ${timeLabel(item.occurred_at)}`}`}><SatelliteImage compact sources={[item.imagery.preview_url]} alt={`Visual context for ${item.title}`} className="h-full w-full object-cover" /><span>{item.imagery.captured_at ? `Satellite · ${new Date(item.imagery.captured_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Publisher photo"}<small>{item.imagery.attribution}</small></span></button>}
         </li>;
       })}</ol>
-      {!timeline.length && <p className="situation-message">{data.snapshot?.status === "warming" ? "Preparing developments…" : priority === "high" ? "No high-priority developments in this selection. Choose All developments to broaden the view." : "No developments in this selection."}</p>}
-      {timeline.length > 6 && <button type="button" className="situation-show-more" onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer developments" : `Show ${timeline.length - 6} more developments`}</button>}
-      <footer><time dateTime={data.generated_at}>Updated {timeLabel(data.generated_at)}</time><details><summary>Coverage and how to read this</summary><p>{data.coverage.notice}</p><p>{data.coverage.comparison_notice}</p><p>{data.coverage.priority_notice}</p><p>Counts and country shading cover the full selected period. Up to 24 recent developments and 200 located events are shown. An update may concern an existing event. Satellite images retain their acquisition dates; publisher photos may have unverified capture times.</p></details></footer>
+      {!timeline.length && intervalMatches && <p className="situation-message">{data.snapshot?.status === "warming" ? "Preparing developments…" : priority === "high" ? "No high-priority developments in this selection. Choose All developments to broaden the view." : "No developments in this selection."}</p>}
+      {timeline.length > 8 && <button type="button" className="situation-show-more" onClick={() => setExpanded((value) => !value)}>{expanded ? "Show fewer developments" : `Show ${timeline.length - 8} more developments`}</button>}
+      <footer><time dateTime={data.generated_at}>Updated {timeLabel(data.generated_at)}</time><details><summary>Coverage and how to read this</summary><p>{data.coverage.notice}</p><p>{data.coverage.comparison_notice}</p><p>{data.coverage.priority_notice}</p><p>Chart counts cover the full period. Selecting an interval focuses country shading, pins and developments on that interval. Up to 24 key developments and 200 located events are shown. An update may concern an existing event. Satellite images retain their acquisition dates; publisher photos may have unverified capture times.</p></details></footer>
       </>}
     </>}
   </section>;

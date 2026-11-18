@@ -1760,11 +1760,12 @@ private struct EarthComparisonView: View {
 
 private struct DevelopmentSignalVisual: View {
     let visual: OverviewSignalVisual
+    var compact = false
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             if visual.kind == "transport", let current = visual.current, let baseline = visual.baseline,
                current.isFinite, baseline.isFinite, current >= 0, baseline >= 0 {
-                Text("Transport activity").font(.caption.weight(.semibold))
+                Text(compact ? "Transport · \(visual.observed_at.formatted(date: .omitted, time: .shortened))" : "Transport activity").font(.caption2.weight(.semibold))
                 GeometryReader { geometry in
                     VStack(alignment: .leading, spacing: 6) {
                         bar("Observed", value: current, maximum: max(1, max(current, baseline)), width: geometry.size.width, color: .orange)
@@ -1778,8 +1779,10 @@ private struct DevelopmentSignalVisual: View {
                     if let wind = visual.wind_speed { Text(String(format: "%.1f m/s", wind)) }
                 }.font(.caption.weight(.semibold))
             }
-            Text("\(visual.label) · \(visual.observed_at.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary)
-        }.padding(8).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+            if !compact { Text("\(visual.label) · \(visual.observed_at.formatted(date: .abbreviated, time: .shortened))").font(.caption2).foregroundStyle(.secondary) }
+            else if visual.kind == "weather" { Text("Country weather reference · \(visual.observed_at.formatted(date: .omitted, time: .shortened))").font(.caption2).foregroundStyle(.secondary) }
+        }.padding(compact ? 5 : 8).background(.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .combine).accessibilityHint("\(visual.label), observed \(visual.observed_at.formatted())")
     }
     private func bar(_ label: String, value: Double, maximum: Double, width: CGFloat, color: Color) -> some View {
         HStack(spacing: 6) {
@@ -2240,16 +2243,30 @@ struct IntelligenceOverviewPanel: View {
                 Text("Recorded updates").font(.caption2).foregroundStyle(.secondary)
             }
             Chart(overview.buckets) { bucket in
+                let midpoint = bucket.start.addingTimeInterval(bucket.end.timeIntervalSince(bucket.start) / 2)
                 if overview.coverage.comparison_available {
-                    BarMark(x: .value("Time", bucket.start), y: .value("Previous", bucket.previous_event_count))
+                    BarMark(x: .value("Time", midpoint), y: .value("Previous", bucket.previous_event_count))
                         .foregroundStyle(.secondary.opacity(0.23))
                         .position(by: .value("Window", "Previous"))
                 }
-                BarMark(x: .value("Time", bucket.start), y: .value("Current", bucket.event_count))
-                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
+                BarMark(x: .value("Time", midpoint), y: .value("Current", bucket.event_count))
+                    .foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme).opacity(model.overviewBucket == nil || overview.buckets.firstIndex(where: { $0.id == bucket.id }) == model.overviewBucket ? 1 : 0.35))
                     .position(by: .value("Window", "Current"))
             }
+            .chartOverlay { proxy in
+                GeometryReader { geometry in
+                    Rectangle().fill(.clear).contentShape(Rectangle())
+                        .gesture(SpatialTapGesture().onEnded { value in
+                            let plot = geometry[proxy.plotAreaFrame]
+                            guard plot.contains(value.location), let date: Date = proxy.value(atX: value.location.x - plot.minX),
+                                  let index = overview.buckets.firstIndex(where: { date >= $0.start && date < $0.end }) else { return }
+                            model.overviewBucket = model.overviewBucket == index ? nil : index
+                            showsMore = false
+                        })
+                }
+            }
             .chartLegend(.hidden)
+            .chartXScale(domain: overview.window.start...overview.window.end)
             .chartXAxis {
                 AxisMarks(values: .automatic(desiredCount: 4)) { value in
                     AxisGridLine()
@@ -2269,48 +2286,68 @@ struct IntelligenceOverviewPanel: View {
                 }
             }
             .font(.caption2)
+            HStack {
+                if let selection = overview.selection, overview.filters.bucket == model.overviewBucket {
+                    Text("\(selection.event_count) updates · \(selection.start.formatted(date: .abbreviated, time: .shortened)) – \(selection.end.formatted(date: .omitted, time: .shortened))")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else {
+                    Text(model.overviewBucket == nil ? "Tap an interval to explore the map and developments" : model.intelligenceOverviewError == nil ? "Loading selected interval…" : "Selected interval unavailable")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 4)
+                if model.overviewBucket != nil { Button("Full period") { model.overviewBucket = nil }.font(.caption2).frame(minHeight: 44) }
+                Menu {
+                    Button("Full period") { model.overviewBucket = nil }
+                    ForEach(Array(overview.buckets.enumerated()), id: \.offset) { index, bucket in
+                        Button("\(bucket.start.formatted(date: .abbreviated, time: .shortened)) · \(bucket.event_count) updates") { model.overviewBucket = index; showsMore = false }
+                    }
+                } label: { Image(systemName: "clock").frame(minWidth: 44, minHeight: 44) }
+                .accessibilityLabel("Choose activity interval or return to full period")
+            }
         }
     }
 
     @ViewBuilder
     private func topics(_ overview: IntelligenceOverview) -> some View {
-        if !overview.topics.isEmpty {
             ScrollView(.horizontal, showsIndicators: false) {
                 LazyHStack(spacing: 8) {
-                    ForEach(overview.topics.prefix(7)) { topic in
+                    Button("All topics") { model.overviewTopic = nil }
+                        .font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(minHeight: 44)
+                        .background(model.overviewTopic == nil ? ClaritasPalette.shellAccent(for: colorScheme).opacity(0.2) : ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: Capsule())
+                    ForEach(IntelligenceOverviewScope.topics, id: \.key) { topic in
                         Button {
                             model.overviewTopic = model.overviewTopic == topic.key ? nil : topic.key
                         } label: {
-                            VStack(alignment: .leading, spacing: 3) {
+                            HStack(spacing: 5) {
                                 Text(topic.label).font(.caption.weight(.semibold))
-                                Text(overview.coverage.comparison_available
-                                     ? "\(topic.event_count) updates · \(topic.change > 0 ? "+" : "")\(topic.change) vs before"
-                                     : "\(topic.event_count)+ sampled updates")
-                                    .font(.caption2.monospacedDigit())
+                                if let count = overview.topics.first(where: { $0.key == topic.key })?.event_count { Text(count.formatted()).font(.caption2.monospacedDigit()) }
                             }
                             .padding(10)
                             .frame(minHeight: 44, alignment: .leading)
-                            .background(ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: RoundedRectangle(cornerRadius: 10))
+                            .background(model.overviewTopic == topic.key ? ClaritasPalette.shellAccent(for: colorScheme).opacity(0.2) : ClaritasPalette.shellSurfaceMuted(for: colorScheme), in: Capsule())
                         }
                         .buttonStyle(.plain)
-                        .accessibilityLabel("Filter \(topic.label), \(topic.event_count) updated investigations")
+                        .accessibilityLabel("Filter \(topic.label)")
+                        .accessibilityAddTraits(model.overviewTopic == topic.key ? .isSelected : [])
                     }
                 }
             }
-        }
     }
 
     private func timeline(_ overview: IntelligenceOverview) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Key developments").font(.subheadline.weight(.semibold))
-            if overview.timeline.isEmpty {
+            if overview.filters.bucket != model.overviewBucket {
+                if model.intelligenceOverviewError == nil { ProgressView("Loading selected interval…").font(.caption) }
+                else { Text("Selected interval unavailable. Retry below or return to the full period.").font(.caption).foregroundStyle(.secondary) }
+            } else if overview.timeline.isEmpty {
                 Text(model.overviewPriority == "high" ? "No high priority developments here. Try All events or a wider window." : "No developments in this scope.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            ForEach(Array(overview.timeline.prefix(showsMore ? 24 : 5))) { entry in
+            ForEach(Array(overview.timeline.prefix(overview.filters.bucket == model.overviewBucket ? (showsMore ? 24 : 8) : 0))) { entry in
                 timelineRow(entry, overview: overview)
             }
-            if overview.timeline.count > 5 {
+            if overview.timeline.count > 8 {
                 Button(showsMore ? "Show fewer developments" : "Show more developments") { showsMore.toggle() }
                     .font(.caption.weight(.semibold))
                     .frame(minHeight: 44)
@@ -2320,48 +2357,42 @@ struct IntelligenceOverviewPanel: View {
 
     private func timelineRow(_ entry: IntelligenceOverview.TimelineEntry, overview: IntelligenceOverview) -> some View {
         Button {
-            if let event = overview.events.first(where: { $0.id == entry.event_id }) {
-                model.selectIntelligenceEvent(event)
-            } else {
-                model.selectedIntelligenceEventID = entry.event_id
-            }
+            if let event = overview.events.first(where: { $0.id == entry.event_id }) { model.selectIntelligenceEvent(event) }
+            else { model.selectedIntelligenceEventID = entry.event_id }
         } label: {
-            HStack(alignment: .top, spacing: 10) {
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text("Updated \(entry.occurred_at.formatted(date: .abbreviated, time: .shortened))")
-                        Spacer()
-                        Text(entry.severity.capitalized)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .top, spacing: 10) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        HStack(spacing: 5) {
+                            Text(entry.severity.capitalized).fontWeight(.semibold)
+                            Text(entry.occurred_at.formatted(date: .abbreviated, time: .shortened)).monospacedDigit()
+                        }.font(.caption2).foregroundStyle(.secondary)
+                        Text(entry.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(2)
+                        Text([entry.topic_label, entry.location_name ?? entry.country_iso2.map(countryName)].compactMap { $0 }.joined(separator: " · "))
+                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                        if let disclosure = entry.headlineTranslationDisclosure { Text(disclosure).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }
+                        HStack(spacing: 5) {
+                            if !entry.source_refs.isEmpty { Text("\(entry.source_refs.count) source\(entry.source_refs.count == 1 ? "" : "s")") }
+                            else if let visual = entry.signal_visual { Text(visual.kind == "transport" ? "Transport data" : "Weather reference") }
+                            if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true { Text("· Archived") }
+                            Spacer(minLength: 2)
+                            Image(systemName: "chevron.right")
+                        }.font(.caption2).foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                     }
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                    if overview.events.first(where: { $0.id == entry.event_id })?.isArchived == true {
-                        Label("Archived investigation", systemImage: "clock.arrow.circlepath")
-                            .font(.caption2.weight(.semibold)).foregroundStyle(.secondary)
-                    }
-                    Text(entry.title).font(.subheadline.weight(.semibold)).foregroundStyle(.primary).lineLimit(3)
-                    if let disclosure = entry.headlineTranslationDisclosure {
-                        Text(disclosure).font(.caption2).foregroundStyle(.secondary)
-                    }
-                    Text([entry.topic_label, entry.location_name ?? entry.country_iso2.map(countryName)].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption).foregroundStyle(.secondary)
                     if let image = entry.imagery {
-                        AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(height: 125).clipped().cornerRadius(8)
-                        Text("\(image.source_kind == "satellite" ? "Satellite captured" : "Publisher photo · report updated") · \((image.captured_at ?? entry.occurred_at).formatted(date: .abbreviated, time: .shortened)) · \(image.attribution)")
-                            .font(.caption2).foregroundStyle(.secondary)
+                        VStack(alignment: .leading, spacing: 3) {
+                            AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width: 96, height: 72).clipped().cornerRadius(7)
+                            Text(image.captured_at.map { "Satellite · \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "Publisher photo")
+                                .font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                            Text(image.attribution).font(.system(size: 9)).foregroundStyle(.secondary).lineLimit(1)
+                        }.frame(width: 96)
+                        .accessibilityLabel("\(image.attribution), \(image.captured_at.map { "captured " + $0.formatted() } ?? "report updated " + entry.occurred_at.formatted())")
                     }
-                    if let visual = entry.signal_visual { DevelopmentSignalVisual(visual: visual) }
-                    HStack(spacing: 8) {
-                        if let source = entry.source_refs.first {
-                            Label(source.label, systemImage: "link").lineLimit(1)
-                        }
-                        if entry.imagery != nil { Label("Imagery", systemImage: "photo") }
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                    }
-                    .font(.caption2).foregroundStyle(ClaritasPalette.shellAccent(for: colorScheme))
                 }
+                if let visual = entry.signal_visual { DevelopmentSignalVisual(visual: visual, compact: true) }
+                Divider().padding(.top, 4)
             }
-            .padding(.vertical, 10)
+            .padding(.vertical, 5)
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
         }

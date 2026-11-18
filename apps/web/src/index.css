@@ -5751,7 +5751,6 @@ body {
   .situation-context-panel { top: .75rem; left: .75rem; bottom: .75rem; right: auto; width: var(--context-width); height: auto; border-radius: 1.5rem; box-shadow: 0 12px 40px #0003; }
   .situation-panel-handle { display: none; }
   .situation-panel-heading { padding: 1rem; }
-  .situation-map-canvas .map-featured-country { display: grid; top: 7rem; max-width: 16rem; }
   .panel-peek .situation-context-panel { bottom: auto; }
   .panel-peek .situation-map-canvas { inset: 0; }
   .panel-peek .situation-map-heading { left: calc(var(--context-width) + 1.5rem); }
@@ -5787,5 +5786,44 @@ body {
 .development-signal-visual p { display: flex; flex-wrap: wrap; gap: 1rem; font-size: .8rem; }
 .development-signal-visual small { display: block; margin-top: .5rem; color: var(--shell-muted); font-size: .6rem; }
 
-.situation-market-pulse { display: flex; align-items: center; gap: .6rem; margin: .5rem 1rem; padding: .65rem; font-size: .7rem; border: 1px solid var(--shell-border); border-radius: .6rem; color: var(--shell-accent-2); }
-.situation-market-pulse strong { color: var(--shell-ink); }
+/* Compact, coordinated overview navigation. */
+.situation-topic-pulse { flex-wrap: nowrap; overflow-x: auto; gap: .3rem; scrollbar-width: thin; }
+.situation-topic-pulse button { min-height: 36px; border-radius: 2rem; padding: .3rem .6rem; font-size: .68rem; }
+.situation-bars > button:focus-visible { outline: 2px solid var(--shell-accent-2); outline-offset: 2px; }
+.situation-interval-selection { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .25rem .6rem; margin-top: .6rem; padding: .35rem .6rem; border-radius: .5rem; background: var(--signal-emerald-soft); font-size: .68rem; }
+.situation-interval-selection button { min-height: 36px; color: var(--shell-accent-2); white-space: nowrap; }
+.situation-activity > li, .situation-dashboard .situation-activity > li { grid-template-columns: minmax(0, 1fr) auto; gap: .65rem; padding: .7rem 0; align-items: start; }
+.situation-activity > li:not(:has(.situation-event-image)) { grid-template-columns: minmax(0, 1fr); }
+.situation-event-tags { gap: .35rem; }
+.situation-event-tags time { margin-left: auto; font-size: .62rem; font-variant-numeric: tabular-nums; }
+.situation-event-title { display: block; width: 100%; min-height: 44px; padding: .1rem 0; font-size: .83rem; line-height: 1.35; }
+.situation-event-title .situation-event-tags { display: flex; margin-bottom: .2rem; }
+.situation-event-headline { display: flex; align-items: start; gap: .4rem; }
+.situation-event-headline > span { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.situation-event-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: .15rem .6rem; }
+.situation-event-meta:has(details[open]) { display: block; }
+.situation-event-summary { margin-top: .15rem; font-size: .72rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.situation-event-place, .situation-dashboard .situation-event-place { margin-top: .15rem; font-size: .65rem; }
+.situation-event-image, .situation-dashboard .situation-event-image { grid-column: 2; grid-row: 1; width: 6.5rem; height: 5.25rem; }
+.situation-event-image > span, .situation-dashboard .situation-event-image > span { display: block; font-size: .5rem; max-height: 1.2rem; overflow: hidden; }
+.situation-event-image small { display: none; }
+.situation-event-context, .situation-dashboard .situation-event details { margin-top: .15rem; font-size: .65rem; }
+.situation-event-context > p { margin-top: .4rem; line-height: 1.5; }
+.development-signal-visual.is-compact { margin-top: .3rem; padding: .3rem .45rem; border: 0; background: var(--shell-surface); }
+.development-signal-visual.is-compact figcaption { font-size: .6rem; margin-bottom: .15rem; }
+.development-signal-visual.is-compact figcaption time { font-weight: 400; color: var(--shell-muted); }
+.development-signal-visual.is-compact div > div { margin-top: .1rem; font-size: .6rem; }
+.development-signal-visual.is-compact i { height: 4px; }
+.development-signal-visual.is-compact:has([role="img"]) { display: grid; grid-template-columns: 6.5rem minmax(0,1fr); gap: .35rem; align-items: center; }
+.development-signal-visual.is-compact p { gap: .6rem; font-size: .7rem; }
+.map-legend-explanation { margin-top: .3rem; font-size: .6rem; max-width: 15rem; }
+.map-legend-explanation summary { min-height: 30px; display: list-item; cursor: pointer; padding-top: .35rem; }
+.map-legend-explanation p { margin-top: .35rem; line-height: 1.45; }
+.situation-map-narrative { max-width: 28rem; margin-top: .3rem; font-size: .65rem; line-height: 1.4; color: var(--shell-muted); }
+.situation-map-story { pointer-events: auto; max-width: 28rem; min-height: 36px; text-align: left; font-size: .7rem; color: var(--shell-accent-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media(max-width: 480px) {
+  .situation-topic-pulse { flex-wrap: nowrap; overflow-x: auto; padding-bottom: .35rem; }
+  .situation-event-image, .situation-dashboard .situation-event-image { width: 5.5rem; height: 5rem; }
+  .situation-event-tags time { margin-left: 0; }
+  .situation-map-narrative { max-width: 17rem; font-size: .6rem; }
+}

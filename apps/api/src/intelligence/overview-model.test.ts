@@ -12,8 +12,11 @@ const event = (id: string, hoursAgo: number, overrides: Partial<OverviewSample> 
 });
 
 test("overview filters reject unbounded windows and unknown topic input", () => {
-  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport", priority: "high", displayLanguage: "en" });
-  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "", priority: "high", displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport", priority: "high", bucket: -1, displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "", priority: "high", bucket: -1, displayLanguage: "en" });
+  assert.equal(normalizeOverviewOptions({ bucket: "0" }).bucket, 0);
+  assert.equal(normalizeOverviewOptions({ hours: 168, bucket: 13 }).bucket, 13);
+  for (const bucket of [-2, 1.5, 12, "unlimited"]) assert.throws(() => normalizeOverviewOptions({ bucket }), /interval/);
   for (const hours of [0, 1, 1000, Infinity, "forever"]) assert.throws(() => normalizeOverviewOptions({ hours }), /hours/);
   assert.equal(normalizeOverviewOptions({ displayLanguage: "fr_FR" }).displayLanguage, "fr-fr");
   assert.notEqual(JSON.stringify(normalizeOverviewOptions({ displayLanguage: "fr" })), JSON.stringify(normalizeOverviewOptions()));

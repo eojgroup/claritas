@@ -86,7 +86,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var intelligenceOverview: IntelligenceOverview?
     @Published private(set) var intelligenceOverviewError: String?
     @Published private(set) var isRefreshingIntelligenceOverview = false
-    @Published var overviewHours = 24
+    @Published var overviewHours = 24 { didSet { if oldValue != overviewHours { overviewBucket = nil } } }
+    @Published var overviewBucket: Int? = nil
     @Published var overviewTopic: String? = nil
     @Published var overviewPriority = "all"
     private var overviewRequestID = UUID()
@@ -95,7 +96,7 @@ final class AppModel: ObservableObject {
     private var overviewLoadedAt: Date?
 
     var overviewScope: IntelligenceOverviewScope {
-        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority)
+        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority, bucket: overviewBucket)
     }
 
     @Published var dailyBriefing: DailySignalBriefing? = nil
@@ -586,6 +587,7 @@ final class AppModel: ObservableObject {
         overviewPriority = overview.filters.priority ?? "all"
         overviewHours = overview.window.hours
         overviewTopic = overview.filters.topic
+        overviewBucket = overview.filters.bucket
     }
     #endif
 
@@ -599,7 +601,7 @@ final class AppModel: ObservableObject {
         let generation = dataGeneration
         overviewRequestID = requestID
         overviewPendingScope = scope
-        if overviewLoadedScope != scope { intelligenceOverview = nil }
+        if overviewLoadedScope?.baseRequestKey != scope.baseRequestKey { intelligenceOverview = nil }
         isRefreshingIntelligenceOverview = true
         intelligenceOverviewError = nil
         defer {
@@ -678,6 +680,7 @@ final class AppModel: ObservableObject {
         overviewLoadedAt = nil
         isRefreshingIntelligenceOverview = false
         overviewHours = 24
+        overviewBucket = nil
         overviewTopic = nil
         overviewPriority = "all"
         dailyBriefing = nil

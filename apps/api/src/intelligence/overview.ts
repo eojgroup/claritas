@@ -239,7 +239,9 @@ export function assembleIntelligenceOverview(rawRows: OverviewSample[], eventRow
   return { ...analytics, events, timeline, map_events, visual_events };
 }
 
-export type IntelligenceOverview = ReturnType<typeof assembleIntelligenceOverview>;
+export type IntelligenceOverview = ReturnType<typeof assembleIntelligenceOverview> & {
+  selection?: { bucket: number; start: string; end: string; event_count: number; high_priority_count: number } | null;
+};
 export type OverviewSnapshot = { status: "fresh" | "stale" | "warming"; generated_at: string | null; age_seconds: number | null; pending_events?: number };
 
 /** Called after auth only; this reads saved shared data, never account state. */
