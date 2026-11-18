@@ -1311,6 +1311,19 @@ jobs:
                   console.log(JSON.stringify({ event: "release_overview_coverage_verified", hours: view.window.hours, priority: view.filters.priority,
                     count: view.summary.event_count, countries: view.countries.length, map_events: view.map_events.length, images: view.visual_events.length, buckets: view.buckets.length }));
                 }
+                const intervalIndex = overview.buckets.findIndex((bucket) => bucket.event_count > 0);
+                if (intervalIndex >= 0) {
+                  const intervalStarted = Date.now();
+                  const interval = await getIntelligenceOverview({ hours: 24, priority: "all", bucket: intervalIndex });
+                  const selected = interval.selection;
+                  if (!selected || interval.filters.bucket !== intervalIndex || selected.event_count !== interval.buckets[intervalIndex].event_count) throw new Error("Selected activity interval counts are inconsistent");
+                  const inInterval = (event) => event.last_activity_time >= selected.start && (event.last_activity_time < selected.end || (selected.end === interval.window.end && event.last_activity_time === selected.end));
+                  if (![...interval.events, ...interval.map_events, ...interval.visual_events].every(inInterval)) throw new Error("Activity interval includes developments outside its time range");
+                  if (interval.buckets.reduce((sum, bucket) => sum + bucket.event_count, 0) !== interval.summary.event_count) throw new Error("Interval selection changed full-period chart totals");
+                  const intervalMs = Date.now()-intervalStarted;
+                  if (intervalMs > 5000) throw new Error("Selected activity interval exceeded its five-second production read budget");
+                  console.log(JSON.stringify({ event: "release_overview_interval_verified", index: intervalIndex, count: selected.event_count, cards: interval.events.length, map_events: interval.map_events.length, read_ms: intervalMs }));
+                }
                 const visual = views.flatMap((view) => view.visual_events).find((event) => event.imagery)?.imagery;
                 if (visual) {
                   const path = new URL(visual.preview_url, "http://127.0.0.1").pathname.split("/");

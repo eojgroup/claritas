@@ -5473,13 +5473,27 @@ private struct NativeSignalMap: View {
 }
 
 private struct SignalMapInteractionKey: View {
+    @EnvironmentObject private var model: AppModel
+    @State private var expanded = false
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 4) { Circle().fill(Color(hex: "#E98D53")).frame(width: 7, height: 7); Text("Event") }
-            HStack(spacing: 4) { Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 1.5, dash: [2, 1])).frame(width: 10, height: 10); Text("Image") }
-            Text("Number = nearby events")
-        }.font(.caption2).foregroundStyle(.secondary)
-        .accessibilityElement(children: .combine)
+        VStack(alignment: .leading, spacing: 4) {
+            if model.intelligenceOverview?.filters.bucket == model.overviewBucket,
+               let country = model.intelligenceOverview?.countries?.max(by: { $0.event_count < $1.event_count }) {
+                Text("Most updates: \(Locale.current.localizedString(forRegionCode: country.country_iso2) ?? country.country_iso2) · \(country.event_count)\(model.overviewBucket == nil ? " in this period" : " in this interval")")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+            DisclosureGroup(isExpanded: $expanded) {
+                Text("Warmer country colours mean more reported updates. Tap a country for its profile. Pins mark precise event locations; tap a pin to open the story. Red/orange pins have critical/high reported severity, gold medium and blue low. A number groups nearby events. A teal ring or photo indicates imagery linked to that event. Reports with only a country still contribute to country shading.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } label: {
+                HStack(spacing: 8) {
+                    Circle().fill(Color(hex: "#E98D53")).frame(width: 7, height: 7)
+                    Text("Located event")
+                    Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 1.5, dash: [2, 1])).frame(width: 10, height: 10)
+                    Text("Image · Map key")
+                }.font(.caption2).foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
@@ -5510,7 +5524,7 @@ private struct SignalDensityLegend: View {
                 Text(format(upper))
             }
             .font(.system(size: 9).monospacedDigit())
-
+            if isOverview { Text("Warmer = more updates\nTap country for profile").font(.system(size: 8)).lineSpacing(2) }
         }
         .foregroundStyle(.white.opacity(0.88))
         .padding(.horizontal, 7)
@@ -5869,7 +5883,7 @@ private struct InteractiveCountryBubbleMap: View {
             let halfWidth: CGFloat = compactPresentation ? 73 : 105
             guard pixel.x > halfWidth + 8, pixel.x < size.width - halfWidth - 8, pixel.y > 52, pixel.y < size.height - 24 else { continue }
             let labelBox = CGRect(x: pixel.x - halfWidth, y: pixel.y - 46, width: halfWidth * 2, height: 44)
-            let legendBox = CGRect(x: size.width - 156, y: size.height - 58, width: 156, height: 58)
+            let legendBox = CGRect(x: size.width - 156, y: size.height - 90, width: 156, height: 90)
             let controlsBox = CGRect(x: size.width - 64, y: 0, width: 64, height: 152)
             guard !labelBox.intersects(legendBox), !labelBox.intersects(controlsBox) else { continue }
             if visible.allSatisfy({
@@ -5888,7 +5902,7 @@ private struct InteractiveCountryBubbleMap: View {
         } label: {
             ZStack {
                 if group.hasImagery { Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 2, dash: [3, 2])).frame(width: 32, height: 32) }
-                Circle().fill(Color(hex: "#E98D53")).frame(width: group.eventIDs.count > 1 ? 26 : 12, height: group.eventIDs.count > 1 ? 26 : 12)
+                Circle().fill(pinColor(group)).frame(width: group.eventIDs.count > 1 ? 26 : 12, height: group.eventIDs.count > 1 ? 26 : 12)
                     .overlay(Circle().stroke(Color(hex: "#F2EEE6"), lineWidth: 1.5))
                 if group.eventIDs.count > 1 { Text("\(group.eventIDs.count)").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: "#102535")) }
             }.frame(width: 44, height: 44).contentShape(Circle())
@@ -5906,6 +5920,14 @@ private struct InteractiveCountryBubbleMap: View {
                 }
         .accessibilityLabel(group.eventIDs.count > 1 ? "\(group.eventIDs.count) nearby developments\(group.hasImagery ? ", images available" : "")" : events.first(where: { $0.id == group.id })?.title ?? "Development")
         .accessibilityHint(group.eventIDs.count > 1 ? "Open list of nearby developments" : "Open event context")
+    }
+
+    private func pinColor(_ group: SignalMapPinGroup) -> Color {
+        let severities = events.filter { group.eventIDs.contains($0.id) }.map(\.severity)
+        if severities.contains(.critical) { return Color(hex: "#E57168") }
+        if severities.contains(.high) { return Color(hex: "#E98D53") }
+        if severities.contains(.medium) { return Color(hex: "#D6BA78") }
+        return Color(hex: "#78A9BA")
     }
 
     private var viewportControls: some View {

@@ -79,12 +79,24 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const statement = buildSavedOverviewAggregateQuery(state, options);
   const aggregate = (await read<{ aggregate: Aggregate }>(statement.sql, statement.params)).rows[0].aggregate;
   const params = scopeParams(state, options);
+  const window = overviewWindow(options.hours, new Date(state.generated_at));
+  const interval = options.bucket >= 0 ? {
+    bucket: options.bucket,
+    start: new Date(Date.parse(window.start) + options.bucket * window.bucket_hours * 3600_000).toISOString(),
+    end: new Date(Date.parse(window.start) + (options.bucket + 1) * window.bucket_hours * 3600_000).toISOString(),
+    event_count: aggregate.buckets.find((row) => row.index === options.bucket)?.event_count ?? 0,
+    high_priority_count: aggregate.buckets.find((row) => row.index === options.bucket)?.high_priority_count ?? 0,
+  } : null;
+  const detailParams = [...params.slice(0, 7), interval?.start ?? null, interval?.end ?? null, interval?.end === window.end];
+  const detailScope = `${scopeSql} AND last_activity_time>=$7::timestamptz
+    AND ($8::timestamptz IS NULL OR (last_activity_time>=$8::timestamptz
+      AND (last_activity_time<$9::timestamptz OR ($10::boolean AND last_activity_time=$9::timestamptz))))`;
   // Bound JSON/title processing independently for each topic. Full-period
   // counts and map coverage above/below still use every eligible saved event.
   const { rows: cards } = await read<SavedCard>(`WITH ranked AS (
       SELECT id,last_activity_time,topic,${prioritySql} AS attention,
         row_number() OVER (PARTITION BY topic ORDER BY ${prioritySql} DESC,last_activity_time DESC,id) AS topic_rank
-      FROM intelligence_overview_projection WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz
+      FROM intelligence_overview_projection WHERE ${detailScope}
     ), pool AS MATERIALIZED (
       SELECT id,last_activity_time,topic,attention FROM ranked WHERE topic_rank<=400
     ), candidates AS (
@@ -105,17 +117,20 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
       FROM diverse ORDER BY (family_rank>2),attention DESC,last_activity_time DESC,id LIMIT ${OVERVIEW_EVENT_LIMIT}
     ) SELECT projection.sample,projection.event FROM selected
       JOIN intelligence_overview_projection projection ON projection.generation_id=$1::uuid AND projection.id=selected.id
-      ORDER BY selected.deferred,selected.attention DESC,selected.last_activity_time DESC,selected.id`, params.slice(0, 7));
+      ORDER BY selected.deferred,selected.attention DESC,selected.last_activity_time DESC,selected.id`, detailParams);
   // Geography must come from the full selected window, not the latest cards:
   // a burst of unlocated reporting must not erase every known map position.
   const { rows: mapped } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
-    WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz
+    WHERE ${detailScope}
       AND event->>'latitude' IS NOT NULL AND event->>'longitude' IS NOT NULL
       AND COALESCE(event->>'location_type','')<>'country'
-    ORDER BY last_activity_time DESC,id LIMIT 200`, params.slice(0, 7));
+    ORDER BY last_activity_time DESC,id LIMIT 200`, detailParams);
   const { rows: visual } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
-    WHERE ${scopeSql} AND last_activity_time>=$7::timestamptz AND event->'imagery'<>'null'::jsonb
-    ORDER BY last_activity_time DESC,id LIMIT 8`, params.slice(0, 7));
+    WHERE ${detailScope} AND event->'imagery'<>'null'::jsonb
+    ORDER BY last_activity_time DESC,id LIMIT 8`, detailParams);
+  const selectedCountries = interval ? (await read<{ country_iso2: string; event_count: number; high_priority_count: number }>(`
+    SELECT country_iso2,count(*)::int AS event_count,count(*) FILTER(WHERE ${highSql})::int AS high_priority_count
+    FROM intelligence_overview_projection WHERE ${detailScope} AND country_iso2 IS NOT NULL GROUP BY country_iso2`, detailParams)).rows : aggregate.countries;
   const now = new Date(state.generated_at);
   const samples = cards.map(({ sample }) => ({ ...sample, period: "current" as const }));
   const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now, cards.map(({ event }) => event.id));
@@ -129,7 +144,7 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     return { ...bucket, event_count: counts?.event_count ?? 0, previous_event_count: counts?.previous_event_count ?? 0, high_priority_count: counts?.high_priority_count ?? 0 };
   });
   return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations,
-    countries: aggregate.countries, map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
+    selection: interval, countries: selectedCountries, map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
     visual_events: visual.map(({ event: { source_refs: _refs, ...event } }) => event), buckets,
     coverage: { ...base.coverage, notice: "Key developments balance importance, recency and source/topic variety. Repeated updates are grouped in the list; chart totals cover every eligible saved investigation.", sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),
       sampled_events: aggregate.summary.event_count + aggregate.summary.previous_event_count } };
@@ -160,7 +175,7 @@ async function readUncached(options: Required<OverviewOptions>, read: OverviewQu
     const { current: _current, ...empty } = buildOverviewAnalytics([], options, new Date());
     return { ...empty, events: [], timeline: [], map_events: [], visual_events: [], snapshot: { status: "warming", generated_at: null, age_seconds: null } };
   }
-  const savedGlobal = !options.country && !options.topic && state.payload;
+  const savedGlobal = !options.country && !options.topic && options.bucket < 0 && state.payload;
   const overview = savedGlobal || await buildSavedIntelligenceOverview(state, options, read);
   // Global English presentation is prepared by the worker. Scoped views and
   // other languages need only a bounded lookup of existing translation rows.

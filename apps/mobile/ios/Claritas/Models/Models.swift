@@ -3870,28 +3870,33 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
     static let windows = [24, 72, 168]
     static let topics: [(key: String, label: String)] = [
         ("security", "Security"), ("disasters", "Disasters"), ("weather", "Weather"),
-        ("transport", "Transport"), ("markets", "Markets"), ("agriculture", "Agriculture"),
+        ("transport", "Transport"), ("markets", "Markets & economy"), ("agriculture", "Agriculture"),
         ("developments", "Developments"),
     ]
     let hours: Int
     let country: String?
     let topic: String?
     let priority: String
+    let bucket: Int?
 
-    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "all") {
+    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "all", bucket: Int? = nil) {
         self.hours = Self.windows.contains(hours) ? hours : 24
         let code = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         self.country = code?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil ? (code == "UK" ? "GB" : code) : nil
         self.topic = Self.topics.contains(where: { $0.key == topic }) ? topic : nil
         self.priority = priority == "high" ? "high" : "all"
+        let bucketCount = self.hours == 168 ? 14 : 12
+        self.bucket = bucket.flatMap { (0..<bucketCount).contains($0) ? $0 : nil }
     }
 
-    var requestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")|\(priority)" }
+    var baseRequestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")|\(priority)" }
+    var requestKey: String { "\(baseRequestKey)|\(bucket.map(String.init) ?? "all")" }
     var windowLabel: String { hours == 24 ? "24 hours" : hours == 72 ? "3 days" : "7 days" }
     var queryItems: [URLQueryItem] {
         [URLQueryItem(name: "hours", value: String(hours)), URLQueryItem(name: "priority", value: priority)]
             + (country.map { [URLQueryItem(name: "country", value: $0)] } ?? [])
             + (topic.map { [URLQueryItem(name: "topic", value: $0)] } ?? [])
+            + (bucket.map { [URLQueryItem(name: "bucket", value: String($0))] } ?? [])
     }
 }
 
@@ -3915,7 +3920,8 @@ struct IntelligenceOverview: Codable {
         let previous_end: Date
         let bucket_hours: Int
     }
-    struct Filters: Codable { let country: String?; let topic: String?; var priority: String? = nil }
+    struct Filters: Codable { let country: String?; let topic: String?; var priority: String? = nil; var bucket: Int? = nil }
+    struct Selection: Codable { let bucket: Int; let start: Date; let end: Date; let event_count: Int; let high_priority_count: Int }
     struct Snapshot: Codable {
         let status: String
         let generated_at: Date?
@@ -4052,6 +4058,7 @@ struct IntelligenceOverview: Codable {
     var map_events: [IntelligenceEvent]? = nil
     var visual_events: [IntelligenceEvent]? = nil
     var snapshot: Snapshot? = nil
+    var selection: Selection? = nil
     var currentEvents: [IntelligenceEvent] { events.filter { !$0.isArchived } }
     /// Map candidates are the developments available in the timeline, even
     /// when the response includes additional event cards for other summaries.
@@ -4065,6 +4072,6 @@ struct IntelligenceOverview: Codable {
     /// Missing priority metadata remains compatible with older servers/caches.
     func matches(scope: IntelligenceOverviewScope) -> Bool {
         window.hours == scope.hours && filters.country == scope.country && filters.topic == scope.topic
-            && (filters.priority == nil || filters.priority == scope.priority)
+            && (filters.priority == nil || filters.priority == scope.priority) && filters.bucket == scope.bucket
     }
 }

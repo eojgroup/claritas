@@ -2020,7 +2020,7 @@ app.get("/api/intelligence/overview", requireAuthenticated, async (req, res) => 
   let options;
   try {
     options = normalizeOverviewOptions({ hours: req.query.hours, country: req.query.country, topic: req.query.topic,
-      priority: req.query.priority,
+      priority: req.query.priority, bucket: req.query.bucket,
       displayLanguage: req.query.display_language });
   } catch (error) {
     return res.status(400).json({ error: error instanceof Error ? error.message : String(error) });

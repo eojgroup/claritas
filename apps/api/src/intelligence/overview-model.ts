@@ -9,7 +9,7 @@ export const OVERVIEW_TOPICS = [
   { key: "developments", label: "Other developments", pattern: "" },
 ] as const;
 export type OverviewTopic = typeof OVERVIEW_TOPICS[number]["key"];
-export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?: OverviewTopic; priority?: "high" | "all"; displayLanguage?: string };
+export type OverviewOptions = { hours?: 24 | 72 | 168; country?: string; topic?: OverviewTopic; priority?: "high" | "all"; displayLanguage?: string; bucket?: number };
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type OverviewSample = {
   id: string; event_type: string; status: string; severity: string;
@@ -25,7 +25,7 @@ export type OverviewSample = {
 export const OVERVIEW_EVENT_LIMIT = 40;
 export const OVERVIEW_TIMELINE_LIMIT = 24;
 
-export function normalizeOverviewOptions(input: { hours?: unknown; country?: unknown; topic?: unknown; priority?: unknown; displayLanguage?: unknown } = {}): Required<OverviewOptions> {
+export function normalizeOverviewOptions(input: { hours?: unknown; country?: unknown; topic?: unknown; priority?: unknown; displayLanguage?: unknown; bucket?: unknown } = {}): Required<OverviewOptions> {
   const hours = Number(input.hours ?? 24);
   if (![24, 72, 168].includes(hours)) throw new Error("Overview hours must be 24, 72 or 168.");
   const country = typeof input.country === "string" ? input.country.trim().toUpperCase() : "";
@@ -34,7 +34,9 @@ export function normalizeOverviewOptions(input: { hours?: unknown; country?: unk
   if (topic && !OVERVIEW_TOPICS.some((candidate) => candidate.key === topic)) throw new Error("Unknown overview topic.");
   const priority = input.priority ?? "high";
   if (priority !== "high" && priority !== "all") throw new Error("Overview priority must be high or all.");
-  return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, priority, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
+  const bucket = input.bucket == null || input.bucket === "" ? -1 : Number(input.bucket);
+  if (!Number.isInteger(bucket) || bucket < -1 || bucket >= (hours === 168 ? 14 : 12)) throw new Error("Unknown overview time interval.");
+  return { hours: hours as 24 | 72 | 168, country, topic: topic as OverviewTopic, priority, bucket, displayLanguage: normalizeIntelligenceDisplayLanguage(input.displayLanguage ?? "en") };
 }
 
 export function overviewTopic(eventType: string, newsCategory?: string) {
@@ -143,7 +145,7 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
       previous_event_count: previous.filter((row) => contains(row, duration)).length,
       high_priority_count: current.filter((row) => contains(row) && highPriority(row)).length };
   });
-  return { generated_at: now.toISOString(), window, filters: { country: options.country || null, topic: options.topic || null, priority: options.priority },
+  return { generated_at: now.toISOString(), window, filters: { country: options.country || null, topic: options.topic || null, priority: options.priority, bucket: options.bucket >= 0 ? options.bucket : null },
     summary: { event_count: current.length, previous_event_count: previous.length, ...overviewChange(current.length, previous.length),
       high_priority_count: current.filter(highPriority).length,
       location_count: new Set(current.map((row) => row.primary_location_id || row.primary_country_iso2).filter(Boolean)).size },
