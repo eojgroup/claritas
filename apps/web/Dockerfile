@@ -18,6 +18,15 @@ server {
   root /usr/share/nginx/html;
   index index.html;
   add_header Strict-Transport-Security "max-age=31536000" always;
+  # Revalidate the app entry point so browsers discover each release.
+  add_header Cache-Control "no-cache";
+
+  # Vite names these assets by content; repeat visits can reuse their bytes.
+  location /assets/ {
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header Cache-Control "public, max-age=31536000, immutable";
+    try_files $uri =404;
+  }
 
   location / {
     try_files $uri /index.html;
