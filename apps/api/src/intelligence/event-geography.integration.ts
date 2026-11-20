@@ -44,12 +44,35 @@ test("conflicting news geography cannot move Hormuz; retained coordinates keep t
     assert.equal(rejected.geography, null);
     assert.equal(rejected.metadata.exact_geography, undefined);
     assert.equal(rejected.primary_country_iso2, null);
+    // The same invariant holds when enrichment precedes the named article.
+    for (const physical of [false, true]) {
+      const before = { ...base, dedupeKey: randomUUID(), primaryLocationId: null, primaryCountryIso2: "SE",
+        latitude: 59.3333, longitude: 18.05, coordinatesAreExact: true,
+        evidence: { ...base.evidence, domain: physical ? "disaster" as const : "news" as const,
+          relationship: physical ? "observed" as const : "reported" as const, sourceRecordId: randomUUID() } };
+      const early = await upsertIntelligenceSignalTx(client, before, options);
+      await upsertIntelligenceSignalTx(client, { ...base, dedupeKey: before.dedupeKey }, options);
+      const named = (await client.query("SELECT geography,ST_Y(geography) AS lat,primary_location_id,primary_country_iso2,metadata FROM intelligence_event WHERE id=$1", [early.id])).rows[0];
+      if (physical) {
+        assert.equal(named.lat, 59.3333);
+        assert.equal(named.primary_location_id, null);
+        assert.equal(named.primary_country_iso2, "SE");
+        assert.equal(named.metadata.exact_geography, true);
+        assert.equal((await client.query("SELECT count(*)::int AS n FROM intelligence_event_location WHERE event_id=$1 AND relationship='primary'", [early.id])).rows[0].n, 0);
+      } else {
+        assert.equal(named.geography, null);
+        assert.equal(named.primary_location_id, location);
+        assert.equal(named.primary_country_iso2, null);
+        assert.equal(named.metadata.exact_geography, undefined);
+      }
+    }
     // Replay the historic corrupt state through the actual repair migration.
-    await client.query(`UPDATE intelligence_event SET geography=ST_SetSRID(ST_MakePoint(18.05,59.3333),4326),
+    await client.query(`UPDATE intelligence_event SET geography=ST_SetSRID(ST_MakePoint(18.05,59.3333),4326),primary_country_iso2='SE',
       metadata=metadata||'{"exact_geography":true,"geography_provenance_key":"news:global_event:3"}' WHERE id=$1`, [event.id]);
     await client.query(readFileSync(resolve(__dirname, "../../../../infra/gcp/sql/V76__repair_conflicting_news_geography.sql"), "utf8"));
-    saved = (await client.query("SELECT geography,metadata FROM intelligence_event WHERE id=$1", [event.id])).rows[0];
+    saved = (await client.query("SELECT geography,primary_country_iso2,metadata FROM intelligence_event WHERE id=$1", [event.id])).rows[0];
     assert.equal(saved.geography, null);
+    assert.equal(saved.primary_country_iso2, null);
     assert.equal(saved.metadata.geography_repair_v1.previous_latitude, 59.3333);
     assert.equal(saved.metadata.exact_geography, undefined);
   } finally { await client.query("ROLLBACK"); client.release(); }

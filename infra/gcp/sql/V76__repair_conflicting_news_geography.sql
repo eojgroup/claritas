@@ -3,7 +3,7 @@
 -- Keep the rejected position/provenance for audit; readers use the retained
 -- catalogue location as an estimate, rather than an invented precise point.
 WITH conflicts AS MATERIALIZED (
-  SELECT event.id FROM intelligence_event event
+  SELECT event.id,location.country_iso2 FROM intelligence_event event
   JOIN intelligence_location location ON location.id=event.primary_location_id
   WHERE location.location_type IN ('city','port','airport','strait','canal','chokepoint','industrial_facility','refinery','lng_terminal','rail_terminal','dam','strategic_site','point')
     AND location.center IS NOT NULL
@@ -12,6 +12,7 @@ WITH conflicts AS MATERIALIZED (
 )
 UPDATE intelligence_event event
 SET geography = NULL,
+    primary_country_iso2 = conflicts.country_iso2,
     metadata = (event.metadata - 'exact_geography' - 'geography_provenance_key')
       || jsonb_build_object('geography_repair_v1', jsonb_build_object(
         'reason', 'news_coordinates_conflict_with_named_location',
