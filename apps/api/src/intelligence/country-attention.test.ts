@@ -8,4 +8,7 @@ test("important, unusual activity can outrank a much larger routine news market"
   assert(changing > routine);
   assert(countryAttentionScore({ event_count: 1, high_priority_count: 0, peak_priority_score: 45 }) < routine);
   assert.equal(countryAttentionScore({ event_count: 0, high_priority_count: 0, peak_priority_score: 100 }), 0);
+  assert(countryAttentionScore({ event_count: 20, previous_event_count: 10, high_priority_count: 0, peak_priority_score: 80 })
+    > countryAttentionScore({ event_count: 12000, previous_event_count: 11000, high_priority_count: 0, peak_priority_score: 80 }),
+  "a large absolute increase must not outrank a sharper proportional change solely due to country size");
 });

@@ -5269,7 +5269,7 @@ struct WorldMapWorkspace: View {
                 Color(hex: "#0C2230").ignoresSafeArea()
                 NativeSignalMap(points: points, events: events, mode: .signals, mapRegion: .global,
                     compactPresentation: geometry.size.width < 600, selectedCountry: model.selectedCountry,
-                    comparisonCountry: nil, pinnedCountry: nil, featuredCountry: points.first?.iso,
+                    comparisonCountry: nil, pinnedCountry: nil, featuredCountry: nil,
                     transportEntities: [], resetToken: 0, onSelectCountry: selectCountry,
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
                     immersive: true)
@@ -5777,8 +5777,16 @@ private struct InteractiveCountryBubbleMap: View {
                             .position(x: project(point.coordinate, size: proxy.size).x, y: project(point.coordinate, size: proxy.size).y - 24)
                     }
 
+                    let labels = labelledPinIDs(size: proxy.size)
                     ForEach(pinGroups(size: proxy.size)) { group in
                         pinGroupView(group, size: proxy.size)
+                            .overlay(alignment: .top) {
+                                if labels.contains(group.id), !group.hasImagery {
+                                    Text(pinLabel(group)).font(.system(size: 10, weight: .medium))
+                                        .foregroundStyle(Color.white.opacity(0.9)).shadow(color: .black, radius: 2)
+                                        .fixedSize().offset(y: -12).allowsHitTesting(false)
+                                }
+                            }
                             .position(x: group.x, y: group.y)
                     }
                     ForEach(transportEntities.prefix(40)) { entity in
@@ -5887,6 +5895,35 @@ private struct InteractiveCountryBubbleMap: View {
         })
     }
 
+    private func pinLabel(_ group: SignalMapPinGroup) -> String {
+        let kinds = Set(events.filter { group.eventIDs.contains($0.id) }.map { SignalMapEventKind(eventType: $0.event_type) })
+        guard kinds.count == 1, let kind = kinds.first else { return "\(group.eventIDs.count) events" }
+        return kind.label + (group.eventIDs.count > 1 ? " · \(group.eventIDs.count)" : "")
+    }
+
+    private func labelledPinIDs(size: CGSize) -> Set<String> {
+        let groups = pinGroups(size: size)
+        var seen = Set<String>(), preferred: [SignalMapPinGroup] = []
+        for group in groups where seen.insert(pinLabel(group).components(separatedBy: " · ")[0]).inserted { preferred.append(group) }
+        preferred += groups.filter { group in !preferred.contains { $0.id == group.id } }
+        var accepted = Set<String>(), boxes: [CGRect] = []
+        let reserved = [CGRect(x: size.width - 220, y: size.height - 240, width: 220, height: 240),
+                        CGRect(x: size.width - 64, y: 0, width: 64, height: 152)]
+            + labelledCountries(size: size).map { country -> CGRect in
+                let pixel = project(country.coordinate, size: size)
+                return CGRect(x: pixel.x - 100, y: pixel.y - 46, width: 200, height: 44)
+            }
+        for group in preferred where !group.hasImagery {
+            let width = CGFloat(min(160, pinLabel(group).count * 6))
+            let box = CGRect(x: CGFloat(group.x) - width / 2, y: CGFloat(group.y) - 34, width: width, height: 18)
+            guard box.minX > 8, box.maxX < size.width - 8, box.minY > 8, box.maxY < size.height - 8,
+                  !reserved.contains(where: { $0.intersects(box) }), !boxes.contains(where: { $0.intersects(box.insetBy(dx: -5, dy: -3)) }) else { continue }
+            accepted.insert(group.id); boxes.append(box)
+            if accepted.count >= (compactPresentation ? 4 : 7) { break }
+        }
+        return accepted
+    }
+
     private func zoom(to group: SignalMapPinGroup, size: CGSize) {
         userAdjustedViewport = true
         let old = committedScale, next = min(10, old * 1.8)
@@ -5928,11 +5965,14 @@ private struct InteractiveCountryBubbleMap: View {
         } label: {
             ZStack {
                 if group.hasImagery { Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 2, dash: [3, 2])).frame(width: 32, height: 32) }
-                Circle().fill(pinColor(group)).frame(width: group.eventIDs.count > 1 ? 26 : 22, height: group.eventIDs.count > 1 ? 26 : 22)
-                    .overlay(Circle().stroke(Color(hex: "#F2EEE6"), lineWidth: 1.5))
-                if group.eventIDs.count > 1 { Text("\(group.eventIDs.count)").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: "#102535")) }
-                else if let event = events.first(where: { $0.id == group.id }) {
-                    Image(systemName: SignalMapEventKind(eventType: event.event_type).symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: "#102535"))
+                let kinds = Set(events.filter { group.eventIDs.contains($0.id) }.map { SignalMapEventKind(eventType: $0.event_type) })
+                Image(systemName: kinds.count == 1 ? kinds.first!.symbol : "square.stack")
+                    .font(.system(size: 16, weight: .regular)).symbolRenderingMode(.monochrome)
+                    .foregroundStyle(pinColor(group)).shadow(color: .black, radius: 1.2)
+                if group.eventIDs.count > 1 {
+                    Text("\(group.eventIDs.count)").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(hex: "#F2EEE6"))
+                        .padding(.horizontal, 3).padding(.vertical, 1).background(Color(hex: "#102535"), in: RoundedRectangle(cornerRadius: 2))
+                        .offset(x: 12, y: 10)
                 }
             }.frame(width: 44, height: 44).contentShape(Circle())
         }.buttonStyle(.plain)

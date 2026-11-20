@@ -1,6 +1,6 @@
 import Foundation
 
-enum SignalMapEventKind: String, CaseIterable {
+enum SignalMapEventKind: String, CaseIterable, Hashable {
     case earthquake, storm, fire, flood, transport, weather, markets, security, news
     init(eventType: String) {
         let type = eventType.lowercased()
@@ -18,7 +18,7 @@ enum SignalMapEventKind: String, CaseIterable {
         switch self {
         case .earthquake: return "Earthquake"
         case .storm: return "Storm"
-        case .fire: return "Fire"
+        case .fire: return "Fire signal"
         case .flood: return "Flood"
         case .transport: return "Transport"
         case .weather: return "Weather"
@@ -30,16 +30,17 @@ enum SignalMapEventKind: String, CaseIterable {
     var symbol: String {
         switch self {
         case .earthquake: return "waveform.path.ecg"
-        case .storm: return "cloud.bolt.rain.fill"
-        case .fire: return "flame.fill"
+        case .storm: return "cloud.bolt.rain"
+        case .fire: return "flame"
         case .flood: return "water.waves"
-        case .transport: return "truck.box.fill"
-        case .weather: return "cloud.sun.fill"
+        case .transport: return "truck.box"
+        case .weather: return "cloud.sun"
         case .markets: return "chart.line.uptrend.xyaxis"
-        case .security: return "shield.lefthalf.filled"
+        case .security: return "shield"
         case .news: return "newspaper"
         }
     }
+
 }
 
 enum SignalMapLayout {

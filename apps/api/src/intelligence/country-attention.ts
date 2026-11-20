@@ -13,6 +13,7 @@ export function countryAttentionScore(country: CountryAttentionInput) {
   const peak = Math.min(100, Math.max(0, country.peak_priority_score ?? 0));
   const concentration = Math.min(100, country.high_priority_count / (country.event_count + 4) * 100);
   const previous = Math.max(0, country.previous_event_count ?? 0);
-  const increase = Math.min(100, Math.max(0, country.event_count - previous) / Math.sqrt(previous + 4) * 20);
+  const increase = Math.min(100, Math.max(0, (country.event_count - previous) / Math.max(4, previous)) * 100)
+    * Math.min(1, country.event_count / 8);
   return Math.round(peak * .55 + concentration * .30 + increase * .15);
 }

@@ -131,8 +131,8 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const { rows: visual } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
     WHERE ${detailScope} AND event->'imagery'<>'null'::jsonb
     ORDER BY last_activity_time DESC,id LIMIT 8`, detailParams);
-  const inInterval = `(last_activity_time >= $8::timestamptz AND (last_activity_time < $9::timestamptz OR ($10::boolean AND last_activity_time=$9::timestamptz)))`;
-  const previousInterval = inInterval.replaceAll("last_activity_time", "(last_activity_time+($11::double precision*interval '1 second'))");
+  const inInterval = `(last_activity_time >= $7::timestamptz AND (last_activity_time < $8::timestamptz OR ($9::boolean AND last_activity_time=$8::timestamptz)))`;
+  const previousInterval = inInterval.replaceAll("last_activity_time", "(last_activity_time+($10::double precision*interval '1 second'))");
   const selectedCountries = interval ? (await read<CountryAttentionInput & { country_iso2: string }>(`
     SELECT country_iso2,count(*) FILTER(WHERE ${inInterval})::int AS event_count,
       count(*) FILTER(WHERE ${inInterval} AND ${highSql})::int AS high_priority_count,
@@ -140,7 +140,7 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
       COALESCE(max(${prioritySql}) FILTER(WHERE ${inInterval}),0)::int AS peak_priority_score
     FROM intelligence_overview_projection WHERE ${scopeSql} AND country_iso2 IS NOT NULL
       AND (${inInterval} OR ${previousInterval}) GROUP BY country_iso2
-    HAVING count(*) FILTER(WHERE ${inInterval})>0`, [...detailParams, options.hours * 3600])).rows : aggregate.countries;
+    HAVING count(*) FILTER(WHERE ${inInterval})>0`, [...params.slice(0, 6), interval.start, interval.end, interval.end === window.end, options.hours * 3600])).rows : aggregate.countries;
   const now = new Date(state.generated_at);
   const samples = cards.map(({ sample }) => ({ ...sample, period: "current" as const }));
   const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now, cards.map(({ event }) => event.id));

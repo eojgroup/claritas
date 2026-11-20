@@ -6,7 +6,8 @@ WITH conflicts AS MATERIALIZED (
   SELECT event.id FROM intelligence_event event
   JOIN intelligence_location location ON location.id=event.primary_location_id
   WHERE location.location_type IN ('city','port','airport','strait','canal','chokepoint','industrial_facility','refinery','lng_terminal','rail_terminal','dam','strategic_site','point')
-    AND location.center IS NOT NULL AND event.geography IS NOT NULL
+    AND location.center IS NOT NULL
+    AND event.primary_location_id IS NOT NULL AND event.geography IS NOT NULL
     AND NOT ST_DWithin(location.center,ST_PointOnSurface(event.geography)::geography,150000)
 )
 UPDATE intelligence_event event

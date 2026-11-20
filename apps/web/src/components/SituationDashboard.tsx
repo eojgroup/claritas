@@ -71,7 +71,7 @@ export default function SituationDashboard(props: Props) {
   const mappedHighlight = [...events].sort((a, b) => (b.priority_score ?? b.relevance_score) - (a.priority_score ?? a.relevance_score))[0];
   const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country} allowsSingleFingerPan
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale={mapMetric === "attention" ? "linear" : "log"} valueDomain={mapMetric === "attention" ? [0, 100] : undefined}
-    featuredCountry={leadingCountries[0]?.country} focusOnActivity={Boolean(country)}
+    focusOnActivity={Boolean(country)}
     featuredLabel={mapMetric === "attention" ? "Highest signal relevance" : mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
     onSelectPoint={(point) => selectEvent(point.id)} showBubbles={false} showLabels legend
     legendLabel={!intervalMatches ? "Previous selection · updating" : mapMetric === "attention" ? "Signal relevance" : mapMetric === "priority" ? "High-priority updates" : "Number of updates"}

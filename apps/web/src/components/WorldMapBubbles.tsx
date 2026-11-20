@@ -480,6 +480,7 @@ export default memo(function WorldMapBubbles({
       .slice(0, 200),
     [points],
   );
+  const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(() => new Set());
 
   const markerByCountry = useMemo(
     () =>
@@ -862,12 +863,14 @@ export default memo(function WorldMapBubbles({
   const pointLabelIds = useMemo(() => {
     const accepted = new Set<string>();
     const boxes: Array<{ x: number; y: number; width: number }> = [];
-    const preferred = [...eventPoints].sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)));
+    const representatives = [...new Map([...eventPoints].reverse().map((point) => [point.kind ?? "news", point])).values()];
+    const preferred = [...new Map([...eventPoints.filter((point) => point.selected), ...representatives, ...eventPoints].map((point) => [point.id, point])).values()];
     for (const eventPoint of preferred) {
       if (!eventPoint.label) continue;
       const point = projection([eventPoint.longitude, eventPoint.latitude]);
       if (!point) continue;
-      const x = point[0] * view.scale + view.x, y = point[1] * view.scale + view.y - (eventPoint.imageUrl ? 55 : 17);
+      const hasImage = eventPoint.imageUrl && !failedImageUrls.has(eventPoint.imageUrl);
+      const x = point[0] * view.scale + view.x, y = point[1] * view.scale + view.y - (hasImage ? 55 : 17);
       const width = Math.min(220, eventPoint.label.length * 6.2);
       if (!eventPoint.selected && (x < width / 2 + 8 || x > size.width - width / 2 - 8 || y < 12 || y > size.height - 12 || (legend && x < 260 && y > size.height - 230)
         || boxes.some((box) => Math.abs(box.y - y) < 23 && Math.abs(box.x - x) < (width + box.width) / 2 + 8))) continue;
@@ -875,7 +878,7 @@ export default memo(function WorldMapBubbles({
       if (accepted.size >= (isCompact ? 4 : 8)) break;
     }
     return accepted;
-  }, [eventPoints, projection, view, size, isCompact, legend]);
+  }, [eventPoints, projection, view, size, isCompact, legend, failedImageUrls]);
   const legendPalette = markerPalette(
     markers[markers.length - 1]?.tone,
     isDark,
@@ -1168,8 +1171,9 @@ export default memo(function WorldMapBubbles({
             const point = projection([eventPoint.longitude, eventPoint.latitude]);
             if (!point) return null;
             const color = eventPointColor(eventPoint.severity, isDark);
-            const radius = 9 / view.scale;
+            const radius = 8 / view.scale;
             const EventIcon = MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
+            const hasImage = eventPoint.imageUrl && !failedImageUrls.has(eventPoint.imageUrl);
             const showPointLabel = pointLabelIds.has(eventPoint.id);
             return (
               <g
@@ -1198,10 +1202,8 @@ export default memo(function WorldMapBubbles({
                 }}
               >
                 <circle
-                  r={radius + 5 / view.scale}
-                  fill={color}
-                  fillOpacity={0.2}
-                  className="world-map-bubble-halo"
+                  r={20 / view.scale}
+                  fill="transparent"
                 />
                 {eventPoint.hasImagery && (
                   <circle
@@ -1213,35 +1215,31 @@ export default memo(function WorldMapBubbles({
                   />
                 )}
                 {eventPoint.selected && (
-                  <circle
-                    r={radius + 8 / view.scale}
+                  <rect
+                    x={-12 / view.scale} y={-12 / view.scale} width={24 / view.scale} height={24 / view.scale} rx={3 / view.scale}
                     fill="none"
                     stroke={isDark ? "#fff0d9" : "#57290f"}
                     strokeWidth={2.2 / view.scale}
                   />
                 )}
-                <circle
-                  r={radius}
-                  fill={color}
-                  stroke={isDark ? "#fff7ed" : "#ffffff"}
-                  strokeWidth={1.4 / view.scale}
-                />
-                <EventIcon aria-hidden="true" x={-6 / view.scale} y={-6 / view.scale} width={12 / view.scale} height={12 / view.scale} stroke={isDark ? "#07121a" : "#ffffff"} strokeWidth={2} pointerEvents="none" />
-                {eventPoint.imageUrl && eventPoints.filter((point) => point.imageUrl).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
+                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={isDark ? "#07121a" : "#ffffff"} strokeWidth={4} pointerEvents="none" />
+                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none" />
+                {hasImage && eventPoints.filter((point) => point.imageUrl && !failedImageUrls.has(point.imageUrl)).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
                   <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
                   <rect x={-23 / view.scale} y={-51 / view.scale} width={46 / view.scale} height={34 / view.scale} rx={4 / view.scale} fill={color} />
-                  <image href={eventPoint.imageUrl} x={-21 / view.scale} y={-49 / view.scale} width={42 / view.scale} height={30 / view.scale} preserveAspectRatio="xMidYMid slice" />
+                  <image href={eventPoint.imageUrl} x={-21 / view.scale} y={-49 / view.scale} width={42 / view.scale} height={30 / view.scale} preserveAspectRatio="xMidYMid slice"
+                    onError={() => setFailedImageUrls((urls) => new Set(urls).add(eventPoint.imageUrl!))} />
                 </g>}
                 {showPointLabel && (
                   <text
-                    y={eventPoint.imageUrl ? -55 / view.scale : -(radius + 6 / view.scale)}
+                    y={hasImage ? -55 / view.scale : -(radius + 6 / view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
                     stroke={isDark ? "#07121a" : "#eef2f3"}
-                    strokeWidth={3 / view.scale}
+                    strokeWidth={2.5 / view.scale}
                     paintOrder="stroke"
-                    fontSize={11 / view.scale}
-                    fontWeight={800}
+                    fontSize={10.5 / view.scale}
+                    fontWeight={600}
                   >
                     {eventPoint.label && eventPoint.label.length > 36 ? `${eventPoint.label.slice(0, 35)}…` : eventPoint.label}
                   </text>
@@ -1409,7 +1407,7 @@ export default memo(function WorldMapBubbles({
             <strong>Events · tap for the story</strong>
             <div className="map-event-types">{[...new Set(eventPoints.map((point) => point.kind ?? "news"))].map((kind) => {
               const { icon: Icon, label } = MAP_EVENT_KINDS[kind];
-              return <span key={kind}><Icon size={13} aria-hidden="true" />{label}</span>;
+              return <span key={kind}><Icon size={13} strokeWidth={1.5} aria-hidden="true" />{label}</span>;
             })}</div>
             <div className="map-event-levels" aria-label="Reported severity">{(["low", "medium", "high", "critical"] as const).map((level) => <span key={level}><i style={{ background: eventPointColor(level, isDark) }} />{level}</span>)}</div>
             <p className="map-key-note">Colour = reported severity · ring = image</p>

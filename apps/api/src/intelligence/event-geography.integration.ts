@@ -47,7 +47,7 @@ test("conflicting news geography cannot move Hormuz; retained coordinates keep t
     // Replay the historic corrupt state through the actual repair migration.
     await client.query(`UPDATE intelligence_event SET geography=ST_SetSRID(ST_MakePoint(18.05,59.3333),4326),
       metadata=metadata||'{"exact_geography":true,"geography_provenance_key":"news:global_event:3"}' WHERE id=$1`, [event.id]);
-    await client.query(readFileSync(resolve(__dirname, "../../../../infra/gcp/sql/V75__repair_conflicting_news_geography.sql"), "utf8"));
+    await client.query(readFileSync(resolve(__dirname, "../../../../infra/gcp/sql/V76__repair_conflicting_news_geography.sql"), "utf8"));
     saved = (await client.query("SELECT geography,metadata FROM intelligence_event WHERE id=$1", [event.id])).rows[0];
     assert.equal(saved.geography, null);
     assert.equal(saved.metadata.geography_repair_v1.previous_latitude, 59.3333);

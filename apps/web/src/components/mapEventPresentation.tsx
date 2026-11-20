@@ -2,7 +2,7 @@ import { Activity, CloudLightning, CloudSun, Flame, Landmark, Newspaper, ShieldA
 
 export const MAP_EVENT_KINDS = {
   earthquake: { label: "Earthquake", icon: Activity }, storm: { label: "Storm", icon: CloudLightning },
-  fire: { label: "Fire", icon: Flame }, flood: { label: "Flood", icon: Waves },
+  fire: { label: "Fire signal", icon: Flame }, flood: { label: "Flood", icon: Waves },
   transport: { label: "Transport", icon: Truck }, weather: { label: "Weather", icon: CloudSun },
   markets: { label: "Markets", icon: Landmark }, security: { label: "Security", icon: ShieldAlert },
   news: { label: "News report", icon: Newspaper },
