@@ -5,6 +5,7 @@ import WorldMapBubbles from "./WorldMapBubbles";
 import type { IntelligenceEventDetail } from "../lib/api";
 import { evidenceFamily, isCoverageAssessment, sourceFamilyLabel } from "./eventSourcePresentation";
 import SatelliteImage from "./SatelliteImage";
+import { mapEventKind } from "./mapEventPresentation";
 
 const validPoint = (lat: unknown, lon: unknown): lat is number => typeof lat === "number" && typeof lon === "number" && Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 
@@ -13,7 +14,8 @@ const EventLocationMap = memo(function EventLocationMap({ detail }: { detail: In
   const coordinates = detail.understanding?.coordinates;
   const primary = coordinates && validPoint(coordinates.latitude, coordinates.longitude) ? coordinates : null;
   const center = primary ?? located[0];
-  const points = [...(primary ? [{ id: "event", latitude: primary.latitude, longitude: primary.longitude, title: primary.label, subtitle: primary.basis === "estimated_mapped" ? "Estimated event location" : "Source-observed event location" }] : []), ...located.map((location) => ({ id: location.id, latitude: location.latitude!, longitude: location.longitude!, title: location.canonical_name, subtitle: location.relationship }))];
+  const presentation = { kind: mapEventKind(detail.event.event_type), severity: detail.event.severity };
+  const points = [...(primary ? [{ ...presentation, id: "event", latitude: primary.latitude, longitude: primary.longitude, title: primary.label, subtitle: primary.basis === "estimated_mapped" ? "Estimated event location" : "Source-observed event location" }] : []), ...located.map((location) => ({ ...presentation, id: location.id, latitude: location.latitude!, longitude: location.longitude!, title: location.canonical_name, subtitle: location.relationship }))];
   const country = detail.event.primary_country_iso2;
   return <figure className="event-location-map">
         <figcaption><strong><CountryFlag country={detail.event.primary_country_iso2} />Geographic context</strong><span>{center ? detail.event.location_name || "Event area" : "Location not resolved · world overview"}</span></figcaption>
