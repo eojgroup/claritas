@@ -68,6 +68,8 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.ok(!high.events.some((event) => event.id === olderLocated.id));
     assert.ok(high.map_events.some((event) => event.id === olderLocated.id), "older located events survive bursts of newer unlocated cards");
     assert.equal(high.countries.reduce((sum, country) => sum + country.event_count, 0), high.summary.event_count);
+    assert.equal(high.countries.reduce((sum, country) => sum + country.previous_event_count, 0), high.summary.previous_event_count);
+    assert.ok(high.countries.every((country) => Number.isInteger(country.attention_score) && country.attention_score >= 0 && country.attention_score <= 100));
     assert.equal(high.timeline.length, 24);
     assert.equal(high.buckets[0].event_count, 2);
     assert.equal(high.buckets.at(-1)?.event_count, 401);
@@ -85,6 +87,7 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.equal(interval.events.length, 2, "interval selection retrieves older developments outside the initial card page");
     assert.ok(interval.events.some((event) => event.id === olderLocated.id));
     assert.equal(interval.countries.reduce((sum, entry) => sum + entry.event_count, 0), 2);
+    assert.ok(interval.countries.every((country) => Number.isInteger(country.attention_score)));
     assert.ok(interval.events.every((event) => event.last_activity_time >= interval.selection!.start && event.last_activity_time < interval.selection!.end));
     assert.ok(interval.map_events.some((event) => event.id === olderLocated.id));
     const scoped = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ country: "SE", topic: "transport" }), measured);

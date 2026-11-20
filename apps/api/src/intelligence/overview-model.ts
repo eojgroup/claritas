@@ -1,4 +1,5 @@
 import { normalizeIntelligenceDisplayLanguage } from "./display-language";
+import { countryAttentionScore } from "./country-attention";
 export const OVERVIEW_TOPICS = [
   { key: "security", label: "Security & geopolitics", pattern: "(security|conflict|military|protest|politic|diploma)" },
   { key: "disasters", label: "Disasters & hazards", pattern: "(earthquake|seismic|wildfire|flood|fire|volcan|disaster)" },
@@ -130,7 +131,10 @@ export function buildOverviewAnalytics(rawRows: OverviewSample[], options: Requi
   }).sort((a, b) => b.event_count - a.event_count || b.priority_score - a.priority_score || a.key.localeCompare(b.key)).slice(0, 8);
   const countries = [...new Set(current.map((row) => row.primary_country_iso2).filter((value): value is string => Boolean(value)))].map((country_iso2) => {
     const members = current.filter((row) => row.primary_country_iso2 === country_iso2);
-    return { country_iso2, event_count: members.length, high_priority_count: members.filter(highPriority).length };
+    const metrics = { country_iso2, event_count: members.length, high_priority_count: members.filter(highPriority).length,
+      previous_event_count: previous.filter((row) => row.primary_country_iso2 === country_iso2).length,
+      peak_priority_score: Math.max(0, ...members.map((row) => overviewPriority(row, now))) };
+    return { ...metrics, attention_score: countryAttentionScore(metrics) };
   }).sort((a, b) => b.event_count - a.event_count || a.country_iso2.localeCompare(b.country_iso2));
   const bucketDuration = window.bucket_hours * 3_600_000;
   const buckets = Array.from({ length: options.hours / window.bucket_hours }, (_, index) => {

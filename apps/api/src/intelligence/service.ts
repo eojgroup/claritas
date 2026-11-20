@@ -1,4 +1,5 @@
 import { readPreparedIntelligenceFeed } from "./feed-snapshot";
+import { newsCoordinateConflictsWithLocation, NAMED_POINT_LOCATION_TYPES } from "./event-geography";
 import { listNewsImages } from "../image-analysis/news-image-store";
 import { getEventContextImages } from "./context-images";
 import { isTimelyEventMedia } from "./event-media";
@@ -1410,13 +1411,16 @@ export async function upsertIntelligenceSignalTx(
   input: IntelligenceSignalInput,
   options: { suppressAlertCandidate?: boolean; suppressEarthObservation?: boolean; preserveCanonical?: boolean } = {},
 ) {
-  const existing = await client.query<Pick<EventRow, "id" | "severity" | "confidence" | "metadata">>(
-    `SELECT id,severity,confidence,metadata FROM intelligence_event WHERE dedupe_key = $1 FOR UPDATE`,
+  const existing = await client.query<Pick<EventRow, "id" | "severity" | "confidence" | "metadata" | "primary_location_id" | "primary_country_iso2"> & SignalLocation & { has_geography: boolean }>(
+    `SELECT event.id,event.severity,event.confidence,event.metadata,event.primary_location_id,event.primary_country_iso2,
+       event.geography IS NOT NULL AS has_geography,location.location_type,location.latitude,location.longitude
+     FROM intelligence_event event LEFT JOIN intelligence_location location ON location.id=event.primary_location_id
+     WHERE event.dedupe_key = $1 FOR UPDATE OF event`,
     [input.dedupeKey],
   );
   const incomingCanonicalRank = canonicalSignalRank(input);
   const canonicalEvidenceKey = `${input.evidence.domain}:${input.evidence.sourceRecordType}:${input.evidence.sourceRecordId}`;
-  const trustedIncomingCoordinates = input.coordinatesAreExact === true
+  let trustedIncomingCoordinates = input.coordinatesAreExact === true
     ? resolveSignalCoordinates({
         latitude: input.latitude,
         longitude: input.longitude,
@@ -1437,6 +1441,24 @@ export async function upsertIntelligenceSignalTx(
     incomingEvidenceKey: canonicalEvidenceKey,
     incomingCanonicalRank,
   });
+  const retainedLocation = input.evidence.domain === "news" && trustedIncomingCoordinates
+    ? existing.rows[0]?.primary_location_id && existing.rows[0].location_type !== "country"
+      ? existing.rows[0] : await loadSignalLocation(client, input.primaryLocationId)
+    : null;
+  const coordinateConflict = input.evidence.domain === "news" && trustedIncomingCoordinates
+    && newsCoordinateConflictsWithLocation(trustedIncomingCoordinates, retainedLocation);
+  if (coordinateConflict) {
+    trustedIncomingCoordinates = null;
+    delete eventMetadata.exact_geography;
+    delete eventMetadata.geography_provenance_key;
+    eventMetadata.geography_conflict = { reason: "news_coordinates_conflict_with_named_location", source: canonicalEvidenceKey };
+  }
+  // Provenance must describe the coordinates actually retained by the SQL
+  // update, rather than the last enrichment record to arrive.
+  if (existing.rows[0]?.has_geography && existing.rows[0].metadata.exact_geography === true && !replaceCanonical) {
+    delete eventMetadata.exact_geography;
+    delete eventMetadata.geography_provenance_key;
+  }
   // Origin describes the source that opened the investigation, even when a
   // stronger source later becomes its canonical headline. Context must also
   // retain its own epistemic label rather than relabelling the whole event.
@@ -1499,7 +1521,7 @@ export async function upsertIntelligenceSignalTx(
     [
       input.dedupeKey, input.eventType, input.title, input.summary, input.status ?? "active",
       severity, Math.min(1, Math.max(0, confidence)), input.startTime, input.lastActivityTime,
-      input.primaryLocationId ?? null, input.primaryCountryIso2?.toUpperCase() ?? null,
+      input.primaryLocationId ?? null, coordinateConflict ? existing.rows[0]?.primary_country_iso2 ?? null : input.primaryCountryIso2?.toUpperCase() ?? null,
       trustedIncomingCoordinates?.latitude ?? null,
       trustedIncomingCoordinates?.longitude ?? null,
       Math.min(1, Math.max(0, input.relevanceScore)),
@@ -1509,8 +1531,32 @@ export async function upsertIntelligenceSignalTx(
       replaceCanonical, incomingCanonicalRank, canonicalEvidenceKey, Boolean(trustedIncomingCoordinates),
     ],
   );
-  const event = eventResult.rows[0];
-  if (input.primaryLocationId) {
+  let event = eventResult.rows[0];
+  if (input.evidence.domain === "news" && existing.rows[0]?.has_geography
+      && input.primaryLocationId && existing.rows[0].primary_location_id !== event.primary_location_id) {
+    // A named story can arrive after its coordinate-bearing enrichment.
+    // Validate that upgrade too. News geometry can fall back to the named
+    // place; an observed physical position must retain its original anchor.
+    const newsPosition = `(event.metadata->>'geography_provenance_key' LIKE 'news:%')`;
+    const { rows } = await client.query<EventRow>(`UPDATE intelligence_event event SET
+      geography=CASE WHEN ${newsPosition} THEN NULL ELSE event.geography END,
+      primary_location_id=CASE WHEN ${newsPosition} THEN event.primary_location_id ELSE $3::uuid END,
+      primary_country_iso2=CASE WHEN ${newsPosition} THEN location.country_iso2 ELSE $4::text END,
+      metadata=CASE WHEN ${newsPosition} THEN
+        (event.metadata-'exact_geography'-'geography_provenance_key')||jsonb_build_object('geography_repair_v1',jsonb_build_object(
+          'reason','news_coordinates_conflict_with_named_location','previous_latitude',ST_Y(ST_PointOnSurface(event.geography)),
+          'previous_longitude',ST_X(ST_PointOnSurface(event.geography)),
+          'previous_provenance',event.metadata->>'geography_provenance_key','repaired_at',now()))
+        ELSE event.metadata||jsonb_build_object('geography_conflict',jsonb_build_object(
+          'reason','named_location_conflicts_with_observed_coordinates','rejected_location_id',location.id)) END,
+      updated_at=now()
+      FROM intelligence_location location WHERE event.id=$1::uuid AND location.id=event.primary_location_id
+        AND location.location_type=ANY($2::text[]) AND location.center IS NOT NULL
+        AND NOT ST_DWithin(location.center,ST_PointOnSurface(event.geography)::geography,150000)
+      RETURNING event.*`, [event.id, NAMED_POINT_LOCATION_TYPES, existing.rows[0].primary_location_id, existing.rows[0].primary_country_iso2]);
+    if (rows[0]) event = rows[0];
+  }
+  if (input.primaryLocationId && event.primary_location_id === input.primaryLocationId) {
     await client.query(
       `INSERT INTO intelligence_event_location (event_id, location_id, relationship, confidence)
        VALUES ($1, $2, 'primary', $3)

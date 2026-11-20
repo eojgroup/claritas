@@ -88,6 +88,7 @@ function renderMap() {
   return { mapLayer, onSelect, onSelectPoint, svg };
 }
 
+
 function dispatchWheel(
   target: Element,
   init: WheelEventInit,
@@ -122,6 +123,26 @@ describe("WorldMapBubbles interaction", () => {
     cleanup();
     vi.unstubAllGlobals();
   });
+  it("hides an unavailable image while keeping its event selectable", () => {
+    const select = vi.fn();
+    const { container } = render(<WorldMapBubbles data={[]} onSelectPoint={select} points={[{
+      id: "photo-event", latitude: 26.56, longitude: 56.25, title: "Located report", kind: "news",
+      imageUrl: "/api/news-images/unavailable/preview", hasImagery: true,
+    }]} />);
+    const photo = container.querySelector("image");
+    expect(photo).toBeTruthy();
+    fireEvent.error(photo!);
+    expect(container.querySelector("image")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Located report/ }));
+    expect(select).toHaveBeenCalledWith(expect.objectContaining({ id: "photo-event" }));
+  });
+
+it("keeps the event key visible without opening a disclosure", () => {
+  renderMap();
+  expect(screen.getByLabelText("Map event types").textContent).toContain("News report");
+  expect(screen.getByLabelText("Reported severity").textContent).toContain("critical");
+  expect(screen.queryByText("How to read the map")).toBeNull();
+});
 
   it("renders and remains interactive when the event layer is omitted", () => {
     // News, weather and market maps provide countries only. This path used to

@@ -2508,7 +2508,7 @@ export async function fetchIntelligenceEvents(params?: {
 export type OverviewTopic = "security" | "disasters" | "weather" | "transport" | "markets" | "agriculture" | "developments";
 export type OverviewDirection = "rising" | "falling" | "steady" | "new" | "quiet" | "unavailable";
 export type IntelligenceOverview = {
-  countries?: Array<{ country_iso2: string; event_count: number; high_priority_count: number }>;
+  countries?: Array<{ country_iso2: string; event_count: number; high_priority_count: number; attention_score?: number; previous_event_count?: number; peak_priority_score?: number }>;
   map_events?: IntelligenceEvent[];
   visual_events?: IntelligenceEvent[];
   generated_at: string;

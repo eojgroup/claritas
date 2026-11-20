@@ -949,6 +949,13 @@ a {
 .map-data-legend svg {
   width: 3.5rem;
 }
+.map-key-note { max-width: 225px; margin-top: .35rem; font-size: 11px; line-height: 1.4; }
+.map-visible-event-key { margin-top: .5rem; padding-top: .5rem; border-top: 1px solid var(--shell-border); font-size: 11px; }
+.map-event-types, .map-event-levels { display: flex; flex-wrap: wrap; gap: .35rem .65rem; margin-top: .35rem; }
+.map-event-types span, .map-event-levels span { display: inline-flex; align-items: center; gap: .25rem; }
+.map-data-legend .map-event-types svg { width: 13px; height: 13px; flex: 0 0 13px; }
+.map-event-levels { font-size: 10px; text-transform: capitalize; }
+.map-event-levels i { width: 7px; height: 7px; border-radius: 50%; }
 
 .map-legend-coverage {
   white-space: nowrap;
@@ -5761,9 +5768,10 @@ body {
   .situation-panel-heading p { font-size: .65rem; }
   .situation-map-heading h2 { font-size: .9rem; }
   .situation-map-heading > span:last-child { font-size: .6rem; }
-  .situation-map-canvas .map-data-legend { max-width: 12rem; padding: .45rem .65rem; }
+  .situation-map-canvas .map-data-legend { max-width: 14rem; padding: .45rem .65rem; }
   .situation-map-canvas .map-legend-title { font-size: .52rem; letter-spacing: .08em; }
   .situation-map-canvas .map-data-legend > div { font-size: .55rem; }
+  .situation-map-canvas .map-data-legend > .map-visible-event-key { font-size: 11px; }
   .situation-map-canvas .map-legend-coverage { display: none; }
 }
 @media (prefers-reduced-motion: reduce) { .situation-context-panel { transition: none; } }
