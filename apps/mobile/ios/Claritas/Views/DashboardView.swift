@@ -5455,7 +5455,7 @@ private struct NativeSignalMap: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .bottomTrailing) {
-            SignalDensityLegend(mode: mode, points: points, events: events)
+            SignalDensityLegend(mode: mode, points: points, events: events, compact: compactPresentation)
                 .padding(8)
                 .allowsHitTesting(false)
         }
@@ -5515,6 +5515,7 @@ private struct SignalDensityLegend: View {
     let mode: SignalMapMode
     let points: [CountryBubblePoint]
     var events: [IntelligenceEvent] = []
+    var compact = false
 
     private var values: [Double] { points.map(\.colorValue) }
     private var lower: Double { mode == .signals ? 0 : (values.min() ?? 0) }
@@ -5523,39 +5524,67 @@ private struct SignalDensityLegend: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(isOverview ? "SIGNAL RELEVANCE" : mode.legend.uppercased())
-                .font(.system(size: 8, weight: .bold))
-                .tracking(0.8)
+            HStack {
+                Text(isOverview ? "SIGNAL RELEVANCE" : mode.legend.uppercased())
+                    .font(.system(size: 8, weight: .bold)).tracking(0.8)
+                if compact {
+                    Spacer(minLength: 2)
+                    Text("\(format(lower))–\(format(upper))").font(.system(size: 8).monospacedDigit())
+                }
+            }
             LinearGradient(
                 colors: legendColors,
                 startPoint: .leading,
                 endPoint: .trailing
             )
-            .frame(width: 124, height: 5)
+            .frame(width: compact ? 150 : 124, height: 5)
             .clipShape(Capsule())
-            HStack {
-                Text(format(lower))
-                Spacer()
-                Text(format(upper))
+            if !compact {
+                HStack {
+                    Text(format(lower))
+                    Spacer()
+                    Text(format(upper))
+                }.font(.system(size: 9).monospacedDigit())
             }
-            .font(.system(size: 9).monospacedDigit())
-            if isOverview { Text("Importance + unusual changes\nTap country for profile").font(.system(size: 10)).lineSpacing(2) }
+            if isOverview {
+                Text(compact ? "Country: importance + change" : "Importance + unusual changes\nTap country for profile")
+                    .font(.system(size: compact ? 8 : 10)).lineSpacing(compact ? 0 : 2)
+            }
             if !events.isEmpty {
                 Divider().overlay(Color.white.opacity(0.3))
-                Text("EVENTS · TAP FOR STORY").font(.system(size: 9, weight: .bold))
+                if !compact { Text("EVENTS · TAP FOR STORY").font(.system(size: 9, weight: .bold)) }
                 let kinds = SignalMapEventKind.allCases.filter { kind in events.contains { SignalMapEventKind(eventType: $0.event_type) == kind } }
-                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 4) {
-                    ForEach(kinds, id: \.rawValue) { kind in Label(kind.label, systemImage: kind.symbol).font(.system(size: 10)) }
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: compact ? 2 : 4) {
+                    ForEach(kinds, id: \.rawValue) { kind in Label(kind.label, systemImage: kind.symbol).font(.system(size: compact ? 9 : 10)) }
                 }
-                Text("Colour = reported severity\nBlue low · gold medium\nOrange high · red critical\nRing = image · number = group")
-                    .font(.system(size: 9)).lineSpacing(2)
+                if compact {
+                    Text("Reported severity").font(.system(size: 8))
+                    HStack(spacing: 5) {
+                        severityKey("Low", color: "#78A9BA")
+                        severityKey("Medium", color: "#D6BA78")
+                        severityKey("High", color: "#E98D53")
+                        severityKey("Critical", color: "#E57168")
+                    }
+                    Text("Tap country: profile · icon: story\nRing: image · number: nearby events")
+                        .font(.system(size: 8)).lineSpacing(1)
+                } else {
+                    Text("Colour = reported severity\nBlue low · gold medium\nOrange high · red critical\nRing = image · number = group")
+                        .font(.system(size: 9)).lineSpacing(2)
+                }
             }
         }
         .foregroundStyle(.white.opacity(0.88))
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .frame(width: events.isEmpty ? 140 : 200)
+        .frame(width: events.isEmpty ? 140 : compact ? 164 : 200)
         .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 7))
+    }
+
+    private func severityKey(_ label: String, color: String) -> some View {
+        HStack(spacing: 2) {
+            Circle().fill(Color(hex: color)).frame(width: 4, height: 4)
+            Text(label).font(.system(size: 8))
+        }.accessibilityLabel("\(label) reported severity")
     }
 
     private var legendColors: [Color] {
