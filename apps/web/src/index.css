@@ -8,69 +8,69 @@
   text-rendering: optimizeLegibility;
   --font-display: "Fraunces", "Times New Roman", serif;
   --font-body: "Work Sans", "Gill Sans", "Trebuchet MS", sans-serif;
-  --brand-navy: #0f2136;
-  --brand-blue: #386b86;
-  --brand-teal: #2f6b62;
-  --brand-steel: #647286;
-  --brand-platinum: #e4e9ef;
-  --brand-cloud: #f4f6f8;
-  --brand-graphite: #172437;
-  --brand-bronze: #b3542d;
-  --brand-mark-1: #17324d;
-  --brand-mark-2: #4b849f;
-  --brand-mark-3: #d7e2ea;
+  --brand-navy: #19382a;
+  --brand-blue: #426b51;
+  --brand-teal: #2d6045;
+  --brand-steel: #596b5a;
+  --brand-platinum: #e8ddc9;
+  --brand-cloud: #fffaf0;
+  --brand-graphite: #19382a;
+  --brand-bronze: #a74720;
+  --brand-mark-1: #234e36;
+  --brand-mark-2: #c87942;
+  --brand-mark-3: #e8ddc9;
   --login-ink: var(--brand-navy);
   --login-ink-soft: var(--brand-steel);
   --login-cream: var(--brand-cloud);
-  --login-sand: #e7edf2;
-  --login-mist: #607086;
+  --login-sand: #e8ddc9;
+  --login-mist: #64745f;
   --login-teal: var(--brand-teal);
   --login-amber: var(--brand-bronze);
-  --shell-bg: #edf1f5;
-  --shell-bg-elevated: #e7ecf2;
-  --shell-sidebar: #0b1727;
-  --shell-sidebar-border: rgba(195, 209, 225, 0.16);
-  --shell-surface: rgba(255, 255, 255, 0.94);
-  --shell-surface-strong: #ffffff;
-  --shell-surface-muted: rgba(239, 243, 247, 0.96);
-  --shell-border: rgba(15, 33, 54, 0.16);
-  --shell-border-strong: rgba(15, 33, 54, 0.3);
+  --shell-bg: #f2ebdd;
+  --shell-bg-elevated: #e8ddc9;
+  --shell-sidebar: #18392b;
+  --shell-sidebar-border: rgba(225, 231, 212, 0.18);
+  --shell-surface: rgba(255, 250, 240, 0.96);
+  --shell-surface-strong: #fffcf5;
+  --shell-surface-muted: rgba(234, 226, 209, 0.96);
+  --shell-border: rgba(37, 75, 54, 0.2);
+  --shell-border-strong: rgba(37, 75, 54, 0.36);
   --shell-ink: var(--brand-graphite);
-  --shell-muted: #586779;
-  --shell-accent: #b3542d;
-  --shell-accent-2: #2f6b62;
-  --shell-strong: #17324d;
-  --shell-on-strong: #ffffff;
-  --shell-positive: #2f6858;
-  --shell-on-accent: #ffffff;
-  --shell-selected: #d8e8f0;
-  --shell-on-selected: #10243a;
+  --shell-muted: #596b5a;
+  --shell-accent: #a74720;
+  --shell-accent-2: #2d6045;
+  --shell-strong: #234e36;
+  --shell-on-strong: #fffaf0;
+  --shell-positive: #2d6045;
+  --shell-on-accent: #fffaf0;
+  --shell-selected: #dce5d6;
+  --shell-on-selected: #19382a;
   --glass-highlight: rgba(255, 255, 255, 0.72);
   --glass-reflection: rgba(255, 255, 255, 0.32);
   --glass-shadow: rgba(11, 32, 40, 0.12);
   --signal-emerald: var(--brand-teal);
-  --signal-emerald-soft: rgba(47, 107, 98, 0.13);
-  --signal-sky: #386b86;
-  --signal-sky-soft: rgba(56, 107, 134, 0.13);
+  --signal-emerald-soft: rgba(45, 96, 69, 0.13);
+  --signal-sky: #426b51;
+  --signal-sky-soft: rgba(66, 107, 81, 0.13);
   --signal-amber: var(--brand-bronze);
-  --signal-amber-soft: rgba(169, 120, 70, 0.16);
+  --signal-amber-soft: rgba(167, 71, 32, 0.14);
   --signal-rose: #a73b32;
   --signal-rose-soft: rgba(167, 59, 50, 0.13);
-  --viz-grid: rgba(11, 32, 40, 0.18);
-  --viz-news: #386b86;
-  --viz-weather: #b3542d;
+  --viz-grid: rgba(37, 75, 54, 0.18);
+  --viz-news: #426b51;
+  --viz-weather: #a74720;
   --viz-market: var(--brand-bronze);
-  --viz-violet: #5c647e;
-  --viz-amber: #a97846;
+  --viz-violet: #766b48;
+  --viz-amber: #946326;
   --viz-rose: #a73b32;
   --viz-positive: var(--brand-teal);
   --viz-negative: #a73b32;
-  --hero-glow-1: rgba(56, 107, 134, 0.08);
-  --hero-glow-2: rgba(47, 107, 98, 0.07);
+  --hero-glow-1: rgba(66, 107, 81, 0.07);
+  --hero-glow-2: rgba(167, 71, 32, 0.05);
   --shadow-soft: 0 8px 24px rgba(15, 33, 54, 0.08), inset 0 1px 0 var(--glass-highlight);
   --shadow-strong: 0 18px 48px rgba(15, 33, 54, 0.13), inset 0 1px 0 var(--glass-highlight);
   --home-bg: var(--shell-bg);
-  --home-header: #172f42;
+  --home-header: #18392b;
   --home-surface: var(--shell-surface);
   --home-border: var(--shell-border);
   --home-ink: var(--shell-ink);
@@ -83,65 +83,65 @@
 
 html.dark {
   color-scheme: dark;
-  --brand-navy: #07111d;
-  --brand-blue: #79a9c1;
-  --brand-teal: #6eb5a7;
-  --brand-steel: #aab7c7;
-  --brand-platinum: #d7e2ea;
-  --brand-cloud: #07111d;
-  --brand-graphite: #f4f7fb;
-  --brand-bronze: #f0a266;
-  --brand-mark-1: #79a9c1;
-  --brand-mark-2: #f0a266;
-  --brand-mark-3: #f4f7fb;
-  --login-ink: #f4f7fb;
-  --login-ink-soft: #aab7c7;
-  --login-cream: #07111d;
-  --login-sand: #122338;
-  --login-mist: #8797aa;
-  --login-teal: #6eb5a7;
-  --login-amber: #f0a266;
-  --shell-bg: #07111d;
-  --shell-bg-elevated: #0a1624;
-  --shell-sidebar: #050d17;
-  --shell-sidebar-border: rgba(151, 172, 197, 0.16);
-  --shell-surface: rgba(14, 27, 42, 0.97);
-  --shell-surface-strong: #122338;
-  --shell-surface-muted: rgba(22, 40, 59, 0.96);
-  --shell-border: rgba(151, 172, 197, 0.22);
-  --shell-border-strong: rgba(151, 172, 197, 0.4);
-  --shell-ink: #f4f7fb;
-  --shell-muted: #aab7c7;
-  --shell-accent: #f0a266;
-  --shell-accent-2: #6eb5a7;
-  --shell-strong: #245675;
-  --shell-on-strong: #ffffff;
-  --shell-positive: #7bc7aa;
-  --shell-on-accent: #1a2635;
-  --shell-selected: rgba(79, 145, 178, 0.28);
-  --shell-on-selected: #f4f7fb;
+  --brand-navy: #0d1b16;
+  --brand-blue: #9fb7a3;
+  --brand-teal: #9fb7a3;
+  --brand-steel: #b7c0af;
+  --brand-platinum: #e8ddc9;
+  --brand-cloud: #0d1b16;
+  --brand-graphite: #f2ebdd;
+  --brand-bronze: #eca168;
+  --brand-mark-1: #9fb7a3;
+  --brand-mark-2: #eca168;
+  --brand-mark-3: #f2ebdd;
+  --login-ink: #f2ebdd;
+  --login-ink-soft: #b7c0af;
+  --login-cream: #0d1b16;
+  --login-sand: #203b30;
+  --login-mist: #a1ae9b;
+  --login-teal: #9fb7a3;
+  --login-amber: #eca168;
+  --shell-bg: #0d1b16;
+  --shell-bg-elevated: #13271f;
+  --shell-sidebar: #091710;
+  --shell-sidebar-border: rgba(159, 183, 163, 0.2);
+  --shell-surface: rgba(24, 47, 38, 0.97);
+  --shell-surface-strong: #203b30;
+  --shell-surface-muted: rgba(36, 62, 50, 0.96);
+  --shell-border: rgba(159, 183, 163, 0.26);
+  --shell-border-strong: rgba(159, 183, 163, 0.46);
+  --shell-ink: #f2ebdd;
+  --shell-muted: #b7c0af;
+  --shell-accent: #eca168;
+  --shell-accent-2: #9fb7a3;
+  --shell-strong: #315e46;
+  --shell-on-strong: #fffaf0;
+  --shell-positive: #9fc1a5;
+  --shell-on-accent: #19382a;
+  --shell-selected: #2f4d3b;
+  --shell-on-selected: #f2ebdd;
   --glass-highlight: rgba(255, 255, 255, 0.14);
   --glass-reflection: rgba(255, 255, 255, 0.07);
   --glass-shadow: rgba(0, 0, 0, 0.3);
-  --signal-emerald: #7bc7aa;
-  --signal-emerald-soft: rgba(123, 199, 170, 0.15);
-  --signal-sky: #79b7d4;
-  --signal-sky-soft: rgba(121, 183, 212, 0.15);
-  --signal-amber: #f0a266;
-  --signal-amber-soft: rgba(240, 162, 102, 0.15);
+  --signal-emerald: #9fc1a5;
+  --signal-emerald-soft: rgba(159, 193, 165, 0.15);
+  --signal-sky: #a3bdab;
+  --signal-sky-soft: rgba(163, 189, 171, 0.15);
+  --signal-amber: #eca168;
+  --signal-amber-soft: rgba(236, 161, 104, 0.15);
   --signal-rose: #d96b62;
   --signal-rose-soft: rgba(217, 107, 98, 0.14);
-  --viz-grid: rgba(151, 172, 197, 0.17);
-  --viz-news: #79b7d4;
-  --viz-weather: #f0a266;
-  --viz-market: #d8b06e;
-  --viz-violet: #a997d9;
-  --viz-amber: #f0a266;
+  --viz-grid: rgba(159, 183, 163, 0.18);
+  --viz-news: #a3bdab;
+  --viz-weather: #eca168;
+  --viz-market: #d7be88;
+  --viz-violet: #bdb28e;
+  --viz-amber: #eca168;
   --viz-rose: #d96b62;
-  --viz-positive: #7bc7aa;
+  --viz-positive: #9fc1a5;
   --viz-negative: #d96b62;
-  --hero-glow-1: rgba(121, 183, 212, 0.07);
-  --hero-glow-2: rgba(110, 181, 167, 0.06);
+  --hero-glow-1: rgba(159, 183, 163, 0.06);
+  --hero-glow-2: rgba(236, 161, 104, 0.05);
   --shadow-soft: none;
   --shadow-strong: var(--elevation-overlay);
 }
@@ -3966,12 +3966,12 @@ body {
 }
 
 .transport-map-ocean {
-  fill: color-mix(in srgb, var(--shell-bg) 92%, #173a50);
+  fill: color-mix(in srgb, var(--shell-bg) 92%, #234e36);
 }
 
 .transport-map-land path {
-  fill: color-mix(in srgb, var(--shell-surface-strong) 84%, #426174);
-  stroke: color-mix(in srgb, var(--shell-border) 72%, #7190a0);
+  fill: color-mix(in srgb, var(--shell-surface-strong) 84%, #6b896b);
+  stroke: color-mix(in srgb, var(--shell-border) 72%, #8fa58d);
   stroke-width: 0.6;
   vector-effect: non-scaling-stroke;
 }
@@ -3983,8 +3983,8 @@ body {
 }
 
 .transport-map-land path[data-comparison="true"] {
-  fill: color-mix(in srgb, #77a8ba 30%, var(--shell-surface-strong));
-  stroke: color-mix(in srgb, #77a8ba 82%, var(--shell-ink));
+  fill: color-mix(in srgb, var(--shell-accent-2) 30%, var(--shell-surface-strong));
+  stroke: color-mix(in srgb, var(--shell-accent-2) 82%, var(--shell-ink));
   stroke-width: 1.5;
 }
 
@@ -4006,19 +4006,19 @@ body {
 }
 
 .transport-map-connection-band[data-mode="aviation"] {
-  stroke: #77a8ba;
+  stroke: var(--shell-accent-2);
 }
 
 .transport-map-connection-band[data-mode="maritime"] {
-  stroke: #eda36a;
+  stroke: var(--shell-accent);
 }
 
 #transport-arrow-aviation path {
-  fill: #77a8ba;
+  fill: var(--shell-accent-2);
 }
 
 #transport-arrow-maritime path {
-  fill: #eda36a;
+  fill: var(--shell-accent);
 }
 
 .transport-map-routes path {
@@ -4031,11 +4031,11 @@ body {
 }
 
 .transport-map-routes path[data-mode="aviation"] {
-  stroke: #77a8ba;
+  stroke: var(--shell-accent-2);
 }
 
 .transport-map-routes path[data-mode="maritime"] {
-  stroke: #eda36a;
+  stroke: var(--shell-accent);
 }
 
 .transport-map-routes path[data-selected="true"] {
@@ -4082,8 +4082,8 @@ body {
 }
 
 .transport-map-flow-nodes g[data-comparison="true"] circle {
-  fill: color-mix(in srgb, #77a8ba 34%, var(--shell-surface));
-  stroke: #77a8ba;
+  fill: color-mix(in srgb, var(--shell-accent-2) 34%, var(--shell-surface));
+  stroke: var(--shell-accent-2);
   stroke-width: 1.8;
 }
 
@@ -4117,12 +4117,12 @@ body {
 }
 
 .transport-map-entities g[data-mode="aviation"] path {
-  fill: #77a8ba;
+  fill: var(--shell-accent-2);
   stroke: #e1f2f8;
 }
 
 .transport-map-entities g[data-mode="maritime"] path {
-  fill: #eda36a;
+  fill: var(--shell-accent);
   stroke: #fff0df;
 }
 
@@ -4237,11 +4237,11 @@ body {
 }
 
 .transport-map-legend i[data-mode="aviation"] {
-  background: #77a8ba;
+  background: var(--shell-accent-2);
 }
 
 .transport-map-legend i[data-mode="maritime"] {
-  background: #eda36a;
+  background: var(--shell-accent);
 }
 
 .transport-map-legend i[data-mode="alert"] {
@@ -4256,11 +4256,11 @@ body {
 }
 
 .transport-map-legend i[data-mode="aviation-link"] {
-  background: #77a8ba;
+  background: var(--shell-accent-2);
 }
 
 .transport-map-legend i[data-mode="maritime-link"] {
-  background: #eda36a;
+  background: var(--shell-accent);
 }
 
 .transport-map-legend i[data-mode="direction"] {
@@ -4268,7 +4268,7 @@ body {
   width: 14px;
   height: 2px;
   border-radius: 0;
-  background: color-mix(in srgb, var(--shell-ink) 74%, #77a8ba);
+  background: color-mix(in srgb, var(--shell-ink) 74%, var(--shell-accent-2));
 }
 
 .transport-map-legend i[data-mode="direction"]::after {
@@ -4279,7 +4279,7 @@ body {
   height: 0;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
-  border-left: 5px solid color-mix(in srgb, var(--shell-ink) 74%, #77a8ba);
+  border-left: 5px solid color-mix(in srgb, var(--shell-ink) 74%, var(--shell-accent-2));
   content: "";
 }
 
@@ -4289,8 +4289,8 @@ body {
 }
 
 .transport-map-legend i[data-mode="comparison"] {
-  border: 1px solid #77a8ba;
-  background: color-mix(in srgb, #77a8ba 34%, transparent);
+  border: 1px solid var(--shell-accent-2);
+  background: color-mix(in srgb, var(--shell-accent-2) 34%, transparent);
 }
 
 .transport-detail-panel {
@@ -4518,11 +4518,11 @@ body {
 }
 
 .transport-country-vehicle-list i[data-mode="aviation"] {
-  color: #77a8ba;
+  color: var(--shell-accent-2);
 }
 
 .transport-country-vehicle-list i[data-mode="maritime"] {
-  color: #eda36a;
+  color: var(--shell-accent);
 }
 
 .transport-country-vehicle-list i svg {
@@ -4568,12 +4568,12 @@ body {
 
 .transport-country-vehicle-list em[data-role="inbound"],
 .transport-country-vehicle-list em[data-role="domestic"] {
-  border-color: color-mix(in srgb, #77a8ba 65%, var(--shell-border));
+  border-color: color-mix(in srgb, var(--shell-accent-2) 65%, var(--shell-border));
   color: #9fc5d3;
 }
 
 .transport-country-vehicle-list em[data-role="outbound"] {
-  border-color: color-mix(in srgb, #eda36a 65%, var(--shell-border));
+  border-color: color-mix(in srgb, var(--shell-accent) 65%, var(--shell-border));
   color: #f1b98d;
 }
 
@@ -4744,11 +4744,11 @@ body {
 }
 
 .transport-flow-line[data-mode="aviation"] i {
-  background: #77a8ba;
+  background: var(--shell-accent-2);
 }
 
 .transport-flow-line[data-mode="maritime"] i {
-  background: #eda36a;
+  background: var(--shell-accent);
 }
 
 .transport-flow-line em {
@@ -5349,7 +5349,7 @@ body {
 .situation-event details summary, .situation-overview footer summary { cursor: pointer; padding: .2rem 0; }
 .situation-event details ul { margin: .35rem 0 0 1rem; list-style: disc; line-height: 1.6; }
 .situation-event-image { position: relative; width: 8rem; height: 6rem; overflow: hidden; border-radius: .6rem; align-self: start; background: var(--shell-sidebar); }
-.situation-event-image > span { position: absolute; left: 0; bottom: 0; right: 0; padding: .2rem; color: white; background: #102030c9; font-size: .55rem; }
+.situation-event-image > span { position: absolute; left: 0; bottom: 0; right: 0; padding: .2rem; color: white; background: #13271fc9; font-size: .55rem; }
 .situation-event-image small { display: block; margin-top: 2px; font-size: .5rem; line-height: 1.3; }
 .situation-message { margin-top: .8rem; font-size: .8rem; line-height: 1.6; color: var(--shell-muted); }
 .situation-overview footer { display: flex; align-items: start; justify-content: space-between; gap: 1rem; flex-wrap: wrap; border-top: 1px solid var(--shell-border); margin-top: .75rem; padding-top: .75rem; font-size: .65rem; line-height: 1.6; color: var(--shell-muted); }
@@ -5779,7 +5779,7 @@ body {
 .situation-map-images { position: absolute; left: .75rem; right: 4rem; bottom: 7.5rem; display: flex; gap: .5rem; overflow-x: auto; scrollbar-width: none; pointer-events: none; }
 .situation-map-images > button { pointer-events: auto; position: relative; flex: 0 0 100px; height: 76px; overflow: hidden; border-radius: .65rem; background: var(--shell-bg); border: 1px solid var(--shell-border-strong); box-shadow: 0 3px 14px #0004; }
 .situation-map-image { width: 100%; height: 100%; object-fit: cover; }
-.situation-map-images > button > span:last-child { position: absolute; inset: auto 0 0; display: flex; align-items: center; justify-content: center; gap: .3rem; padding: .2rem; background: #07121add; color: #fff; font-size: .6rem; }
+.situation-map-images > button > span:last-child { position: absolute; inset: auto 0 0; display: flex; align-items: center; justify-content: center; gap: .3rem; padding: .2rem; background: #0d1b16dd; color: #fff; font-size: .6rem; }
 .situation-map-images > button:focus-visible { outline: 3px solid var(--shell-accent); outline-offset: -3px; }
 
 .event-location-canvas { height: 20rem; min-height: 16rem; }

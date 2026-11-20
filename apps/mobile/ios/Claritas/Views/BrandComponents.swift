@@ -1,64 +1,73 @@
 import SwiftUI
 
 enum ClaritasPalette {
-    // Navy structure with beige surfaces and warm orange accents.
-    static let darkBlue = Color(hex: "#0B1E2D")
-    static let darkGreen = Color(hex: "#253D46")
-    static let lightGreen = Color(hex: "#CBD5D8")
-    static let sage = Color(hex: "#829EAC")
-    static let orange = Color(hex: "#F0A266")
-    static let orangeStrong = Color(hex: "#B3542D")
-    static let grey = Color(hex: "#657580")
-    static let beige = Color(hex: "#D3C3A5")
+    // Forest green structure, warm beige surfaces and orange accents.
+    static let darkBlue = Color(hex: "#13271F")
+    static let darkGreen = Color(hex: "#234E36")
+    static let lightGreen = Color(hex: "#DCE5D6")
+    static let sage = Color(hex: "#8FA58D")
+    static let orange = Color(hex: "#ECA168")
+    static let orangeStrong = Color(hex: "#A74720")
+    static let grey = Color(hex: "#596B5A")
+    static let beige = Color(hex: "#D7C7A6")
     static let brown = orangeStrong
-    static let offWhite = Color(hex: "#F7F2E8")
-    static let text = Color(hex: "#0B2028")
+    static let offWhite = Color(hex: "#FFFAF0")
+    static let text = Color(hex: "#19382A")
 
     static let positive = darkGreen
     static let negative = Color(hex: "#A73B32")
 
+    static func eventSeverity(_ severity: IntelligenceSeverity, for scheme: ColorScheme) -> Color {
+        switch severity {
+        case .low: return Color(hex: scheme == .dark ? "#9ABCA8" : "#3F6E58")
+        case .medium: return Color(hex: scheme == .dark ? "#E0B86E" : "#9C7429")
+        case .high: return Color(hex: scheme == .dark ? "#EE9463" : "#B9572F")
+        case .critical: return Color(hex: scheme == .dark ? "#EF625C" : "#AD302E")
+        }
+    }
+
     static func shellBackground(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#07141E") : Color(hex: "#ECEFF0")
+        scheme == .dark ? Color(hex: "#0D1B16") : Color(hex: "#F2EBDD")
     }
 
     static func shellBackgroundElevated(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#0B1E2D") : Color(hex: "#E2E7E9")
+        scheme == .dark ? Color(hex: "#13271F") : Color(hex: "#E8DDC9")
     }
 
     static func shellSurface(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#102735").opacity(0.96) : Color(hex: "#F7F5F0").opacity(0.94)
+        scheme == .dark ? Color(hex: "#182F26").opacity(0.96) : Color(hex: "#FFFAF0").opacity(0.94)
     }
 
     static func shellRaised(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#173140").opacity(0.98) : Color(hex: "#FFFFFF").opacity(0.98)
+        scheme == .dark ? Color(hex: "#203B30").opacity(0.98) : Color(hex: "#FFFCF5").opacity(0.98)
     }
 
     static func shellSurfaceMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#203A48").opacity(0.88) : Color(hex: "#E5EAEC").opacity(0.92)
+        scheme == .dark ? Color(hex: "#243E32").opacity(0.88) : Color(hex: "#EAE2D1").opacity(0.92)
     }
 
     static func shellBorder(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#AFC0C8").opacity(0.18) : darkBlue.opacity(0.14)
+        scheme == .dark ? Color(hex: "#9FB7A3").opacity(0.18) : darkBlue.opacity(0.14)
     }
 
     static func shellBorderStrong(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#AFC0C8").opacity(0.3) : darkBlue.opacity(0.24)
+        scheme == .dark ? Color(hex: "#9FB7A3").opacity(0.3) : darkBlue.opacity(0.24)
     }
 
     static func shellInk(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#F2F0EA") : text
+        scheme == .dark ? Color(hex: "#F2EBDD") : text
     }
 
     static func shellMuted(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#B8C3C9") : grey
+        scheme == .dark ? Color(hex: "#B7C0AF") : grey
     }
 
     static func shellSidebar(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#06111A") : Color(hex: "#0B1E2D")
+        scheme == .dark ? Color(hex: "#091710") : Color(hex: "#13271F")
     }
 
     static func shellHighlight(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#D3C3A5").opacity(0.16) : Color(hex: "#D3C3A5").opacity(0.7)
+        scheme == .dark ? Color(hex: "#D7C7A6").opacity(0.16) : Color(hex: "#D7C7A6").opacity(0.7)
     }
 
     static func shellAccent(for scheme: ColorScheme) -> Color {
@@ -66,11 +75,11 @@ enum ClaritasPalette {
     }
 
     static func shellAccentSecondary(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#91ADBA") : Color(hex: "#426779")
+        scheme == .dark ? Color(hex: "#9FB7A3") : Color(hex: "#2D6045")
     }
 
     static func positiveText(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#91B7A6") : Color(hex: "#356B58")
+        scheme == .dark ? Color(hex: "#9FC1A5") : Color(hex: "#356B58")
     }
 
     static func negativeText(for scheme: ColorScheme) -> Color {
@@ -78,7 +87,7 @@ enum ClaritasPalette {
     }
 
     static func dataBlue(for scheme: ColorScheme) -> Color {
-        scheme == .dark ? Color(hex: "#9AB6C4") : Color(hex: "#426779")
+        scheme == .dark ? Color(hex: "#A3BDAB") : Color(hex: "#2D6045")
     }
 
     static func glassHighlight(for scheme: ColorScheme) -> Color {
@@ -128,8 +137,8 @@ struct BrandBackground<Content: View>: View {
                     ClaritasPalette.shellBackgroundElevated(for: colorScheme),
                     ClaritasPalette.shellBackground(for: colorScheme),
                     colorScheme == .dark
-                        ? Color(hex: "#07141E")
-                        : Color(hex: "#E4E8EA")
+                        ? Color(hex: "#0D1B16")
+                        : Color(hex: "#E8DDC9")
                 ],
                 startPoint: .top,
                 endPoint: .bottom

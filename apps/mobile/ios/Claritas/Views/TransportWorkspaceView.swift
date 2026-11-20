@@ -1138,10 +1138,10 @@ private struct TransportTrackingMap: View {
             Text("CURRENT SCOPE · \((scopeCountry ?? "GLOBAL").uppercased())")
                 .font(.caption2.weight(.bold))
                 .tracking(1)
-                .foregroundStyle(.white)
+                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                 .padding(.horizontal, 9)
                 .padding(.vertical, 6)
-                .background(Color.black.opacity(0.62), in: Capsule())
+                .background(ClaritasPalette.shellSurface(for: colorScheme), in: Capsule())
                 .padding(9)
                 .allowsHitTesting(false)
         }
@@ -1156,23 +1156,23 @@ private struct TransportTrackingMap: View {
                 }
                 .disabled(connections.isEmpty)
             }
-            .background(Color(hex: "#11222E").opacity(0.92), in: RoundedRectangle(cornerRadius: 9))
+            .background(ClaritasPalette.shellSurface(for: colorScheme).opacity(0.92), in: RoundedRectangle(cornerRadius: 9))
             .overlay(
                 RoundedRectangle(cornerRadius: 9)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 1)
+                    .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
             )
             .padding(9)
         }
         .overlay(alignment: .bottomLeading) {
             HStack(spacing: 9) {
-                if mode != .maritime { legend("Aircraft", color: Color(hex: "#78A9BA")) }
-                if mode != .aviation { legend("Vessels", color: Color(hex: "#D6A66B")) }
-                if !connections.isEmpty { legend("Country links", color: Color(hex: "#D87543"), line: true) }
-                if track.count > 1 { legend("Trail", color: .white, line: true) }
+                if mode != .maritime { legend("Aircraft", color: ClaritasPalette.dataBlue(for: colorScheme)) }
+                if mode != .aviation { legend("Vessels", color: ClaritasPalette.shellAccent(for: colorScheme)) }
+                if !connections.isEmpty { legend("Country links", color: ClaritasPalette.shellAccent(for: colorScheme), line: true) }
+                if track.count > 1 { legend("Trail", color: ClaritasPalette.shellInk(for: colorScheme), line: true) }
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .background(Color.black.opacity(0.62), in: Capsule())
+            .background(ClaritasPalette.shellSurface(for: colorScheme), in: Capsule())
             .padding(9)
             .allowsHitTesting(false)
         }
@@ -1217,9 +1217,9 @@ private struct TransportTrackingMap: View {
 // route selection and gestures. All country geometry comes from our bundled map.
 private final class TransportOceanTiles: MKTileOverlay {
     private let imageData: Data
-    override init(urlTemplate: String?) {
+    init(dark: Bool) {
         imageData = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256)).image { context in
-            UIColor(red: 12 / 255.0, green: 34 / 255.0, blue: 48 / 255.0, alpha: 1).setFill()
+            UIColor(ClaritasPalette.shellBackground(for: dark ? .dark : .light)).setFill()
             context.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
         }.pngData()!
         super.init(urlTemplate: nil)
@@ -1280,6 +1280,7 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
         static let countryReuseID = "claritas-transport-country"
         static let entityReuseID = "claritas-transport-entity"
 
+        private var scheme: ColorScheme { parent.darkAppearance ? .dark : .light }
         private var parent: MapKitTransportTrackingView
         private var countryPolygons: [ObjectIdentifier: String] = [:]
         private var overlayStyles: [ObjectIdentifier: TransportOverlayStyle] = [:]
@@ -1294,6 +1295,7 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
 
         func update(_ map: MKMapView, with next: MapKitTransportTrackingView, force: Bool) {
             parent = next
+            map.overrideUserInterfaceStyle = next.darkAppearance ? .dark : .light
             map.showsScale = !next.compactPresentation
 
             let nextOverlaySignature = [
@@ -1312,6 +1314,7 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
             }
 
             let nextAnnotationSignature = [
+                next.darkAppearance ? "dark" : "light",
                 next.scopeCountry?.uppercased() ?? "",
                 next.selectedID ?? "",
                 next.connections.map { "\($0.id):\($0.activeCount)" }.joined(separator: ","),
@@ -1338,7 +1341,7 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
 
         private func installOverlays(on map: MKMapView) {
             map.removeOverlays(map.overlays)
-            map.addOverlay(TransportOceanTiles(urlTemplate: nil), level: .aboveRoads)
+            map.addOverlay(TransportOceanTiles(dark: parent.darkAppearance), level: .aboveRoads)
             countryPolygons.removeAll(keepingCapacity: true)
             overlayStyles.removeAll(keepingCapacity: true)
 
@@ -1415,15 +1418,15 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
                     $0.originCountry == iso || $0.destinationCountry == iso
                 }
                 renderer.fillColor = iso == scope
-                    ? UIColor(red: 0.85, green: 0.46, blue: 0.26, alpha: 1)
+                    ? UIColor(ClaritasPalette.shellAccent(for: scheme))
                     : linked
-                        ? UIColor(red: 0.19, green: 0.36, blue: 0.43, alpha: 1)
-                        : UIColor(red: 28 / 255.0, green: 48 / 255.0, blue: 65 / 255.0, alpha: 1)
+                        ? UIColor(ClaritasPalette.shellAccentSecondary(for: scheme)).withAlphaComponent(parent.darkAppearance ? 0.4 : 0.25)
+                        : UIColor(ClaritasPalette.shellSurfaceMuted(for: scheme))
                 renderer.strokeColor = iso == scope
-                    ? UIColor.white.withAlphaComponent(0.92)
+                    ? UIColor(ClaritasPalette.shellInk(for: scheme)).withAlphaComponent(0.92)
                     : linked
-                        ? UIColor(red: 0.50, green: 0.75, blue: 0.82, alpha: 0.82)
-                        : UIColor.white.withAlphaComponent(0.16)
+                        ? UIColor(ClaritasPalette.shellAccentSecondary(for: scheme)).withAlphaComponent(0.82)
+                        : UIColor(ClaritasPalette.shellBorder(for: scheme))
                 renderer.lineWidth = iso == scope ? 2.1 : linked ? 1.25 : 0.55
                 return renderer
             }
@@ -1435,17 +1438,17 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
             switch style {
             case let .countryConnection(mode, count):
                 renderer.strokeColor = mode == .aviation
-                    ? UIColor(red: 0.42, green: 0.69, blue: 0.79, alpha: 0.88)
-                    : UIColor(red: 0.87, green: 0.61, blue: 0.36, alpha: 0.88)
+                    ? UIColor(ClaritasPalette.dataBlue(for: scheme)).withAlphaComponent(0.88)
+                    : UIColor(ClaritasPalette.shellAccent(for: scheme)).withAlphaComponent(0.88)
                 renderer.lineWidth = min(5, 1.3 + log2(Double(max(count, 1))))
                 renderer.lineDashPattern = [NSNumber(value: 6), NSNumber(value: 4)]
             case let .vehicleRoute(mode, selected):
                 renderer.strokeColor = mode == .aviation
-                    ? UIColor(red: 0.48, green: 0.72, blue: 0.80, alpha: selected ? 0.92 : 0.24)
-                    : UIColor(red: 0.90, green: 0.64, blue: 0.39, alpha: selected ? 0.92 : 0.24)
+                    ? UIColor(ClaritasPalette.dataBlue(for: scheme)).withAlphaComponent(selected ? 0.92 : 0.24)
+                    : UIColor(ClaritasPalette.shellAccent(for: scheme)).withAlphaComponent(selected ? 0.92 : 0.24)
                 renderer.lineWidth = selected ? 2.7 : 0.9
             case .sampledTrack:
-                renderer.strokeColor = UIColor.white.withAlphaComponent(0.96)
+                renderer.strokeColor = UIColor(ClaritasPalette.shellInk(for: scheme)).withAlphaComponent(0.96)
                 renderer.lineWidth = 3
                 renderer.lineDashPattern = nil
             }
@@ -1460,10 +1463,10 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
                 ) as! MKMarkerAnnotationView
                 view.annotation = country
                 view.markerTintColor = country.selected
-                    ? UIColor(red: 0.85, green: 0.65, blue: 0.42, alpha: 1)
-                    : UIColor(red: 0.42, green: 0.69, blue: 0.79, alpha: 1)
+                    ? UIColor(ClaritasPalette.shellAccent(for: scheme))
+                    : UIColor(ClaritasPalette.dataBlue(for: scheme))
                 view.glyphText = country.iso
-                view.glyphTintColor = UIColor(red: 0.03, green: 0.08, blue: 0.12, alpha: 1)
+                view.glyphTintColor = UIColor(ClaritasPalette.shellBackground(for: scheme))
                 view.displayPriority = country.selected ? .required : .defaultHigh
                 view.canShowCallout = false
                 view.titleVisibility = .hidden
@@ -1481,8 +1484,8 @@ private struct MapKitTransportTrackingView: UIViewRepresentable {
                 let tone = entity.entity.is_alert
                     ? UIColor(red: 0.82, green: 0.35, blue: 0.33, alpha: 1)
                     : aviation
-                        ? UIColor(red: 0.47, green: 0.66, blue: 0.73, alpha: 1)
-                        : UIColor(red: 0.84, green: 0.65, blue: 0.42, alpha: 1)
+                        ? UIColor(ClaritasPalette.dataBlue(for: scheme))
+                        : UIColor(ClaritasPalette.shellAccent(for: scheme))
                 view.image = UIImage(systemName: aviation ? "airplane" : "ferry.fill")?
                     .withTintColor(tone, renderingMode: .alwaysOriginal)
                 view.transform = aviation

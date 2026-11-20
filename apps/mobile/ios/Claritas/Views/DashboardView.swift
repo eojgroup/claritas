@@ -2347,7 +2347,7 @@ struct WeatherWorkspaceView: View {
                                 Task { await model.refreshWeatherNow() }
                             }
                             .buttonStyle(.borderedProminent)
-                            .tint(ClaritasPalette.darkGreen)
+                            .tint(ClaritasPalette.positiveText(for: colorScheme))
                             .disabled(model.isRefreshingWeather)
                         }
                     }
@@ -2644,7 +2644,7 @@ struct MarketsWorkspaceView: View {
                                     Task { await model.refreshMarketQuotes() }
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(ClaritasPalette.darkGreen)
+                                .tint(ClaritasPalette.positiveText(for: colorScheme))
                                 .disabled(model.isRefreshingMarketQuotes)
                             }
                         }
@@ -3037,7 +3037,7 @@ private struct LegacyMarketsWorkspaceView: View {
                                     Task { await model.refreshMarketQuotes(forceRefresh: true) }
                                 }
                                 .buttonStyle(.borderedProminent)
-                                .tint(ClaritasPalette.darkGreen)
+                                .tint(ClaritasPalette.positiveText(for: colorScheme))
                                 .disabled(model.isRefreshingMarketQuotes)
 
                                 if model.selectedSymbol != nil {
@@ -3448,33 +3448,33 @@ struct PoliciesWorkspaceView: View {
                     DisclosureGroup("Claritas colour reference") {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
                             BrandSwatch(
-                                name: "Command Navy",
-                                hex: "#0B1E2D",
+                                name: "Forest Green",
+                                hex: "#13271F",
                                 color: ClaritasPalette.darkBlue
                             )
                             BrandSwatch(
-                                name: "Evidence Blue",
-                                hex: colorScheme == .dark ? "#9AB6C4" : "#426779",
+                                name: "Sage Green",
+                                hex: colorScheme == .dark ? "#A3BDAB" : "#2D6045",
                                 color: ClaritasPalette.dataBlue(for: colorScheme)
                             )
                             BrandSwatch(
-                                name: "Briefing Beige",
-                                hex: colorScheme == .dark ? "#D3C3A5" : "#765F3E",
-                                color: ClaritasPalette.shellAccent(for: colorScheme)
+                                name: "Warm Beige",
+                                hex: "#D7C7A6",
+                                color: ClaritasPalette.beige
                             )
                             BrandSwatch(
                                 name: "Working Surface",
-                                hex: colorScheme == .dark ? "#102735" : "#F7F5F0",
+                                hex: colorScheme == .dark ? "#182F26" : "#FFFAF0",
                                 color: ClaritasPalette.shellSurface(for: colorScheme)
                             )
                             BrandSwatch(
                                 name: "Muted Text",
-                                hex: colorScheme == .dark ? "#B8C3C9" : "#657580",
+                                hex: colorScheme == .dark ? "#B7C0AF" : "#596B5A",
                                 color: ClaritasPalette.shellMuted(for: colorScheme)
                             )
                             BrandSwatch(
                                 name: "Primary Ink",
-                                hex: colorScheme == .dark ? "#F2F0EA" : "#0B2028",
+                                hex: colorScheme == .dark ? "#F2EBDD" : "#19382A",
                                 color: ClaritasPalette.shellInk(for: colorScheme)
                             )
                         }
@@ -5412,6 +5412,7 @@ struct WorldMapWorkspace: View {
 }
 
 private struct NativeSignalMap: View {
+    @Environment(\.colorScheme) private var colorScheme
     let points: [CountryBubblePoint]
     let events: [IntelligenceEvent]
     let mode: SignalMapMode
@@ -5447,10 +5448,10 @@ private struct NativeSignalMap: View {
         .overlay(alignment: .bottomLeading) {
             Text("Natural Earth · Claritas signals")
                 .font(.system(size: 8, weight: .medium))
-                .foregroundStyle(.white.opacity(0.78))
+                .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .padding(.horizontal, 7)
                 .padding(.vertical, 4)
-                .background(Color.black.opacity(0.5), in: Capsule())
+                .background(ClaritasPalette.shellSurface(for: colorScheme), in: Capsule())
                 .padding(8)
                 .allowsHitTesting(false)
         }
@@ -5462,9 +5463,9 @@ private struct NativeSignalMap: View {
         .overlay(alignment: .topLeading) {
             Text(immersive ? "Drag to explore · Pinch to zoom" : "Pinch to zoom · Two fingers to move")
                 .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(Color(hex: "#F2EEE6").opacity(0.85))
+                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme).opacity(0.85))
                 .padding(.horizontal, 8).padding(.vertical, 5)
-                .background(Color(hex: "#102535").opacity(0.88), in: Capsule())
+                .background(ClaritasPalette.shellSurface(for: colorScheme).opacity(0.88), in: Capsule())
                 .padding(8).allowsHitTesting(false)
         }
         .accessibilityElement(children: .contain)
@@ -5497,7 +5498,7 @@ private struct SignalMapInteractionKey: View {
                 }.buttonStyle(.plain).accessibilityLabel("Open mapped development: \(event.title)")
             }
             DisclosureGroup(isExpanded: $expanded) {
-                Text((overviewOnly ? "Country colours show signal relevance: importance, high-priority share and unusual increases. This is not a danger rating. " : "Country shading shows \(mode.legend.lowercased()). ") + "Tap a country for its profile. Event pins mark mapped locations; tap a pin to open the story. Red/orange event pins have critical/high reported severity, gold medium and blue low. A number groups nearby events. A teal ring or photo indicates imagery linked to that event. Reports with only a country still contribute to overview country shading.")
+                Text((overviewOnly ? "Country colours show signal relevance: importance, high-priority share and unusual increases. This is not a danger rating. " : "Country shading shows \(mode.legend.lowercased()). ") + "Tap a country for its profile. Event pins mark mapped locations; tap a pin to open the story. Red/orange event pins have critical/high reported severity, gold medium and sage low. A number groups nearby events. A teal ring or photo indicates imagery linked to that event. Reports with only a country still contribute to overview country shading.")
                     .font(.caption2).foregroundStyle(.secondary)
             } label: {
                 HStack(spacing: 8) {
@@ -5512,6 +5513,7 @@ private struct SignalMapInteractionKey: View {
 }
 
 private struct SignalDensityLegend: View {
+    @Environment(\.colorScheme) private var colorScheme
     let mode: SignalMapMode
     let points: [CountryBubblePoint]
     var events: [IntelligenceEvent] = []
@@ -5551,7 +5553,7 @@ private struct SignalDensityLegend: View {
                     .font(.system(size: compact ? 8 : 10)).lineSpacing(compact ? 0 : 2)
             }
             if !events.isEmpty {
-                Divider().overlay(Color.white.opacity(0.3))
+                Divider().overlay(ClaritasPalette.shellBorderStrong(for: colorScheme))
                 if !compact { Text("EVENTS · TAP FOR STORY").font(.system(size: 9, weight: .bold)) }
                 let kinds = SignalMapEventKind.allCases.filter { kind in events.contains { SignalMapEventKind(eventType: $0.event_type) == kind } }
                 LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: compact ? 2 : 4) {
@@ -5560,29 +5562,29 @@ private struct SignalDensityLegend: View {
                 if compact {
                     Text("Reported severity").font(.system(size: 8))
                     HStack(spacing: 5) {
-                        severityKey("Low", color: "#78A9BA")
-                        severityKey("Medium", color: "#D6BA78")
-                        severityKey("High", color: "#E98D53")
-                        severityKey("Critical", color: "#E57168")
+                        severityKey("Low", severity: .low)
+                        severityKey("Medium", severity: .medium)
+                        severityKey("High", severity: .high)
+                        severityKey("Critical", severity: .critical)
                     }
                     Text("Tap country: profile · icon: story\nRing: image · number: nearby events")
                         .font(.system(size: 8)).lineSpacing(1)
                 } else {
-                    Text("Colour = reported severity\nBlue low · gold medium\nOrange high · red critical\nRing = image · number = group")
+                    Text("Colour = reported severity\nSage low · gold medium\nOrange high · red critical\nRing = image · number = group")
                         .font(.system(size: 9)).lineSpacing(2)
                 }
             }
         }
-        .foregroundStyle(.white.opacity(0.88))
+        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
         .frame(width: events.isEmpty ? 140 : compact ? 164 : 200)
-        .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 7))
+        .background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
     }
 
-    private func severityKey(_ label: String, color: String) -> some View {
+    private func severityKey(_ label: String, severity: IntelligenceSeverity) -> some View {
         HStack(spacing: 2) {
-            Circle().fill(Color(hex: color)).frame(width: 4, height: 4)
+            Circle().fill(ClaritasPalette.eventSeverity(severity, for: colorScheme)).frame(width: 4, height: 4)
             Text(label).font(.system(size: 8))
         }.accessibilityLabel("\(label) reported severity")
     }
@@ -5591,7 +5593,7 @@ private struct SignalDensityLegend: View {
         if mode == .weather {
             return [Color(hex: "#2B5B87"), Color(hex: "#D3BE7E"), Color(hex: "#BD4136")]
         }
-        return [Color(hex: "#1C3041"), Color(hex: "#305B6D"), Color(hex: "#D87543")]
+        return colorScheme == .dark ? [Color(hex: "#20372C"), Color(hex: "#4A6E52"), Color(hex: "#D57E46")] : [Color(hex: "#E2E5D2"), Color(hex: "#85A280"), Color(hex: "#B65227")]
     }
 
     private func format(_ value: Double) -> String {
@@ -5676,9 +5678,9 @@ private enum SignalDensityColorScale {
                 : interpolate(mild, hot, (ratio - 0.5) * 2)
         }
 
-        let low = dark ? (28.0, 48.0, 65.0) : (180.0, 198.0, 211.0)
-        let middle = dark ? (48.0, 91.0, 109.0) : (78.0, 125.0, 145.0)
-        let high = dark ? (216.0, 117.0, 67.0) : (190.0, 82.0, 43.0)
+        let low = dark ? (32.0, 55.0, 44.0) : (226.0, 229.0, 210.0)
+        let middle = dark ? (74.0, 110.0, 82.0) : (133.0, 162.0, 128.0)
+        let high = dark ? (213.0, 126.0, 70.0) : (182.0, 82.0, 39.0)
         return ratio < 0.55
             ? interpolate(low, middle, ratio / 0.55)
             : interpolate(middle, high, (ratio - 0.55) / 0.45)
@@ -5748,6 +5750,7 @@ private struct SignalMapTouchSurface: UIViewRepresentable {
 }
 
 private struct InteractiveCountryBubbleMap: View {
+    @Environment(\.colorScheme) private var colorScheme
     let points: [CountryBubblePoint]
     let events: [IntelligenceEvent]
     let mode: SignalMapMode
@@ -5775,9 +5778,9 @@ private struct InteractiveCountryBubbleMap: View {
                 ZStack {
                     LinearGradient(
                         colors: [
-                            Color(hex: "#0C2230"),
-                            ClaritasPalette.shellSidebar(for: .dark),
-                            Color(hex: "#07141E")
+                            ClaritasPalette.shellBackgroundElevated(for: colorScheme),
+                            ClaritasPalette.shellBackground(for: colorScheme),
+                            ClaritasPalette.shellBackground(for: colorScheme)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -5812,7 +5815,7 @@ private struct InteractiveCountryBubbleMap: View {
                             .overlay(alignment: .top) {
                                 if labels.contains(group.id), !group.hasImagery {
                                     Text(pinLabel(group)).font(.system(size: 10, weight: .medium))
-                                        .foregroundStyle(Color.white.opacity(0.9)).shadow(color: .black, radius: 2)
+                                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme)).shadow(color: colorScheme == .dark ? .black : .white, radius: 2)
                                         .fixedSize().offset(y: -12).allowsHitTesting(false)
                                 }
                             }
@@ -5823,7 +5826,7 @@ private struct InteractiveCountryBubbleMap: View {
                            contains(latitude: latitude, longitude: longitude) {
                             Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: .dark))
+                                .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
                                 .position(project(CLLocationCoordinate2D(latitude: latitude, longitude: longitude), size: proxy.size))
                                 .accessibilityLabel(entity.display_name ?? "Tracked transport")
                         }
@@ -5835,10 +5838,10 @@ private struct InteractiveCountryBubbleMap: View {
                 if points.isEmpty {
                     Text("No mapped \(mapRegion.label.lowercased()) data for this layer.")
                         .font(.footnote)
-                        .foregroundStyle(Color(hex: "#F2EEE6"))
+                        .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(Color(hex: "#11222E").opacity(0.94), in: Capsule())
+                        .background(ClaritasPalette.shellSurface(for: colorScheme).opacity(0.94), in: Capsule())
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
             }
@@ -5901,9 +5904,9 @@ private struct InteractiveCountryBubbleMap: View {
             }
             .font(.system(size: compactPresentation ? 11 : 12, weight: .semibold))
             .padding(.horizontal, 8).padding(.vertical, 6)
-            .foregroundStyle(Color(hex: "#F2EEE6"))
-            .background(Color(hex: "#102535").opacity(0.94), in: Capsule())
-            .overlay(Capsule().stroke(ClaritasPalette.shellAccent(for: .dark).opacity(0.7), lineWidth: 1))
+            .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+            .background(ClaritasPalette.shellSurface(for: colorScheme).opacity(0.94), in: Capsule())
+            .overlay(Capsule().stroke(ClaritasPalette.shellAccent(for: colorScheme).opacity(0.7), lineWidth: 1))
             .frame(maxWidth: compactPresentation ? 145 : 210, minHeight: ClaritasLayout.minimumTouchTarget)
         }.buttonStyle(.plain)
         .accessibilityLabel("\(Locale.current.localizedString(forRegionCode: point.iso) ?? point.iso), \(point.detail)")
@@ -5993,14 +5996,14 @@ private struct InteractiveCountryBubbleMap: View {
             else { expandedGroup = group }
         } label: {
             ZStack {
-                if group.hasImagery { Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 2, dash: [3, 2])).frame(width: 32, height: 32) }
+                if group.hasImagery { Circle().stroke(ClaritasPalette.shellAccentSecondary(for: colorScheme), style: StrokeStyle(lineWidth: 2, dash: [3, 2])).frame(width: 32, height: 32) }
                 let kinds = Set(events.filter { group.eventIDs.contains($0.id) }.map { SignalMapEventKind(eventType: $0.event_type) })
                 Image(systemName: kinds.count == 1 ? kinds.first!.symbol : "square.stack")
                     .font(.system(size: 16, weight: .regular)).symbolRenderingMode(.monochrome)
-                    .foregroundStyle(pinColor(group)).shadow(color: .black, radius: 1.2)
+                    .foregroundStyle(pinColor(group)).shadow(color: colorScheme == .dark ? .black : .white, radius: 1.2)
                 if group.eventIDs.count > 1 {
-                    Text("\(group.eventIDs.count)").font(.system(size: 9, weight: .semibold)).foregroundStyle(Color(hex: "#F2EEE6"))
-                        .padding(.horizontal, 3).padding(.vertical, 1).background(Color(hex: "#102535"), in: RoundedRectangle(cornerRadius: 2))
+                    Text("\(group.eventIDs.count)").font(.system(size: 9, weight: .semibold)).foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
+                        .padding(.horizontal, 3).padding(.vertical, 1).background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 2))
                         .offset(x: 12, y: 10)
                 }
             }.frame(width: 44, height: 44).contentShape(Circle())
@@ -6011,7 +6014,7 @@ private struct InteractiveCountryBubbleMap: View {
                             VStack(spacing: 2) {
                                 AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width: 64, height: 42).clipped().cornerRadius(5)
                                 Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.system(size: 8, weight: .semibold)).lineLimit(1)
-                            }.frame(width: 80).padding(3).background(Color(hex: "#102535"), in: RoundedRectangle(cornerRadius: 7))
+                            }.frame(width: 80).padding(3).background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
                         }.buttonStyle(.plain).offset(y: -36)
                         .accessibilityLabel("Image at \(event.location_name ?? "event location"), updated \(event.last_activity_time.formatted()): \(event.title)")
                     }
@@ -6022,10 +6025,10 @@ private struct InteractiveCountryBubbleMap: View {
 
     private func pinColor(_ group: SignalMapPinGroup) -> Color {
         let severities = events.filter { group.eventIDs.contains($0.id) }.map(\.severity)
-        if severities.contains(.critical) { return Color(hex: "#E57168") }
-        if severities.contains(.high) { return Color(hex: "#E98D53") }
-        if severities.contains(.medium) { return Color(hex: "#D6BA78") }
-        return Color(hex: "#78A9BA")
+        if severities.contains(.critical) { return ClaritasPalette.eventSeverity(.critical, for: colorScheme) }
+        if severities.contains(.high) { return ClaritasPalette.eventSeverity(.high, for: colorScheme) }
+        if severities.contains(.medium) { return ClaritasPalette.eventSeverity(.medium, for: colorScheme) }
+        return ClaritasPalette.eventSeverity(.low, for: colorScheme)
     }
 
     private var viewportControls: some View {
@@ -6036,7 +6039,7 @@ private struct InteractiveCountryBubbleMap: View {
                     committedScale = min(10, committedScale * 1.35)
                 }
             }
-            Divider().frame(width: 28).overlay(Color.white.opacity(0.12))
+            Divider().frame(width: 28).overlay(ClaritasPalette.shellBorder(for: colorScheme))
             viewportButton(icon: "minus", label: "Zoom out") {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     userAdjustedViewport = true
@@ -6046,16 +6049,16 @@ private struct InteractiveCountryBubbleMap: View {
                     }
                 }
             }
-            Divider().frame(width: 28).overlay(Color.white.opacity(0.12))
+            Divider().frame(width: 28).overlay(ClaritasPalette.shellBorder(for: colorScheme))
             viewportButton(icon: "globe", label: "Show whole region") {
                 resetViewport(); userAdjustedViewport = true
             }
         }
         .frame(width: ClaritasLayout.minimumTouchTarget)
-        .background(Color(hex: "#11222E").opacity(0.94), in: RoundedRectangle(cornerRadius: 9))
+        .background(ClaritasPalette.shellSurface(for: colorScheme).opacity(0.94), in: RoundedRectangle(cornerRadius: 9))
         .overlay(
             RoundedRectangle(cornerRadius: 9)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                .stroke(ClaritasPalette.shellBorder(for: colorScheme), lineWidth: 1)
         )
         .padding(10)
     }
@@ -6068,7 +6071,7 @@ private struct InteractiveCountryBubbleMap: View {
         Button(action: action) {
             Image(systemName: icon)
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(hex: "#F2EEE6"))
+                .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
                 .frame(width: ClaritasLayout.minimumTouchTarget, height: ClaritasLayout.minimumTouchTarget)
         }
         .buttonStyle(.plain)
@@ -6117,7 +6120,7 @@ private struct InteractiveCountryBubbleMap: View {
                 if index == 0 { grid.move(to: point) } else { grid.addLine(to: point) }
             }
         }
-        context.stroke(grid, with: .color(Color.white.opacity(0.07)), lineWidth: 0.6)
+        context.stroke(grid, with: .color(ClaritasPalette.shellBorder(for: colorScheme)), lineWidth: 0.6)
     }
 
     private func drawLand(context: GraphicsContext, size: CGSize) {
@@ -6127,10 +6130,10 @@ private struct InteractiveCountryBubbleMap: View {
             let path = countryPath(boundary, transform: transform)
             let point = values[boundary.iso]
             let selected = boundary.iso == selectedCountry || boundary.iso == comparisonCountry
-            let fill = point.map { Color(uiColor: SignalDensityColorScale.color(for: $0, mode: mode, points: points, dark: true)) }
-                ?? Color(hex: "#182F3E")
+            let fill = point.map { Color(uiColor: SignalDensityColorScale.color(for: $0, mode: mode, points: points, dark: colorScheme == .dark)) }
+                ?? (colorScheme == .dark ? Color(hex: "#20372C") : Color(hex: "#E2E5D2"))
             context.fill(path, with: .color(fill), style: FillStyle(eoFill: true))
-            context.stroke(path, with: .color(selected ? ClaritasPalette.shellAccent(for: .dark) : Color(hex: "#668293").opacity(0.55)), lineWidth: selected ? 1.8 : 0.6)
+            context.stroke(path, with: .color(selected ? ClaritasPalette.shellAccent(for: colorScheme) : ClaritasPalette.shellBorderStrong(for: colorScheme)), lineWidth: selected ? 1.8 : 0.6)
         }
     }
 
@@ -6311,7 +6314,7 @@ struct SignalMapSnapshotReview: View {
                 .navigationTitle("Claritas")
                 .navigationBarTitleDisplayMode(.inline)
         }
-        .preferredColorScheme(.dark)
+        .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-qa-map-light") ? .light : .dark)
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
             do {

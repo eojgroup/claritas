@@ -2,21 +2,31 @@ import AppIntents
 import Foundation
 import SwiftUI
 import WidgetKit
+import UIKit
 
 private let claritasOverviewWidgetKind = "ClaritasBriefingWidget"
 private let claritasScopedWidgetKind = "ClaritasScopedWidget"
 private let claritasSnapshotKey = "claritas.widget.snapshot"
 
 private enum ClaritasWidgetPalette {
-    static let backgroundTop = Color(red: 8.0 / 255.0, green: 25.0 / 255.0, blue: 38.0 / 255.0)
-    static let backgroundBottom = Color(red: 4.0 / 255.0, green: 14.0 / 255.0, blue: 23.0 / 255.0)
-    static let primary = Color(red: 243.0 / 255.0, green: 247.0 / 255.0, blue: 250.0 / 255.0)
-    static let secondary = Color(red: 178.0 / 255.0, green: 194.0 / 255.0, blue: 207.0 / 255.0)
-    static let gold = Color(red: 224.0 / 255.0, green: 203.0 / 255.0, blue: 161.0 / 255.0)
-    static let cyan = Color(red: 102.0 / 255.0, green: 211.0 / 255.0, blue: 222.0 / 255.0)
-    static let green = Color(red: 113.0 / 255.0, green: 218.0 / 255.0, blue: 175.0 / 255.0)
-    static let orange = Color(red: 249.0 / 255.0, green: 178.0 / 255.0, blue: 101.0 / 255.0)
-    static let card = Color.white.opacity(0.075)
+    // Dynamic colours follow the widget's light/dark appearance.
+    private static func adaptive(_ light: UInt32, _ dark: UInt32) -> Color {
+        Color(uiColor: UIColor { traits in
+            let value = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((value >> 16) & 255) / 255,
+                           green: CGFloat((value >> 8) & 255) / 255,
+                           blue: CGFloat(value & 255) / 255, alpha: 1)
+        })
+    }
+    static let backgroundTop = adaptive(0xFFFAF0, 0x182F26)
+    static let backgroundBottom = adaptive(0xF2EBDD, 0x0D1B16)
+    static let primary = adaptive(0x19382A, 0xF2EBDD)
+    static let secondary = adaptive(0x596B5A, 0xB7C0AF)
+    static let gold = adaptive(0x946326, 0xD7BE88)
+    static let cyan = adaptive(0x2D6045, 0xA3BDAB)
+    static let green = adaptive(0x2D6045, 0x9FC1A5)
+    static let orange = adaptive(0xA74720, 0xECA168)
+    static let card = adaptive(0xEAE2D1, 0x243E32)
 
     static var background: LinearGradient {
         LinearGradient(
@@ -673,7 +683,7 @@ private struct ClaritasWidgetView: View {
                 domainPrimary
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            Divider().overlay(Color.white.opacity(0.16))
+            Divider().overlay(ClaritasWidgetPalette.secondary.opacity(0.25))
             VStack(alignment: .leading, spacing: 7) {
                 contextHeading
                 contextDetail(lineLimit: 2)
