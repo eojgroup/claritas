@@ -88,6 +88,7 @@ function renderMap() {
   return { mapLayer, onSelect, onSelectPoint, svg };
 }
 
+
 function dispatchWheel(
   target: Element,
   init: WheelEventInit,
@@ -122,6 +123,13 @@ describe("WorldMapBubbles interaction", () => {
     cleanup();
     vi.unstubAllGlobals();
   });
+
+it("keeps the event key visible without opening a disclosure", () => {
+  renderMap();
+  expect(screen.getByLabelText("Map event types").textContent).toContain("News report");
+  expect(screen.getByLabelText("Reported severity").textContent).toContain("critical");
+  expect(screen.queryByText("How to read the map")).toBeNull();
+});
 
   it("renders and remains interactive when the event layer is omitted", () => {
     // News, weather and market maps provide countries only. This path used to

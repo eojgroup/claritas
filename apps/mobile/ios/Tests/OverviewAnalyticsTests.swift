@@ -3,6 +3,17 @@ import XCTest
 @testable import ClaritasAppleModels
 
 final class OverviewAnalyticsTests: XCTestCase {
+    func testCountryAttentionAndPlainMapKinds() throws {
+        var raw = payload()
+        raw["countries"] = [["country_iso2": "JP", "event_count": 30, "high_priority_count": 18,
+                             "attention_score": 83, "previous_event_count": 8, "peak_priority_score": 92]]
+        let view = try decode(raw)
+        XCTAssertEqual(view.countries?.first?.attention_score, 83)
+        XCTAssertEqual(view.countries?.first?.previous_event_count, 8)
+        XCTAssertEqual(SignalMapEventKind(eventType: "earthquake").label, "Earthquake")
+        XCTAssertEqual(SignalMapEventKind(eventType: "severe_storm").label, "Storm")
+        XCTAssertEqual(SignalMapEventKind(eventType: "reported_development").label, "News report")
+    }
     func testTimeIntervalScopesHaveDistinctRequestsAndRejectOutOfWindowBuckets() throws {
         let full = IntelligenceOverviewScope()
         let selected = IntelligenceOverviewScope(bucket: 0)

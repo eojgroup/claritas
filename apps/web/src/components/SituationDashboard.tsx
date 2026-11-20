@@ -7,6 +7,7 @@ import { eventCoordinateContext, presentEvent } from "./eventPresentation";
 import OverviewCountryProfile from "./OverviewCountryProfile";
 import CountryFlag from "./CountryFlag";
 import ModalSurface from "./ModalSurface";
+import { mapEventKind, MAP_EVENT_KINDS } from "./mapEventPresentation";
 
 const IntelligenceWorkspace = lazy(() => import("./IntelligenceWorkspace"));
 type Props = {
@@ -31,7 +32,7 @@ export default function SituationDashboard(props: Props) {
   const [panelStop, setPanelStop] = useState<"peek" | "half" | "full">("half");
   const panelDrag = useRef<{ y: number; stop: number } | null>(null);
   const suppressPanelClick = useRef(false);
-  const [mapMetric, setMapMetric] = useState<"activity" | "priority">("activity");
+  const [mapMetric, setMapMetric] = useState<"attention" | "activity" | "priority">("attention");
   const scopeMatches = overview?.window.hours === props.hours && (overview.filters.topic ?? null) === props.topic
     && (overview.filters.country ?? "").toUpperCase() === (country ?? "").toUpperCase()
     && (overview.filters.priority ?? props.priority) === props.priority;
@@ -46,39 +47,42 @@ export default function SituationDashboard(props: Props) {
     id: event.id, latitude: Number(event.latitude), longitude: Number(event.longitude),
     title: presentEvent(event).headline, subtitle: [event.location_name || event.primary_country_iso2, new Date(event.last_activity_time).toLocaleString()].filter(Boolean).join(" · "),
     imageUrl: event.imagery?.preview_url,
-    label: event.location_name ? (event.location_name.length > 18 ? `${event.location_name.slice(0, 17)}…` : event.location_name) : undefined,
+    kind: mapEventKind(event.event_type),
+    label: `${MAP_EVENT_KINDS[mapEventKind(event.event_type)].label}${event.location_name ? ` · ${event.location_name}` : ""}`,
     severity: event.severity, selected: event.id === selectedId, hasImagery: event.earth_observation_available || Boolean(event.imagery),
   })), [events, selectedId, selectedEvent]);
   const countries = useMemo(() => {
     if (scopeMatches && overview?.countries) return overview.countries.map((item) => ({ country: item.country_iso2,
-      count: mapMetric === "priority" ? item.high_priority_count : item.event_count,
-      meta: { subtitle: `${item.event_count.toLocaleString()} developments · ${item.high_priority_count} high priority` } }));
+      count: mapMetric === "attention" ? item.attention_score ?? 0 : mapMetric === "priority" ? item.high_priority_count : item.event_count,
+      meta: { subtitle: `${item.event_count.toLocaleString()} updates · ${item.high_priority_count} high priority`,
+        lines: [`${item.attention_score ?? 0}/100 signal relevance`, `Previous period: ${item.previous_event_count ?? 0} updates`] } }));
     const counts = new Map<string, number>();
     for (const event of events) if (event.primary_country_iso2) {
       const iso = event.primary_country_iso2.toUpperCase();
       counts.set(iso, (counts.get(iso) ?? 0) + 1);
     }
-    return [...counts].map(([iso, count]) => ({ country: iso, count }));
+    return [...counts].map(([iso, count]) => ({ country: iso, count, meta: { subtitle: `${count} mapped developments`, lines: [] as string[] } }));
   }, [events, overview, scopeMatches, mapMetric]);
   const revealContext = () => setPanelStop((stop) => stop === "peek" ? "half" : stop);
   const selectEvent = (id: string | null) => { onSelect(id); if (id) { setProfileCountry(null); revealContext(); } };
   const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
-  const mappedHighlight = events.find((event) => ["critical", "high"].includes(event.severity)) ?? events[0];
+  const mappedHighlight = [...events].sort((a, b) => (b.priority_score ?? b.relevance_score) - (a.priority_score ?? a.relevance_score))[0];
   const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country} allowsSingleFingerPan
-    dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale="log" featuredCountry={leadingCountries[0]?.country} focusOnActivity
-    featuredLabel={mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
+    dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale={mapMetric === "attention" ? "linear" : "log"} valueDomain={mapMetric === "attention" ? [0, 100] : undefined}
+    featuredCountry={leadingCountries[0]?.country} focusOnActivity={Boolean(country)}
+    featuredLabel={mapMetric === "attention" ? "Highest signal relevance" : mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
     onSelectPoint={(point) => selectEvent(point.id)} showBubbles={false} showLabels legend
-    legendLabel={!intervalMatches ? "Previous selection · updating" : mapMetric === "priority" ? "High-priority developments" : props.bucket != null ? "Updates in selected interval" : "Developments in selected period"}
-    legendDescription="Warmer country colours mean more reported updates, not greater danger. Pins mark precise event locations; photo markers belong to those events. Select a country for its profile or a pin for the story." />;
+    legendLabel={!intervalMatches ? "Previous selection · updating" : mapMetric === "attention" ? "Signal relevance" : mapMetric === "priority" ? "High-priority updates" : "Number of updates"}
+    legendDescription={mapMetric === "attention" ? "Importance, high-priority share and unusual increases. Not a danger rating." : "Warmer = more updates, not more danger."} />;
   const stops = ["peek", "half", "full"] as const;
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
   const overviewControls = <>
         <p className="situation-map-key"><span><i />Pin = located event · colour = severity</span><span><i />Ring = image available</span></p>
           <div id="world-event-stream" tabIndex={-1}>
             <SituationOverview variant="summary" compact {...props} selectedId={selectedId}
-              filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "activity" | "priority")}><option value="activity">All selected activity</option><option value="priority">High-priority activity</option></select></label>}
+              filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "attention" | "activity" | "priority")}><option value="attention">Signal relevance</option><option value="activity">Number of updates</option><option value="priority">High-priority updates</option></select></label>}
               onHoursChange={changeScope(props.onHoursChange)} onTopicChange={changeScope(props.onTopicChange)}
               onPriorityChange={changeScope(props.onPriorityChange)} onCountryChange={changeScope(props.onCountryChange)} />
           </div>
@@ -88,7 +92,7 @@ export default function SituationDashboard(props: Props) {
       {map}
       <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span>
         {!intervalMatches && <p className="situation-map-narrative">{props.error ? "Interval unavailable. Showing the previous map." : "Loading the selected interval. Showing the previous map."}</p>}
-        {intervalMatches && leadingCountries[0] && <p className="situation-map-narrative">Most {mapMetric === "priority" ? "high-priority " : ""}updates: {new Intl.DisplayNames(undefined, { type: "region" }).of(leadingCountries[0].country)} · {leadingCountries[0].count.toLocaleString()}{overview?.selection ? " in this interval" : " in this period"}</p>}
+        {intervalMatches && leadingCountries[0] && <p className="situation-map-narrative">{mapMetric === "attention" ? "Highest signal relevance" : mapMetric === "priority" ? "Most high-priority updates" : "Most updates"}: {new Intl.DisplayNames(undefined, { type: "region" }).of(leadingCountries[0].country)} · {mapMetric === "attention" ? leadingCountries[0].meta?.subtitle : leadingCountries[0].count.toLocaleString()}{overview?.selection ? " in this interval" : " in this period"}</p>}
         {intervalMatches && mappedHighlight && <button type="button" className="situation-map-story" onClick={() => selectEvent(mappedHighlight.id)} aria-label={`Open mapped development: ${presentEvent(mappedHighlight).headline}`}>On the map: {presentEvent(mappedHighlight).headline}</button>}
       </div>
       <div className="situation-map-actions">

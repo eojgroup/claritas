@@ -30,7 +30,7 @@ it("loads the overview and briefing without an optional-feed request burst and s
       const overview = overviewFixture(url.searchParams.get("priority") as "high" | "all", url.searchParams.get("country"));
       overview.events.push({ ...event, id: "outside-latest-cohort" });
       overview.map_events = [event, { ...event, id: "older-located-event" }];
-      overview.countries = [{ country_iso2: "SE", event_count: 1000, high_priority_count: 20 }];
+      overview.countries = [{ country_iso2: "SE", event_count: 1000, high_priority_count: 20, attention_score: 72, previous_event_count: 900, peak_priority_score: 90 }];
       overview.visual_events = [{ ...event, id: "older-imaged-event", imagery: { preview_url: "/api/news-images/photo/preview", captured_at: null, attribution: "Port authority", source_kind: "publisher" } }];
       data = overview;
     }
@@ -45,12 +45,13 @@ it("loads the overview and briefing without an optional-feed request burst and s
   expect(requests.sort()).toEqual(["/api/auth/me", "/api/auth/providers", "/api/briefings/daily/latest", "/api/intelligence/overview?hours=24&priority=all"].sort());
   expect(peak).toBeLessThanOrEqual(3);
   expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("3");
-  expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("1000");
+  expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("72");
   expect(screen.queryByRole("region", { name: "Images from this period" })).toBeNull();
   fireEvent.click(screen.getByText("Filters"));
   fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "priority" } });
   expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("20");
   fireEvent.change(screen.getByRole("combobox", { name: "Country shading" }), { target: { value: "activity" } });
+  expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("1000");
   fireEvent.click(screen.getByText("Filters"));
   fireEvent.click(screen.getByRole("button", { name: "Expand map" }));
   expect(screen.getByRole("dialog", { name: "Expanded development map" })).toBeTruthy();

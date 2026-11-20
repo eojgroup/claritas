@@ -1,6 +1,8 @@
 const CITY_GEO_TYPES = new Set([3, 4]);
 
 function finiteCoordinate(latitudeValue: unknown, longitudeValue: unknown) {
+  const numeric = (value: unknown) => typeof value === "number" || (typeof value === "string" && value.trim() !== "");
+  if (!numeric(latitudeValue) || !numeric(longitudeValue)) return null;
   const latitude = Number(latitudeValue);
   const longitude = Number(longitudeValue);
   return Number.isFinite(latitude) && latitude >= -90 && latitude <= 90

@@ -1,5 +1,47 @@
 import Foundation
 
+enum SignalMapEventKind: String, CaseIterable {
+    case earthquake, storm, fire, flood, transport, weather, markets, security, news
+    init(eventType: String) {
+        let type = eventType.lowercased()
+        if type.contains("earthquake") || type.contains("seismic") { self = .earthquake }
+        else if ["storm", "hurricane", "typhoon", "cyclone"].contains(where: { type.contains($0) }) { self = .storm }
+        else if type.contains("fire") { self = .fire }
+        else if type.contains("flood") { self = .flood }
+        else if ["transport", "aviation", "maritime", "shipping"].contains(where: { type.contains($0) }) { self = .transport }
+        else if ["weather", "temperature", "precipitation"].contains(where: { type.contains($0) }) { self = .weather }
+        else if type.contains("market") || type.contains("econom") { self = .markets }
+        else if type.contains("security") || type.contains("conflict") { self = .security }
+        else { self = .news }
+    }
+    var label: String {
+        switch self {
+        case .earthquake: return "Earthquake"
+        case .storm: return "Storm"
+        case .fire: return "Fire"
+        case .flood: return "Flood"
+        case .transport: return "Transport"
+        case .weather: return "Weather"
+        case .markets: return "Markets"
+        case .security: return "Security"
+        case .news: return "News report"
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .earthquake: return "waveform.path.ecg"
+        case .storm: return "cloud.bolt.rain.fill"
+        case .fire: return "flame.fill"
+        case .flood: return "water.waves"
+        case .transport: return "truck.box.fill"
+        case .weather: return "cloud.sun.fill"
+        case .markets: return "chart.line.uptrend.xyaxis"
+        case .security: return "shield.lefthalf.filled"
+        case .news: return "newspaper"
+        }
+    }
+}
+
 enum SignalMapLayout {
     /// Use the space available to the map, including iPad Split View.
     static func usesSidebar(width: Double, height: Double) -> Bool {
@@ -4054,7 +4096,12 @@ struct IntelligenceOverview: Codable {
     let events: [IntelligenceEvent]
     let timeline: [TimelineEntry]
     let coverage: Coverage
-    struct Country: Codable { let country_iso2: String; let event_count: Int; let high_priority_count: Int }
+    struct Country: Codable {
+        let country_iso2: String; let event_count: Int; let high_priority_count: Int
+        var attention_score: Int? = nil
+        var previous_event_count: Int? = nil
+        var peak_priority_score: Int? = nil
+    }
     var countries: [Country]? = nil
     var map_events: [IntelligenceEvent]? = nil
     var visual_events: [IntelligenceEvent]? = nil

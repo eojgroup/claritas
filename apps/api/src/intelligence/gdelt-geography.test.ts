@@ -16,6 +16,10 @@ test("GDELT imagery geography excludes country and admin centroids", () => {
 });
 
 test("GDELT action geography requires a preserved city/local type", () => {
+  for (const missing of [null, undefined, "", " ", false]) {
+    assert.equal(trustedGdeltActionCoordinate({ action_lat: missing, action_lon: missing, payload: { action_geo: { type: 4 } } }), null);
+    assert.deepEqual(trustedGdeltLocations({ gkg: { locations: [{ type: 4, latitude: missing, longitude: missing }] } }), []);
+  }
   assert.equal(trustedGdeltActionCoordinate({
     action_lat: 39.8,
     action_lon: -98.6,

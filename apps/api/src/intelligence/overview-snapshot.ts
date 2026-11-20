@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { countryAttentionScore, type CountryAttentionInput } from "./country-attention";
 import { refreshPreparedIntelligenceFeed } from "./feed-snapshot";
 import { query, withTransaction, withWorkerLease } from "../db";
 import { SharedReadCache } from "../shared-read-cache";
@@ -16,7 +17,7 @@ type ProjectionRow = OverviewSample & HydratedOverviewRow;
 type SavedCard = { sample: OverviewSample; event: HydratedOverviewRow };
 type Aggregate = { summary: { event_count: number; previous_event_count: number; high_priority_count: number; location_count: number };
   topics: Array<Record<string, any>>; locations: Array<Record<string, any>>;
-  countries: Array<{ country_iso2: string; event_count: number; high_priority_count: number }>;
+  countries: Array<CountryAttentionInput & { country_iso2: string }>;
   buckets: Array<{ index: number; event_count: number; previous_event_count: number; high_priority_count: number }> };
 const cache = new SharedReadCache({ ttlMs: 30_000, maxEntries: 40, maxBytes: 8 * 1024 * 1024 });
 const BATCH_SIZE = 500;
@@ -55,7 +56,9 @@ export function buildSavedOverviewAggregateQuery(state: State, options: Required
       ORDER BY event_count DESC,priority_score DESC,location_key LIMIT 8
     ), country_counts AS (
       SELECT country_iso2,count(*) FILTER(WHERE current_period)::int AS event_count,
-        count(*) FILTER(WHERE current_period AND high_priority)::int AS high_priority_count
+        count(*) FILTER(WHERE current_period AND high_priority)::int AS high_priority_count,
+        count(*) FILTER(WHERE NOT current_period)::int AS previous_event_count,
+        COALESCE(max(priority_score) FILTER(WHERE current_period),0)::int AS peak_priority_score
       FROM eligible WHERE country_iso2 IS NOT NULL GROUP BY country_iso2
       HAVING count(*) FILTER(WHERE current_period)>0
     ), bucket_counts AS (
@@ -128,9 +131,16 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
   const { rows: visual } = await read<{ event: HydratedOverviewRow }>(`SELECT event FROM intelligence_overview_projection
     WHERE ${detailScope} AND event->'imagery'<>'null'::jsonb
     ORDER BY last_activity_time DESC,id LIMIT 8`, detailParams);
-  const selectedCountries = interval ? (await read<{ country_iso2: string; event_count: number; high_priority_count: number }>(`
-    SELECT country_iso2,count(*)::int AS event_count,count(*) FILTER(WHERE ${highSql})::int AS high_priority_count
-    FROM intelligence_overview_projection WHERE ${detailScope} AND country_iso2 IS NOT NULL GROUP BY country_iso2`, detailParams)).rows : aggregate.countries;
+  const inInterval = `(last_activity_time >= $8::timestamptz AND (last_activity_time < $9::timestamptz OR ($10::boolean AND last_activity_time=$9::timestamptz)))`;
+  const previousInterval = inInterval.replaceAll("last_activity_time", "(last_activity_time+($11::double precision*interval '1 second'))");
+  const selectedCountries = interval ? (await read<CountryAttentionInput & { country_iso2: string }>(`
+    SELECT country_iso2,count(*) FILTER(WHERE ${inInterval})::int AS event_count,
+      count(*) FILTER(WHERE ${inInterval} AND ${highSql})::int AS high_priority_count,
+      count(*) FILTER(WHERE ${previousInterval})::int AS previous_event_count,
+      COALESCE(max(${prioritySql}) FILTER(WHERE ${inInterval}),0)::int AS peak_priority_score
+    FROM intelligence_overview_projection WHERE ${scopeSql} AND country_iso2 IS NOT NULL
+      AND (${inInterval} OR ${previousInterval}) GROUP BY country_iso2
+    HAVING count(*) FILTER(WHERE ${inInterval})>0`, [...detailParams, options.hours * 3600])).rows : aggregate.countries;
   const now = new Date(state.generated_at);
   const samples = cards.map(({ sample }) => ({ ...sample, period: "current" as const }));
   const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now, cards.map(({ event }) => event.id));
@@ -144,7 +154,8 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     return { ...bucket, event_count: counts?.event_count ?? 0, previous_event_count: counts?.previous_event_count ?? 0, high_priority_count: counts?.high_priority_count ?? 0 };
   });
   return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations,
-    selection: interval, countries: selectedCountries, map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
+    selection: interval, countries: selectedCountries.map((country) => ({ ...country, previous_event_count: country.previous_event_count ?? 0,
+      peak_priority_score: country.peak_priority_score ?? 0, attention_score: countryAttentionScore(country) })), map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
     visual_events: visual.map(({ event: { source_refs: _refs, ...event } }) => event), buckets,
     coverage: { ...base.coverage, notice: "Key developments balance importance, recency and source/topic variety. Repeated updates are grouped in the list; chart totals cover every eligible saved investigation.", sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),
       sampled_events: aggregate.summary.event_count + aggregate.summary.previous_event_count } };

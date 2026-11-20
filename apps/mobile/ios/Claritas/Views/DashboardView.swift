@@ -4333,7 +4333,7 @@ struct SignalMapPanel: View {
                     guard let coordinate = CountryCentroidLookup.coordinate(for: item.country_iso2) else { return nil }
                     return CountryBubblePoint(id: "overview-\(item.country_iso2)", iso: item.country_iso2,
                         valueLabel: "\(item.event_count) developments", detail: "Full selected period · \(item.high_priority_count) high priority",
-                        magnitude: Double(item.event_count), colorValue: Double(item.event_count), rank: 0, coordinate: coordinate)
+                        magnitude: Double(item.attention_score ?? 0), colorValue: Double(item.attention_score ?? 0), rank: 0, coordinate: coordinate)
                 }
             }
             let countries = Set(events.compactMap { $0.primary_country_iso2?.uppercased() })
@@ -5233,11 +5233,11 @@ struct WorldMapWorkspace: View {
     let onOpenBriefing: () -> Void
 
     private var points: [CountryBubblePoint] {
-        (model.intelligenceOverview?.countries ?? []).enumerated().compactMap { index, country in
+        (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
             guard let coordinate = CountryCentroidLookup.coordinate(for: country.country_iso2) else { return nil }
             return CountryBubblePoint(id: "overview-\(country.country_iso2)", iso: country.country_iso2,
-                valueLabel: "\(country.event_count) developments", detail: "\(country.high_priority_count) high priority",
-                magnitude: Double(country.event_count), colorValue: Double(country.event_count), rank: index + 1, coordinate: coordinate)
+                valueLabel: "\(country.attention_score ?? 0)/100 relevance", detail: "\(country.event_count) updates · \(country.high_priority_count) high priority",
+                magnitude: Double(country.attention_score ?? 0), colorValue: Double(country.attention_score ?? 0), rank: index + 1, coordinate: coordinate)
         }
     }
 
@@ -5455,7 +5455,7 @@ private struct NativeSignalMap: View {
                 .allowsHitTesting(false)
         }
         .overlay(alignment: .bottomTrailing) {
-            SignalDensityLegend(mode: mode, points: points)
+            SignalDensityLegend(mode: mode, points: points, events: events)
                 .padding(8)
                 .allowsHitTesting(false)
         }
@@ -5479,15 +5479,15 @@ private struct SignalMapInteractionKey: View {
     @State private var expanded = false
     private var mappedStory: IntelligenceEvent? {
         guard overviewOnly else { return nil }
-        return model.intelligenceOverview?.map_events?.first {
+        return model.intelligenceOverview?.map_events?.filter {
             $0.latitude != nil && $0.longitude != nil && !["country", "country_centroid", "admin", "admin1", "administrative_area"].contains($0.location_type ?? "")
-        }
+        }.max { ($0.priority_score ?? $0.relevance_score) < ($1.priority_score ?? $1.relevance_score) }
     }
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             if overviewOnly, model.intelligenceOverview?.filters.bucket == model.overviewBucket,
-               let country = model.intelligenceOverview?.countries?.max(by: { $0.event_count < $1.event_count }) {
-                Text("Most updates: \(Locale.current.localizedString(forRegionCode: country.country_iso2) ?? country.country_iso2) · \(country.event_count)\(model.overviewBucket == nil ? " in this period" : " in this interval")")
+               let country = model.intelligenceOverview?.countries?.max(by: { ($0.attention_score ?? 0) < ($1.attention_score ?? 0) }) {
+                Text("Highest signal relevance: \(Locale.current.localizedString(forRegionCode: country.country_iso2) ?? country.country_iso2) · \(country.high_priority_count) high-priority updates")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if let event = mappedStory {
@@ -5497,7 +5497,7 @@ private struct SignalMapInteractionKey: View {
                 }.buttonStyle(.plain).accessibilityLabel("Open mapped development: \(event.title)")
             }
             DisclosureGroup(isExpanded: $expanded) {
-                Text((overviewOnly ? "Warmer country colours mean more reported updates. " : "Country shading shows \(mode.legend.lowercased()). ") + "Tap a country for its profile. Event pins mark mapped locations; tap a pin to open the story. Red/orange event pins have critical/high reported severity, gold medium and blue low. A number groups nearby events. A teal ring or photo indicates imagery linked to that event. Reports with only a country still contribute to overview country shading.")
+                Text((overviewOnly ? "Country colours show signal relevance: importance, high-priority share and unusual increases. This is not a danger rating. " : "Country shading shows \(mode.legend.lowercased()). ") + "Tap a country for its profile. Event pins mark mapped locations; tap a pin to open the story. Red/orange event pins have critical/high reported severity, gold medium and blue low. A number groups nearby events. A teal ring or photo indicates imagery linked to that event. Reports with only a country still contribute to overview country shading.")
                     .font(.caption2).foregroundStyle(.secondary)
             } label: {
                 HStack(spacing: 8) {
@@ -5514,15 +5514,16 @@ private struct SignalMapInteractionKey: View {
 private struct SignalDensityLegend: View {
     let mode: SignalMapMode
     let points: [CountryBubblePoint]
+    var events: [IntelligenceEvent] = []
 
     private var values: [Double] { points.map(\.colorValue) }
     private var lower: Double { mode == .signals ? 0 : (values.min() ?? 0) }
     private var isOverview: Bool { points.first?.id.hasPrefix("overview-") == true }
-    private var upper: Double { mode == .signals && !isOverview ? 100 : (values.max() ?? 1) }
+    private var upper: Double { mode == .signals ? 100 : (values.max() ?? 1) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
-            Text(isOverview ? "COUNTRY DEVELOPMENTS" : mode.legend.uppercased())
+            Text(isOverview ? "SIGNAL RELEVANCE" : mode.legend.uppercased())
                 .font(.system(size: 8, weight: .bold))
                 .tracking(0.8)
             LinearGradient(
@@ -5538,12 +5539,22 @@ private struct SignalDensityLegend: View {
                 Text(format(upper))
             }
             .font(.system(size: 9).monospacedDigit())
-            if isOverview { Text("Warmer = more updates\nTap country for profile").font(.system(size: 8)).lineSpacing(2) }
+            if isOverview { Text("Importance + unusual changes\nTap country for profile").font(.system(size: 10)).lineSpacing(2) }
+            if !events.isEmpty {
+                Divider().overlay(Color.white.opacity(0.3))
+                Text("EVENTS · TAP FOR STORY").font(.system(size: 9, weight: .bold))
+                let kinds = SignalMapEventKind.allCases.filter { kind in events.contains { SignalMapEventKind(eventType: $0.event_type) == kind } }
+                LazyVGrid(columns: [GridItem(.flexible(), alignment: .leading), GridItem(.flexible(), alignment: .leading)], alignment: .leading, spacing: 4) {
+                    ForEach(kinds, id: \.rawValue) { kind in Label(kind.label, systemImage: kind.symbol).font(.system(size: 10)) }
+                }
+                Text("Colour = reported severity\nBlue low · gold medium\nOrange high · red critical\nRing = image · number = group")
+                    .font(.system(size: 9)).lineSpacing(2)
+            }
         }
         .foregroundStyle(.white.opacity(0.88))
         .padding(.horizontal, 7)
         .padding(.vertical, 5)
-        .frame(width: 140)
+        .frame(width: events.isEmpty ? 140 : 200)
         .background(Color.black.opacity(0.58), in: RoundedRectangle(cornerRadius: 7))
     }
 
@@ -5624,8 +5635,7 @@ private enum SignalDensityColorScale {
     ) -> UIColor {
         let values = points.map(\.colorValue)
         let minimum = mode == .signals ? 0 : (values.min() ?? 0)
-        let isOverview = points.first?.id.hasPrefix("overview-") == true
-        let maximum = mode == .signals && !isOverview ? 100 : (values.max() ?? 1)
+        let maximum = mode == .signals ? 100 : (values.max() ?? 1)
         let ratio = min(1, max(0, (point.colorValue - minimum) / max(0.0001, maximum - minimum)))
 
         if mode == .weather {
@@ -5796,7 +5806,7 @@ private struct InteractiveCountryBubbleMap: View {
                 }
             }
             .clipped()
-            .onAppear { previousViewportSize = proxy.size; resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
+            .onAppear { previousViewportSize = proxy.size; resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
             .onChange(of: proxy.size) { next in
                 if let previous = previousViewportSize {
                     let camera = projection.resizedViewport(width: Double(previous.width), height: Double(previous.height),
@@ -5807,13 +5817,13 @@ private struct InteractiveCountryBubbleMap: View {
                 }
                 previousViewportSize = next
             }
-            .onChange(of: mapRegion) { _ in resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
-            .onChange(of: resetToken) { _ in resetViewport(); focus(on: selectedCountry ?? featuredCountry, size: proxy.size) }
+            .onChange(of: mapRegion) { _ in resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
+            .onChange(of: resetToken) { _ in resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
             .onChange(of: selectedCountry) { next in
-                resetViewport(); focus(on: next ?? featuredCountry, size: proxy.size)
+                resetViewport(); focus(on: next ?? (points.first?.id.hasPrefix("overview-") == true ? nil : featuredCountry), size: proxy.size)
             }
             .onChange(of: featuredCountry) { next in
-                if selectedCountry == nil && !userAdjustedViewport { resetViewport(); focus(on: next, size: proxy.size) }
+                if selectedCountry == nil && points.first?.id.hasPrefix("overview-") != true && !userAdjustedViewport { resetViewport(); focus(on: next, size: proxy.size) }
             }
             .sheet(item: $expandedGroup) { group in
                 NavigationStack {
@@ -5839,6 +5849,8 @@ private struct InteractiveCountryBubbleMap: View {
         }
     }
 
+    private var automaticFocusCountry: String? { selectedCountry ?? (points.first?.id.hasPrefix("overview-") == true ? nil : featuredCountry) }
+
     private func bubbleView(for point: CountryBubblePoint) -> some View {
         Button(action: { onSelectCountry(point.iso) }) {
             HStack(spacing: 4) {
@@ -5846,7 +5858,7 @@ private struct InteractiveCountryBubbleMap: View {
                 Text(Locale.current.localizedString(forRegionCode: point.iso) ?? point.iso)
                     .lineLimit(1)
                 if !compactPresentation {
-                    Text(point.id.hasPrefix("overview-") ? Int(point.colorValue).formatted() : point.valueLabel)
+                    Text(point.valueLabel)
                         .lineLimit(1).foregroundStyle(.secondary)
                 }
             }
@@ -5897,7 +5909,7 @@ private struct InteractiveCountryBubbleMap: View {
             let halfWidth: CGFloat = compactPresentation ? 73 : 105
             guard pixel.x > halfWidth + 8, pixel.x < size.width - halfWidth - 8, pixel.y > 52, pixel.y < size.height - 24 else { continue }
             let labelBox = CGRect(x: pixel.x - halfWidth, y: pixel.y - 46, width: halfWidth * 2, height: 44)
-            let legendBox = CGRect(x: size.width - 156, y: size.height - 90, width: 156, height: 90)
+            let legendBox = CGRect(x: size.width - 220, y: size.height - 220, width: 220, height: 220)
             let controlsBox = CGRect(x: size.width - 64, y: 0, width: 64, height: 152)
             guard !labelBox.intersects(legendBox), !labelBox.intersects(controlsBox) else { continue }
             if visible.allSatisfy({
@@ -5916,9 +5928,12 @@ private struct InteractiveCountryBubbleMap: View {
         } label: {
             ZStack {
                 if group.hasImagery { Circle().stroke(Color(hex: "#70B5A7"), style: StrokeStyle(lineWidth: 2, dash: [3, 2])).frame(width: 32, height: 32) }
-                Circle().fill(pinColor(group)).frame(width: group.eventIDs.count > 1 ? 26 : 12, height: group.eventIDs.count > 1 ? 26 : 12)
+                Circle().fill(pinColor(group)).frame(width: group.eventIDs.count > 1 ? 26 : 22, height: group.eventIDs.count > 1 ? 26 : 22)
                     .overlay(Circle().stroke(Color(hex: "#F2EEE6"), lineWidth: 1.5))
                 if group.eventIDs.count > 1 { Text("\(group.eventIDs.count)").font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: "#102535")) }
+                else if let event = events.first(where: { $0.id == group.id }) {
+                    Image(systemName: SignalMapEventKind(eventType: event.event_type).symbol).font(.system(size: 11, weight: .bold)).foregroundStyle(Color(hex: "#102535"))
+                }
             }.frame(width: 44, height: 44).contentShape(Circle())
         }.buttonStyle(.plain)
                 .overlay(alignment: .bottom) {

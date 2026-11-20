@@ -1,4 +1,5 @@
 import CountryFlag from "./CountryFlag";
+import { MAP_EVENT_KINDS, type MapEventKind } from "./mapEventPresentation";
 import { useCountryContexts } from "./countryContext";
 import { countryIso, countryReferencePoint, countryFlagEmoji } from "./countryPresentation";
 import {
@@ -56,6 +57,7 @@ export type WorldMapPoint = {
   hasImagery?: boolean;
   imageUrl?: string;
   selected?: boolean;
+  kind?: MapEventKind;
 };
 
 export type WorldMapBubblesProps = {
@@ -857,6 +859,23 @@ export default memo(function WorldMapBubbles({
     ? markerByCountry.get(featuredIso)
     : undefined;
   const labelColor = isDark ? "#f4eee6" : "#1d2b33";
+  const pointLabelIds = useMemo(() => {
+    const accepted = new Set<string>();
+    const boxes: Array<{ x: number; y: number; width: number }> = [];
+    const preferred = [...eventPoints].sort((a, b) => Number(Boolean(b.selected)) - Number(Boolean(a.selected)));
+    for (const eventPoint of preferred) {
+      if (!eventPoint.label) continue;
+      const point = projection([eventPoint.longitude, eventPoint.latitude]);
+      if (!point) continue;
+      const x = point[0] * view.scale + view.x, y = point[1] * view.scale + view.y - (eventPoint.imageUrl ? 55 : 17);
+      const width = Math.min(220, eventPoint.label.length * 6.2);
+      if (!eventPoint.selected && (x < width / 2 + 8 || x > size.width - width / 2 - 8 || y < 12 || y > size.height - 12 || (legend && x < 260 && y > size.height - 230)
+        || boxes.some((box) => Math.abs(box.y - y) < 23 && Math.abs(box.x - x) < (width + box.width) / 2 + 8))) continue;
+      accepted.add(eventPoint.id); boxes.push({ x, y, width });
+      if (accepted.size >= (isCompact ? 4 : 8)) break;
+    }
+    return accepted;
+  }, [eventPoints, projection, view, size, isCompact, legend]);
   const legendPalette = markerPalette(
     markers[markers.length - 1]?.tone,
     isDark,
@@ -1145,16 +1164,13 @@ export default memo(function WorldMapBubbles({
             );
           })}
 
-          {eventPoints.map((eventPoint, index) => {
+          {eventPoints.map((eventPoint) => {
             const point = projection([eventPoint.longitude, eventPoint.latitude]);
             if (!point) return null;
             const color = eventPointColor(eventPoint.severity, isDark);
-            const radius = (eventPoint.severity === "critical"
-              ? 7
-              : eventPoint.severity === "high"
-                ? 6
-                : 5) / view.scale;
-            const showPointLabel = Boolean(eventPoint.label) && (eventPoint.selected || index < (isCompact ? 5 : 8));
+            const radius = 9 / view.scale;
+            const EventIcon = MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
+            const showPointLabel = pointLabelIds.has(eventPoint.id);
             return (
               <g
                 key={eventPoint.id}
@@ -1210,6 +1226,7 @@ export default memo(function WorldMapBubbles({
                   stroke={isDark ? "#fff7ed" : "#ffffff"}
                   strokeWidth={1.4 / view.scale}
                 />
+                <EventIcon aria-hidden="true" x={-6 / view.scale} y={-6 / view.scale} width={12 / view.scale} height={12 / view.scale} stroke={isDark ? "#07121a" : "#ffffff"} strokeWidth={2} pointerEvents="none" />
                 {eventPoint.imageUrl && eventPoints.filter((point) => point.imageUrl).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
                   <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
                   <rect x={-23 / view.scale} y={-51 / view.scale} width={46 / view.scale} height={34 / view.scale} rx={4 / view.scale} fill={color} />
@@ -1223,10 +1240,10 @@ export default memo(function WorldMapBubbles({
                     stroke={isDark ? "#07121a" : "#eef2f3"}
                     strokeWidth={3 / view.scale}
                     paintOrder="stroke"
-                    fontSize={9 / view.scale}
+                    fontSize={11 / view.scale}
                     fontWeight={800}
                   >
-                    {eventPoint.label ?? eventPoint.severity?.toUpperCase() ?? "EVENT"}
+                    {eventPoint.label && eventPoint.label.length > 36 ? `${eventPoint.label.slice(0, 35)}…` : eventPoint.label}
                   </text>
                 )}
               </g>
@@ -1296,7 +1313,7 @@ export default memo(function WorldMapBubbles({
           aria-hidden="true"
         >
           <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
-            {hoveredPoint.point.severity ?? "low"} event
+            {MAP_EVENT_KINDS[hoveredPoint.point.kind ?? "news"].label} · {hoveredPoint.point.severity ?? "low"} reported severity
             {hoveredPoint.point.hasImagery ? " · image available" : " · reported location"}
           </span>
           <strong className="mt-1 line-clamp-2 block text-xs leading-5 text-[color:var(--shell-ink)]">
@@ -1387,7 +1404,16 @@ export default memo(function WorldMapBubbles({
           <div className="map-legend-coverage mt-1 border-t border-current/15 pt-1 text-[10px] opacity-75">
             {markers.length} mapped · select country for profile
           </div>
-          {legendDescription && <details className="map-legend-explanation"><summary>How to read the map</summary><p>{legendDescription}</p><p>Reported severity: red = critical, orange = high, gold = medium, blue = low. Rings and thumbnails indicate imagery linked to that event.</p></details>}
+          {legendDescription && <p className="map-key-note">{legendDescription}</p>}
+          {eventPoints.length > 0 && <div className="map-visible-event-key" aria-label="Map event types">
+            <strong>Events · tap for the story</strong>
+            <div className="map-event-types">{[...new Set(eventPoints.map((point) => point.kind ?? "news"))].map((kind) => {
+              const { icon: Icon, label } = MAP_EVENT_KINDS[kind];
+              return <span key={kind}><Icon size={13} aria-hidden="true" />{label}</span>;
+            })}</div>
+            <div className="map-event-levels" aria-label="Reported severity">{(["low", "medium", "high", "critical"] as const).map((level) => <span key={level}><i style={{ background: eventPointColor(level, isDark) }} />{level}</span>)}</div>
+            <p className="map-key-note">Colour = reported severity · ring = image</p>
+          </div>}
         </div>
       )}
 
