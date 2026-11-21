@@ -93,7 +93,7 @@ export async function seedNewsAssessmentQueue(scanSize = 500): Promise<void> {
 }
 
 /** Fan out event invalidations outside source/event writer transactions. */
-export async function expandNewsAssessmentEvents(batchSize = 20): Promise<void> {
+export async function expandNewsAssessmentEvents(batchSize = 100): Promise<void> {
   await query(
     `WITH events AS MATERIALIZED (
        SELECT event_id,revision FROM news_assessment_event_queue ORDER BY enqueued_at,event_id LIMIT $1
@@ -130,7 +130,7 @@ export function nextNewsAssessmentRefresh(eventTime: string | Date | null, asses
   return next === undefined ? null : new Date(next).toISOString();
 }
 
-export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESSMENT_BATCH_SIZE", 80, 1, 200)) {
+export async function assessPendingNewsItems(batchSize = integerEnv("NEWS_ASSESSMENT_BATCH_SIZE", 200, 1, 200)) {
   const boundedBatch = Math.max(1, Math.min(Math.trunc(batchSize), 200));
   await seedNewsAssessmentQueue();
   await expandNewsAssessmentEvents();
@@ -298,7 +298,9 @@ async function runWorkerCycle(): Promise<void> {
 
 export function startNewsAssessmentWorker(): void {
   if (workerTimer || !enabledUnlessFalse("NEWS_ASSESSMENT_WORKER_ENABLED")) return;
-  const intervalSeconds = integerEnv("NEWS_ASSESSMENT_POLL_SECONDS", 30, 10, 300);
+  // The event fan-out and assessment stages must both keep up with source
+  // refreshes. Small, leased batches avoid a long queue of stale reader data.
+  const intervalSeconds = integerEnv("NEWS_ASSESSMENT_POLL_SECONDS", 10, 10, 300);
   workerTimer = setInterval(() => void runWorkerCycle(), intervalSeconds * 1_000);
   workerTimer.unref();
   const startup = setTimeout(() => void runWorkerCycle(), 5_000);

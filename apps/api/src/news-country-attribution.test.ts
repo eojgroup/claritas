@@ -24,11 +24,13 @@ test("news story identity deduplicates same-hour syndication without hiding hour
   assert.match(expression, /date_trunc\('hour',i\.event_time AT TIME ZONE 'UTC'\)/);
 });
 
-test("current assessment SQL rejects item and linked-event changes after the worker watermark", () => {
+test("current assessment SQL follows item watermarks and durable input invalidations", () => {
   const expression = currentNewsAssessmentSql("item_row", "assessment_row");
   assert.match(expression, /assessment_row\.assessed_at>=item_row\.updated_at/);
-  assert.match(expression, /GREATEST\(changed_event\.updated_at,changed_evidence\.created_at\)/);
-  assert.match(expression, />\s*assessment_row\.assessed_at/);
+  assert.match(expression, /news_assessment_queue pending_item/);
+  assert.match(expression, /pending_item\.due_at<=now\(\)/);
+  assert.match(expression, /news_assessment_event_queue pending_event/);
+  assert.doesNotMatch(expression, /changed_event\.updated_at/);
   assert.throws(() => currentNewsAssessmentSql("item; DROP TABLE item", "assessment"));
 });
 

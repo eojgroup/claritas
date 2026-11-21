@@ -100,7 +100,7 @@ test("country and category scope compose before syndicated-story pagination", as
   assert.match(built.sql, /'published_at',NULLIF\(i\.payload->>'publisher_published_at',''\)/);
   assert.match(built.sql, /'discovered_at',COALESCE\(/);
   assert.match(built.sql, /assessment\.assessed_at>=i\.updated_at/);
-  assert.match(built.sql, /GREATEST\(changed_event\.updated_at,changed_evidence\.created_at\)/);
+  assert.match(built.sql, /news_assessment_event_queue pending_event/);
 });
 
 test("importance ranks provider discovery below equivalent verified publication", async () => {

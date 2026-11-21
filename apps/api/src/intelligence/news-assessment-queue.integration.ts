@@ -9,6 +9,13 @@ import {
   seedNewsAssessmentQueue,
 } from "../news-assessment-worker";
 import { NEWS_ASSESSMENT_METHODOLOGY } from "../news-intelligence";
+import { currentNewsAssessmentSql } from "../news-country-attribution";
+
+async function assessmentIsCurrent(itemId: string) {
+  return (await query<{ current: boolean }>(`SELECT (${currentNewsAssessmentSql("item", "assessment")}) AS current
+    FROM item JOIN news_item_assessment assessment ON assessment.item_id=item.id
+    WHERE item.id=$1`, [itemId])).rows[0]?.current ?? false;
+}
 
 async function fixture<T>(run: (sourceId: string, addItem: (age?: string, kind?: string) => Promise<string>) => Promise<T>) {
   const suffix = randomUUID();
@@ -76,15 +83,21 @@ test("event and evidence changes invalidate news without fanning out inside even
     const event = await addEvent(item, source);
     assert.equal((await query(`SELECT count(*)::int AS count FROM news_assessment_event_queue WHERE event_id=$1`, [event])).rows[0].count, 1);
     await assessPendingNewsItems(200);
+    assert.equal(await assessmentIsCurrent(item), true);
     const prior = (await query(`SELECT revision FROM news_assessment_queue WHERE item_id=$1`, [item])).rows[0].revision;
-    await query(`UPDATE intelligence_event SET metadata='{"display":"only"}'::jsonb WHERE id=$1`, [event]);
+    await query(`UPDATE intelligence_event SET metadata='{"display":"only"}'::jsonb,updated_at=now() WHERE id=$1`, [event]);
     assert.equal((await query(`SELECT count(*)::int AS count FROM news_assessment_event_queue WHERE event_id=$1`, [event])).rows[0].count, 0);
+    assert.equal(await assessmentIsCurrent(item), true, "display-only timestamp updates must keep valid reporting visible");
     await query(`UPDATE intelligence_event SET severity='critical' WHERE id=$1`, [event]);
+    assert.equal(await assessmentIsCurrent(item), false, "actual event changes remain hidden until assessed");
     assert.equal((await query(`SELECT revision FROM news_assessment_queue WHERE item_id=$1`, [item])).rows[0].revision, prior);
     await expandNewsAssessmentEvents();
+    assert.equal(await assessmentIsCurrent(item), false, "fan-out must not acknowledge an assessment before persistence");
     assert.ok(BigInt((await query(`SELECT revision FROM news_assessment_queue WHERE item_id=$1`, [item])).rows[0].revision) > BigInt(prior));
     await assessPendingNewsItems(200);
+    assert.equal(await assessmentIsCurrent(item), true);
     await query(`DELETE FROM intelligence_event_evidence WHERE event_id=$1`, [event]);
+    assert.equal(await assessmentIsCurrent(item), false, "removed evidence invalidates the item even when no linked event remains");
     assert.equal((await query(`SELECT due_at<=now() AS due FROM news_assessment_queue WHERE item_id=$1`, [item])).rows[0].due, true);
     await query(`DELETE FROM intelligence_event WHERE id=$1`, [event]);
     const cascade = await addEvent(item, source);

@@ -1,5 +1,5 @@
 import { NEWS_ASSESSMENT_METHODOLOGY } from "./news-intelligence";
-import { newsStoryKeySql, trustedNewsDirectCountrySql } from "./news-country-attribution";
+import { currentNewsAssessmentSql, newsStoryKeySql, trustedNewsDirectCountrySql } from "./news-country-attribution";
 
 export type NewsRuntimeHealthRow = {
   current_count: number | string | null;
@@ -136,20 +136,7 @@ export function buildNewsRuntimeHealthQuery(): string {
              assessment.categories,
              (
                assessment.item_id IS NOT NULL
-               AND assessment.assessed_at>=current_item.updated_at
-               AND (
-                 now()<=current_item.event_time+interval '1 hour'
-                 OR assessment.assessed_at>current_item.event_time+interval '1 hour'
-               )
-               AND NOT EXISTS (
-                 SELECT 1
-                 FROM intelligence_event_evidence changed_evidence
-                 JOIN intelligence_event changed_event ON changed_event.id=changed_evidence.event_id
-                 WHERE changed_evidence.domain='news'
-                   AND changed_evidence.source_record_type='item'
-                   AND changed_evidence.source_record_id=current_item.id::text
-                   AND GREATEST(changed_event.updated_at,changed_evidence.created_at)>assessment.assessed_at
-               )
+               AND ${currentNewsAssessmentSql("current_item", "assessment")}
              ) AS assessed,
              (
                COALESCE(current_item.payload->>'time_basis','') LIKE 'publisher_published%'

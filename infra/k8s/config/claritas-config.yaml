@@ -59,8 +59,8 @@ data:
   # Deterministic classification/ranking is local and bounded. A durable lease
   # prevents multiple API replicas from processing the same assessment batch.
   NEWS_ASSESSMENT_WORKER_ENABLED: "true"
-  NEWS_ASSESSMENT_BATCH_SIZE: "80"
-  NEWS_ASSESSMENT_POLL_SECONDS: "30"
+  NEWS_ASSESSMENT_BATCH_SIZE: "200"
+  NEWS_ASSESSMENT_POLL_SECONDS: "10"
   # Durable cross-domain events use Pub/Sub in GKE and a transactionally
   # equivalent in-process consumer when EVENT_BUS_MODE=local in development.
   EVENT_BACKBONE_ENABLED: "true"

@@ -34,8 +34,9 @@ export function newsStoryKeySql(alias: string): string {
 }
 
 /**
- * An assessment is displayable only when neither its item nor any attached
- * event evidence changed after the worker's statement-start watermark.
+ * The durable queues track changes to the actual assessment inputs. Event
+ * updated_at also changes for map/display maintenance, which must not retire
+ * an otherwise current assessment without scheduling any replacement work.
  */
 export function currentNewsAssessmentSql(itemAlias: string, assessmentAlias: string): string {
   const item = checkedAlias(itemAlias);
@@ -46,14 +47,16 @@ export function currentNewsAssessmentSql(itemAlias: string, assessmentAlias: str
       OR ${assessment}.assessed_at>${item}.event_time+interval '1 hour'
     )
     AND NOT EXISTS (
+      SELECT 1 FROM news_assessment_queue pending_item
+      WHERE pending_item.item_id=${item}.id AND pending_item.due_at<=now()
+    )
+    AND NOT EXISTS (
       SELECT 1
       FROM intelligence_event_evidence changed_evidence
-      JOIN intelligence_event changed_event ON changed_event.id=changed_evidence.event_id
+      JOIN news_assessment_event_queue pending_event ON pending_event.event_id=changed_evidence.event_id
       WHERE changed_evidence.domain='news'
         AND changed_evidence.source_record_type='item'
         AND changed_evidence.source_record_id=${item}.id::text
-        AND GREATEST(changed_event.updated_at,changed_evidence.created_at)>
-              ${assessment}.assessed_at
     )`;
 }
 
