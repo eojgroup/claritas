@@ -78,9 +78,18 @@ export function buildSavedOverviewAggregateQuery(state: State, options: Required
       FROM eligible`, params: scopeParams(state, options) };
 }
 
-export async function buildSavedIntelligenceOverview(state: State, options: Required<OverviewOptions>, read: OverviewQuery = query): Promise<IntelligenceOverview> {
-  const statement = buildSavedOverviewAggregateQuery(state, options);
-  const aggregate = (await read<{ aggregate: Aggregate }>(statement.sql, statement.params)).rows[0].aggregate;
+export async function buildSavedIntelligenceOverview(state: State, options: Required<OverviewOptions>, read: OverviewQuery = query, prepared?: IntelligenceOverview): Promise<IntelligenceOverview> {
+  // Interval selection changes cards and pins, not the full-period chart.
+  // Reuse analytics already published for this same generation/window rather
+  // than scanning the entire current/previous cohort again on a cold read.
+  let aggregate: Aggregate;
+  if (prepared) {
+    aggregate = { summary: prepared.summary, topics: prepared.topics, locations: prepared.locations,
+      countries: prepared.countries, buckets: prepared.buckets.map((bucket, index) => ({ ...bucket, index })) };
+  } else {
+    const statement = buildSavedOverviewAggregateQuery(state, options);
+    aggregate = (await read<{ aggregate: Aggregate }>(statement.sql, statement.params)).rows[0].aggregate;
+  }
   const params = scopeParams(state, options);
   const window = overviewWindow(options.hours, new Date(state.generated_at));
   const interval = options.bucket >= 0 ? {
@@ -186,8 +195,9 @@ async function readUncached(options: Required<OverviewOptions>, read: OverviewQu
     const { current: _current, ...empty } = buildOverviewAnalytics([], options, new Date());
     return { ...empty, events: [], timeline: [], map_events: [], visual_events: [], snapshot: { status: "warming", generated_at: null, age_seconds: null } };
   }
-  const savedGlobal = !options.country && !options.topic && options.bucket < 0 && state.payload;
-  const overview = savedGlobal || await buildSavedIntelligenceOverview(state, options, read);
+  const globalScope = !options.country && !options.topic;
+  const savedGlobal = globalScope && options.bucket < 0 && state.payload;
+  const overview = savedGlobal || await buildSavedIntelligenceOverview(state, options, read, globalScope ? state.payload ?? undefined : undefined);
   // Global English presentation is prepared by the worker. Scoped views and
   // other languages need only a bounded lookup of existing translation rows.
   if ((!savedGlobal || options.displayLanguage !== "en") && overview.events.length) {

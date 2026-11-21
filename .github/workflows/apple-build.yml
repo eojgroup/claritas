@@ -57,10 +57,13 @@ jobs:
         run: bash apps/mobile/ios/capture_map_snapshots.sh "$RUNNER_TEMP/claritas-derived/Build/Products/Debug-iphonesimulator/Claritas.app" "$RUNNER_TEMP/claritas-map-snapshots"
 
       - name: Upload native map review
+        if: always()
         uses: actions/upload-artifact@v6
         with:
           name: native-map-review
-          path: ${{ runner.temp }}/claritas-map-snapshots/*.png
+          path: |
+            ${{ runner.temp }}/claritas-map-snapshots/*.png
+            ${{ runner.temp }}/claritas-map-snapshots/*.log
           if-no-files-found: error
 
       - name: Compile watchOS application
