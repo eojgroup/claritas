@@ -100,6 +100,8 @@ final class AppModel: ObservableObject {
     }
 
     @Published var dailyBriefing: DailySignalBriefing? = nil
+    @Published private(set) var isRefreshingDailyBriefing = false
+    @Published private(set) var dailyBriefingError: String? = nil
     @Published var dailyBriefingSchedule: DailyBriefingSchedule? = nil
     @Published var news: [NewsItem] = []
     /// A small importance-ranked feed for overview cards. It is intentionally
@@ -185,6 +187,7 @@ final class AppModel: ObservableObject {
     private var transportRequestID = UUID()
     private var dataGeneration = UUID()
     private var initialLoadID: UUID?
+    private var briefingRequestID: UUID?
     private var widgetFreshness = WidgetSnapshotFreshness.empty
     private var widgetNews: [NewsItem] = []
     private var widgetNewsTotal: Int?
@@ -533,17 +536,30 @@ final class AppModel: ObservableObject {
         // Weather, markets, transport and source feeds load when opened.
         await refreshIntelligenceOverview(force: true)
         guard !Task.isCancelled, authStatus == .authed, hasPaidAccess else { return }
-        let generation = dataGeneration
+        await refreshDailyBriefing()
+    }
+
+    /// Refresh the saved publication without reloading the map or optional lenses.
+    func refreshDailyBriefing() async {
+        guard authStatus == .authed, hasPaidAccess, briefingRequestID == nil else { return }
+        let requestID = UUID(), generation = dataGeneration
+        briefingRequestID = requestID
+        isRefreshingDailyBriefing = true
+        dailyBriefingError = nil
+        defer {
+            if briefingRequestID == requestID {
+                briefingRequestID = nil
+                isRefreshingDailyBriefing = false
+            }
+        }
         let error = await loadInitialValue(generation: generation, fetch: {
             try await self.api.fetchLatestDailyBriefing()
         }, apply: {
             self.dailyBriefing = $0
             self.widgetFreshness.overview = Date()
-        })
-        if let error, isPaymentRequired(error) {
-            await refreshAccess()
-            return
-        }
+        }, onError: { self.dailyBriefingError = $0.localizedDescription })
+        if let error, isPaymentRequired(error) { await refreshAccess(); return }
+        guard generation == dataGeneration else { return }
         updateWidgetSnapshot()
     }
 
@@ -684,6 +700,9 @@ final class AppModel: ObservableObject {
         overviewTopic = nil
         overviewPriority = "all"
         dailyBriefing = nil
+        briefingRequestID = nil
+        isRefreshingDailyBriefing = false
+        dailyBriefingError = nil
         dailyBriefingSchedule = nil
         dailyBriefingScheduleError = nil
         dailyBriefingScheduleNotice = nil

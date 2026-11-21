@@ -929,7 +929,7 @@ export default memo(function WorldMapBubbles({
         <rect
           width={size.width}
           height={size.height}
-          fill={isDark ? "#0d1b16" : "#f2ebdd"}
+          fill={isDark ? "#0b1b28" : "#f2ebdd"}
         />
         <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
           {WORLD_GEOMETRY.collection.features.map((countryFeature) => {
@@ -1045,7 +1045,7 @@ export default memo(function WorldMapBubbles({
                   y={-16 / view.scale}
                   textAnchor="middle"
                   fill={labelColor}
-                  stroke={isDark ? "#0d1b16" : "#f2ebdd"}
+                  stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                   strokeWidth={3 / view.scale}
                   paintOrder="stroke"
                   fontSize={10 / view.scale}
@@ -1145,7 +1145,7 @@ export default memo(function WorldMapBubbles({
                     y={-(radius + 6 / view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
-                    stroke={isDark ? "#0d1b16" : "#f2ebdd"}
+                    stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                     strokeWidth={3 / view.scale}
                     paintOrder="stroke"
                     fontSize={(isCompact ? 10 : 11) / view.scale}
@@ -1161,7 +1161,7 @@ export default memo(function WorldMapBubbles({
                     x={radius + 5 / view.scale}
                     y={radius + 7 / view.scale}
                     fill={labelColor}
-                    stroke={isDark ? "#0d1b16" : "#f2ebdd"}
+                    stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                     strokeWidth={3 / view.scale}
                     paintOrder="stroke"
                     fontSize={9 / view.scale}
@@ -1230,7 +1230,7 @@ export default memo(function WorldMapBubbles({
                     strokeWidth={2.2 / view.scale}
                   />
                 )}
-                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={isDark ? "#0d1b16" : "#ffffff"} strokeWidth={4} pointerEvents="none" />
+                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={isDark ? "#0b1b28" : "#ffffff"} strokeWidth={4} pointerEvents="none" />
                 <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none" />
                 {hasImage && eventPoints.filter((point) => point.imageUrl && !failedImageUrls.has(point.imageUrl)).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
                   <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
@@ -1243,7 +1243,7 @@ export default memo(function WorldMapBubbles({
                     y={hasImage ? -55 / view.scale : -(radius + 6 / view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
-                    stroke={isDark ? "#0d1b16" : "#f2ebdd"}
+                    stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                     strokeWidth={2.5 / view.scale}
                     paintOrder="stroke"
                     fontSize={10.5 / view.scale}

@@ -12,9 +12,9 @@ const themes = {
     textMuted: "#596B5A",
     textSubtle: "#64745F",
     inverseText: "#FFFAF0",
-    navy: "#19382A",
+    navy: "#203C50",
     navyHover: "#2D6045",
-    blue: "#426B51",
+    blue: "#31566D",
     blueHover: "#2D6045",
     positiveText: "#2D6045",
     orangeSoft: "#F3CDAA",
@@ -28,19 +28,19 @@ const themes = {
     infoSoft: "#DCE5D6",
   },
   dark: {
-    canvas: "#0D1B16",
-    surface: "#182F26",
-    surfaceMuted: "#243E32",
-    surfaceStrong: "#203B30",
+    canvas: "#081710",
+    surface: "#10261C",
+    surfaceMuted: "#1E392D",
+    surfaceStrong: "#183328",
     border: "#355441",
     borderStrong: "#6B896B",
     text: "#F2EBDD",
     textMuted: "#B7C0AF",
     textSubtle: "#A1AE9B",
     inverseText: "#FFFAF0",
-    navy: "#315E46",
+    navy: "#28475C",
     navyHover: "#426B51",
-    blue: "#426B51",
+    blue: "#31566D",
     blueHover: "#BBCDB6",
     positiveText: "#9FC1A5",
     orangeSoft: "#503827",
@@ -139,13 +139,13 @@ export default function WebsiteColourPalettePreview() {
 
   const brandColors = [
     {
-      name: "Forest green",
+      name: "Midnight navy",
       value: theme.navy,
       foreground: theme.inverseText,
       role: "Navigation, primary actions, selected tabs, and high-value structure.",
     },
     {
-      name: "Sage green",
+      name: "Evidence blue",
       value: theme.blue,
       foreground: theme.inverseText,
       role: "Trusted data, secondary actions, comparisons, and analytical series.",
@@ -204,7 +204,7 @@ export default function WebsiteColourPalettePreview() {
             </p>
             <h1 className="max-w-3xl text-4xl font-semibold md:text-5xl">Colour with a clear operational role</h1>
             <p className="max-w-3xl text-base leading-7 md:text-lg" style={{ color: theme.textMuted }}>
-              Forest green creates hierarchy, sage structures analytical information, orange directs attention, and layered
+              Forest green and navy create hierarchy, beige softens surfaces, orange directs attention, and layered
               beige keeps dense intelligence surfaces calm.
             </p>
           </div>
@@ -283,7 +283,7 @@ export default function WebsiteColourPalettePreview() {
             <SectionLabel theme={theme}>Interaction contract</SectionLabel>
             <h2 className="text-2xl font-semibold">Controls stay readable in every state</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6" style={{ color: theme.textMuted }}>
-              Selected controls use intentional foreground pairs. Light orange and beige use forest text; deep green and sage
+              Selected controls use intentional foreground pairs. Light orange and beige use dark text; forest green and navy
               use warm light text.
             </p>
 

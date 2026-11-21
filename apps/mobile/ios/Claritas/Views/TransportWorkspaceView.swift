@@ -1219,7 +1219,7 @@ private final class TransportOceanTiles: MKTileOverlay {
     private let imageData: Data
     init(dark: Bool) {
         imageData = UIGraphicsImageRenderer(size: CGSize(width: 256, height: 256)).image { context in
-            UIColor(ClaritasPalette.shellBackground(for: dark ? .dark : .light)).setFill()
+            UIColor(ClaritasPalette.mapBackground(for: dark ? .dark : .light)).setFill()
             context.fill(CGRect(x: 0, y: 0, width: 256, height: 256))
         }.pngData()!
         super.init(urlTemplate: nil)

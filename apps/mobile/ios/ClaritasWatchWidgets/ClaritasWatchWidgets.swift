@@ -466,7 +466,7 @@ private struct ClaritasWatchWidgetView: View {
 }
 
 private enum ClaritasWatchWidgetPalette {
-    static let background = Color(red: 13.0 / 255.0, green: 27.0 / 255.0, blue: 22.0 / 255.0)
+    static let background = Color(red: 11.0 / 255.0, green: 27.0 / 255.0, blue: 40.0 / 255.0)
     static let cream = Color(red: 242.0 / 255.0, green: 235.0 / 255.0, blue: 221.0 / 255.0)
     static let sage = Color(red: 159.0 / 255.0, green: 183.0 / 255.0, blue: 163.0 / 255.0)
     static let positive = Color(red: 159.0 / 255.0, green: 193.0 / 255.0, blue: 165.0 / 255.0)

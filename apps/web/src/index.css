@@ -8,15 +8,15 @@
   text-rendering: optimizeLegibility;
   --font-display: "Fraunces", "Times New Roman", serif;
   --font-body: "Work Sans", "Gill Sans", "Trebuchet MS", sans-serif;
-  --brand-navy: #19382a;
-  --brand-blue: #426b51;
+  --brand-navy: #193247;
+  --brand-blue: #31566d;
   --brand-teal: #2d6045;
   --brand-steel: #596b5a;
   --brand-platinum: #e8ddc9;
   --brand-cloud: #fffaf0;
   --brand-graphite: #19382a;
   --brand-bronze: #a74720;
-  --brand-mark-1: #234e36;
+  --brand-mark-1: #193247;
   --brand-mark-2: #c87942;
   --brand-mark-3: #e8ddc9;
   --login-ink: var(--brand-navy);
@@ -39,25 +39,25 @@
   --shell-muted: #596b5a;
   --shell-accent: #a74720;
   --shell-accent-2: #2d6045;
-  --shell-strong: #234e36;
+  --shell-strong: #203c50;
   --shell-on-strong: #fffaf0;
   --shell-positive: #2d6045;
   --shell-on-accent: #fffaf0;
-  --shell-selected: #dce5d6;
-  --shell-on-selected: #19382a;
+  --shell-selected: #dbe3e7;
+  --shell-on-selected: #193247;
   --glass-highlight: rgba(255, 255, 255, 0.72);
   --glass-reflection: rgba(255, 255, 255, 0.32);
   --glass-shadow: rgba(11, 32, 40, 0.12);
   --signal-emerald: var(--brand-teal);
   --signal-emerald-soft: rgba(45, 96, 69, 0.13);
-  --signal-sky: #426b51;
-  --signal-sky-soft: rgba(66, 107, 81, 0.13);
+  --signal-sky: #31566d;
+  --signal-sky-soft: rgba(49, 86, 109, 0.13);
   --signal-amber: var(--brand-bronze);
   --signal-amber-soft: rgba(167, 71, 32, 0.14);
   --signal-rose: #a73b32;
   --signal-rose-soft: rgba(167, 59, 50, 0.13);
   --viz-grid: rgba(37, 75, 54, 0.18);
-  --viz-news: #426b51;
+  --viz-news: #31566d;
   --viz-weather: #a74720;
   --viz-market: var(--brand-bronze);
   --viz-violet: #766b48;
@@ -70,7 +70,7 @@
   --shadow-soft: 0 8px 24px rgba(15, 33, 54, 0.08), inset 0 1px 0 var(--glass-highlight);
   --shadow-strong: 0 18px 48px rgba(15, 33, 54, 0.13), inset 0 1px 0 var(--glass-highlight);
   --home-bg: var(--shell-bg);
-  --home-header: #18392b;
+  --home-header: #152b3c;
   --home-surface: var(--shell-surface);
   --home-border: var(--shell-border);
   --home-ink: var(--shell-ink);
@@ -79,16 +79,17 @@
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   --safe-left: env(safe-area-inset-left, 0px);
+  --map-ocean: #f2ebdd;
 }
 
 html.dark {
   color-scheme: dark;
-  --brand-navy: #0d1b16;
-  --brand-blue: #9fb7a3;
+  --brand-navy: #0b1b28;
+  --brand-blue: #91b1c4;
   --brand-teal: #9fb7a3;
   --brand-steel: #b7c0af;
   --brand-platinum: #e8ddc9;
-  --brand-cloud: #0d1b16;
+  --brand-cloud: #081710;
   --brand-graphite: #f2ebdd;
   --brand-bronze: #eca168;
   --brand-mark-1: #9fb7a3;
@@ -96,43 +97,43 @@ html.dark {
   --brand-mark-3: #f2ebdd;
   --login-ink: #f2ebdd;
   --login-ink-soft: #b7c0af;
-  --login-cream: #0d1b16;
+  --login-cream: #081710;
   --login-sand: #203b30;
   --login-mist: #a1ae9b;
   --login-teal: #9fb7a3;
   --login-amber: #eca168;
-  --shell-bg: #0d1b16;
-  --shell-bg-elevated: #13271f;
-  --shell-sidebar: #091710;
+  --shell-bg: #081710;
+  --shell-bg-elevated: #0d2017;
+  --shell-sidebar: #06120d;
   --shell-sidebar-border: rgba(159, 183, 163, 0.2);
-  --shell-surface: rgba(24, 47, 38, 0.97);
-  --shell-surface-strong: #203b30;
-  --shell-surface-muted: rgba(36, 62, 50, 0.96);
+  --shell-surface: rgba(16, 38, 28, 0.97);
+  --shell-surface-strong: #183328;
+  --shell-surface-muted: rgba(30, 57, 45, 0.96);
   --shell-border: rgba(159, 183, 163, 0.26);
   --shell-border-strong: rgba(159, 183, 163, 0.46);
   --shell-ink: #f2ebdd;
   --shell-muted: #b7c0af;
   --shell-accent: #eca168;
   --shell-accent-2: #9fb7a3;
-  --shell-strong: #315e46;
+  --shell-strong: #28475c;
   --shell-on-strong: #fffaf0;
   --shell-positive: #9fc1a5;
   --shell-on-accent: #19382a;
-  --shell-selected: #2f4d3b;
+  --shell-selected: #223d4d;
   --shell-on-selected: #f2ebdd;
   --glass-highlight: rgba(255, 255, 255, 0.14);
   --glass-reflection: rgba(255, 255, 255, 0.07);
   --glass-shadow: rgba(0, 0, 0, 0.3);
   --signal-emerald: #9fc1a5;
   --signal-emerald-soft: rgba(159, 193, 165, 0.15);
-  --signal-sky: #a3bdab;
-  --signal-sky-soft: rgba(163, 189, 171, 0.15);
+  --signal-sky: #91b1c4;
+  --signal-sky-soft: rgba(145, 177, 196, 0.15);
   --signal-amber: #eca168;
   --signal-amber-soft: rgba(236, 161, 104, 0.15);
   --signal-rose: #d96b62;
   --signal-rose-soft: rgba(217, 107, 98, 0.14);
   --viz-grid: rgba(159, 183, 163, 0.18);
-  --viz-news: #a3bdab;
+  --viz-news: #91b1c4;
   --viz-weather: #eca168;
   --viz-market: #d7be88;
   --viz-violet: #bdb28e;
@@ -144,6 +145,7 @@ html.dark {
   --hero-glow-2: rgba(236, 161, 104, 0.05);
   --shadow-soft: none;
   --shadow-strong: var(--elevation-overlay);
+  --map-ocean: #0b1b28;
 }
 
 * {
@@ -3966,7 +3968,7 @@ body {
 }
 
 .transport-map-ocean {
-  fill: color-mix(in srgb, var(--shell-bg) 92%, #234e36);
+  fill: var(--map-ocean);
 }
 
 .transport-map-land path {
@@ -3983,8 +3985,8 @@ body {
 }
 
 .transport-map-land path[data-comparison="true"] {
-  fill: color-mix(in srgb, var(--shell-accent-2) 30%, var(--shell-surface-strong));
-  stroke: color-mix(in srgb, var(--shell-accent-2) 82%, var(--shell-ink));
+  fill: color-mix(in srgb, var(--signal-sky) 30%, var(--shell-surface-strong));
+  stroke: color-mix(in srgb, var(--signal-sky) 82%, var(--shell-ink));
   stroke-width: 1.5;
 }
 
@@ -4006,7 +4008,7 @@ body {
 }
 
 .transport-map-connection-band[data-mode="aviation"] {
-  stroke: var(--shell-accent-2);
+  stroke: var(--signal-sky);
 }
 
 .transport-map-connection-band[data-mode="maritime"] {
@@ -4014,7 +4016,7 @@ body {
 }
 
 #transport-arrow-aviation path {
-  fill: var(--shell-accent-2);
+  fill: var(--signal-sky);
 }
 
 #transport-arrow-maritime path {
@@ -4031,7 +4033,7 @@ body {
 }
 
 .transport-map-routes path[data-mode="aviation"] {
-  stroke: var(--shell-accent-2);
+  stroke: var(--signal-sky);
 }
 
 .transport-map-routes path[data-mode="maritime"] {
@@ -4082,8 +4084,8 @@ body {
 }
 
 .transport-map-flow-nodes g[data-comparison="true"] circle {
-  fill: color-mix(in srgb, var(--shell-accent-2) 34%, var(--shell-surface));
-  stroke: var(--shell-accent-2);
+  fill: color-mix(in srgb, var(--signal-sky) 34%, var(--shell-surface));
+  stroke: var(--signal-sky);
   stroke-width: 1.8;
 }
 
@@ -4117,7 +4119,7 @@ body {
 }
 
 .transport-map-entities g[data-mode="aviation"] path {
-  fill: var(--shell-accent-2);
+  fill: var(--signal-sky);
   stroke: #e1f2f8;
 }
 
@@ -4141,8 +4143,8 @@ body {
 }
 
 .transport-map-entities g[data-country-linked="true"] .transport-map-marker-ring {
-  fill: color-mix(in srgb, var(--shell-accent-2) 12%, transparent);
-  stroke: color-mix(in srgb, var(--shell-accent-2) 78%, var(--shell-ink));
+  fill: color-mix(in srgb, var(--signal-sky) 12%, transparent);
+  stroke: color-mix(in srgb, var(--signal-sky) 78%, var(--shell-ink));
   stroke-width: 1.7;
 }
 
@@ -4237,7 +4239,7 @@ body {
 }
 
 .transport-map-legend i[data-mode="aviation"] {
-  background: var(--shell-accent-2);
+  background: var(--signal-sky);
 }
 
 .transport-map-legend i[data-mode="maritime"] {
@@ -4256,7 +4258,7 @@ body {
 }
 
 .transport-map-legend i[data-mode="aviation-link"] {
-  background: var(--shell-accent-2);
+  background: var(--signal-sky);
 }
 
 .transport-map-legend i[data-mode="maritime-link"] {
@@ -4268,7 +4270,7 @@ body {
   width: 14px;
   height: 2px;
   border-radius: 0;
-  background: color-mix(in srgb, var(--shell-ink) 74%, var(--shell-accent-2));
+  background: color-mix(in srgb, var(--shell-ink) 74%, var(--signal-sky));
 }
 
 .transport-map-legend i[data-mode="direction"]::after {
@@ -4279,18 +4281,18 @@ body {
   height: 0;
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
-  border-left: 5px solid color-mix(in srgb, var(--shell-ink) 74%, var(--shell-accent-2));
+  border-left: 5px solid color-mix(in srgb, var(--shell-ink) 74%, var(--signal-sky));
   content: "";
 }
 
 .transport-map-legend i[data-mode="linked"] {
-  border: 1.5px solid var(--shell-accent-2);
+  border: 1.5px solid var(--signal-sky);
   background: transparent;
 }
 
 .transport-map-legend i[data-mode="comparison"] {
-  border: 1px solid var(--shell-accent-2);
-  background: color-mix(in srgb, var(--shell-accent-2) 34%, transparent);
+  border: 1px solid var(--signal-sky);
+  background: color-mix(in srgb, var(--signal-sky) 34%, transparent);
 }
 
 .transport-detail-panel {

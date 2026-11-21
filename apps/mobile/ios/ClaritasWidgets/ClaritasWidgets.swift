@@ -18,15 +18,15 @@ private enum ClaritasWidgetPalette {
                            blue: CGFloat(value & 255) / 255, alpha: 1)
         })
     }
-    static let backgroundTop = adaptive(0xFFFAF0, 0x182F26)
-    static let backgroundBottom = adaptive(0xF2EBDD, 0x0D1B16)
+    static let backgroundTop = adaptive(0xFFFAF0, 0x10261C)
+    static let backgroundBottom = adaptive(0xF2EBDD, 0x0B1B28)
     static let primary = adaptive(0x19382A, 0xF2EBDD)
     static let secondary = adaptive(0x596B5A, 0xB7C0AF)
     static let gold = adaptive(0x946326, 0xD7BE88)
-    static let cyan = adaptive(0x2D6045, 0xA3BDAB)
+    static let cyan = adaptive(0x31566D, 0x91B1C4)
     static let green = adaptive(0x2D6045, 0x9FC1A5)
     static let orange = adaptive(0xA74720, 0xECA168)
-    static let card = adaptive(0xEAE2D1, 0x243E32)
+    static let card = adaptive(0xEAE2D1, 0x1E392D)
 
     static var background: LinearGradient {
         LinearGradient(

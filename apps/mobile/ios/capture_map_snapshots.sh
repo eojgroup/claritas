@@ -14,22 +14,27 @@ while IFS=' ' read -r kind device_id; do
   container_path=$(xcrun simctl get_app_container "$device_id" "$bundle_id" data)
   mkdir -p "$container_path/Documents"
   cp apps/mobile/ios/Tests/Fixtures/MapOverview.json "$container_path/Documents/MapOverview.json"
-  for appearance in dark light; do
-    rm -f "$container_path/Documents/map-review-ready" "$container_path/Documents/map-review-error"
-    launch_args=(-qa-map-snapshot)
-    suffix=""
-    if [[ "$appearance" == light ]]; then launch_args+=(-qa-map-light); suffix="-light"; fi
-    xcrun simctl launch "$device_id" "$bundle_id" "${launch_args[@]}"
-    ready=false
-    for _attempt in $(seq 1 30); do
-      if [[ -f "$container_path/Documents/map-review-error" ]]; then cat "$container_path/Documents/map-review-error"; exit 1; fi
-      if [[ -f "$container_path/Documents/map-review-ready" ]]; then ready=true; break; fi
-      sleep 1
+  cp apps/mobile/ios/Tests/Fixtures/DailyBriefing.json "$container_path/Documents/DailyBriefing.json"
+  for destination in map briefing; do
+    for appearance in dark light; do
+      rm -f "$container_path/Documents/map-review-ready" "$container_path/Documents/map-review-error"
+      launch_args=(-qa-map-snapshot)
+      suffix=""
+      prefix="$kind"
+      if [[ "$destination" == briefing ]]; then launch_args+=(-qa-briefing-snapshot); prefix="$kind-briefing"; fi
+      if [[ "$appearance" == light ]]; then launch_args+=(-qa-map-light); suffix="-light"; fi
+      xcrun simctl launch "$device_id" "$bundle_id" "${launch_args[@]}"
+      ready=false
+      for _attempt in $(seq 1 30); do
+        if [[ -f "$container_path/Documents/map-review-error" ]]; then cat "$container_path/Documents/map-review-error"; exit 1; fi
+        if [[ -f "$container_path/Documents/map-review-ready" ]]; then ready=true; break; fi
+        sleep 1
+      done
+      [[ "$ready" == true ]] || { echo 'Native map review did not load'; exit 1; }
+      sleep 3
+      xcrun simctl io "$device_id" screenshot "$output_dir/$prefix$suffix.png"
+      xcrun simctl terminate "$device_id" "$bundle_id"
     done
-    [[ "$ready" == true ]] || { echo 'Native map review did not load'; exit 1; }
-    sleep 3
-    xcrun simctl io "$device_id" screenshot "$output_dir/$kind$suffix.png"
-    xcrun simctl terminate "$device_id" "$bundle_id"
   done
   xcrun simctl shutdown "$device_id"
 done < <(python3 - "$devices_file" <<'PY'
@@ -42,4 +47,5 @@ for kind,prefix in [('iphone','iPhone'),('ipad','iPad')]:
 PY
 )
 [[ -f "$output_dir/iphone.png" && -f "$output_dir/ipad.png" && -f "$output_dir/iphone-light.png" && -f "$output_dir/ipad-light.png" ]]
+[[ -f "$output_dir/iphone-briefing.png" && -f "$output_dir/ipad-briefing.png" && -f "$output_dir/iphone-briefing-light.png" && -f "$output_dir/ipad-briefing-light.png" ]]
 rm -f "$devices_file"

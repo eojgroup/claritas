@@ -19,9 +19,7 @@ struct DashboardView: View {
     enum DashboardSection: String, CaseIterable { case overview, news, weather, market }
 
     var body: some View {
-        WorldMapWorkspace {
-            openCompactDestination("briefing")
-        }
+        WorldMapWorkspace()
     }
 
     private func eventContextPresented(inExpandedMap: Bool) -> Binding<Bool> {
@@ -3448,13 +3446,13 @@ struct PoliciesWorkspaceView: View {
                     DisclosureGroup("Claritas colour reference") {
                         LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 10)], spacing: 10) {
                             BrandSwatch(
-                                name: "Forest Green",
-                                hex: "#13271F",
+                                name: "Midnight Navy",
+                                hex: "#152B3C",
                                 color: ClaritasPalette.darkBlue
                             )
                             BrandSwatch(
-                                name: "Sage Green",
-                                hex: colorScheme == .dark ? "#A3BDAB" : "#2D6045",
+                                name: "Evidence Blue",
+                                hex: colorScheme == .dark ? "#91B1C4" : "#31566D",
                                 color: ClaritasPalette.dataBlue(for: colorScheme)
                             )
                             BrandSwatch(
@@ -3464,7 +3462,7 @@ struct PoliciesWorkspaceView: View {
                             )
                             BrandSwatch(
                                 name: "Working Surface",
-                                hex: colorScheme == .dark ? "#182F26" : "#FFFAF0",
+                                hex: colorScheme == .dark ? "#10261C" : "#FFFAF0",
                                 color: ClaritasPalette.shellSurface(for: colorScheme)
                             )
                             BrandSwatch(
@@ -5230,7 +5228,7 @@ struct WorldMapWorkspace: View {
     @GestureState private var panelDrag: CGFloat = 0
     @State private var profileCountry: String?
     var refreshesAutomatically = true
-    let onOpenBriefing: () -> Void
+    @State private var showsBriefing = false
 
     private var points: [CountryBubblePoint] {
         (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
@@ -5266,7 +5264,7 @@ struct WorldMapWorkspace: View {
             let stops: [CGFloat] = [112, geometry.size.height * 0.46, geometry.size.height - 12]
             let panelHeight = min(stops[2], max(stops[0], stops[panelStop] - panelDrag))
             ZStack(alignment: wide ? .topLeading : .bottom) {
-                Color(hex: "#0C2230").ignoresSafeArea()
+                ClaritasPalette.mapBackground(for: colorScheme).ignoresSafeArea()
                 NativeSignalMap(points: points, events: events, mode: .signals, mapRegion: .global,
                     compactPresentation: geometry.size.width < 600, selectedCountry: model.selectedCountry,
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: nil,
@@ -5301,6 +5299,11 @@ struct WorldMapWorkspace: View {
             }
             .clipped()
         }
+        .onAppear {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot") { openBriefing() }
+            #endif
+        }
         .task(id: "\(model.overviewScope.requestKey)|\(scenePhase == .active)") {
             guard refreshesAutomatically, scenePhase == .active else { return }
             while !Task.isCancelled {
@@ -5310,7 +5313,7 @@ struct WorldMapWorkspace: View {
             }
         }
         .onChange(of: model.selectedIntelligenceEventID) { id in
-            if id != nil { profileCountry = nil; revealContext() }
+            if id != nil { showsBriefing = false; profileCountry = nil; revealContext() }
         }
         .onChange(of: model.selectedCountry) { country in
             if country != profileCountry { profileCountry = nil }
@@ -5338,19 +5341,20 @@ struct WorldMapWorkspace: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(model.selectedIntelligenceEventID != nil ? "Event context" : model.selectedCountry.map(countryName) ?? "World overview")
+                    Text(showsBriefing ? "Daily briefing" : model.selectedIntelligenceEventID != nil ? "Event context" : model.selectedCountry.map(countryName) ?? "World overview")
                         .font(.title3.weight(.semibold)).lineLimit(1)
-                    Text("\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
+                    Text(showsBriefing ? "Global publication" : "\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
-                if model.selectedIntelligenceEventID != nil || profileCountry != nil {
+                if showsBriefing || model.selectedIntelligenceEventID != nil || profileCountry != nil {
                     Button {
                         model.selectedIntelligenceEventID = nil; profileCountry = nil
+                        if showsBriefing { showsBriefing = false; panelStop = 1; wideContext = false }
                     } label: { Image(systemName: "arrow.left").frame(width: 44, height: 44) }
                     .accessibilityLabel("Back to developments")
                 }
-                if model.selectedCountry != nil {
+                if model.selectedCountry != nil && !showsBriefing {
                     Button {
                         model.selectedCountry = nil; model.selectedIntelligenceEventID = nil; profileCountry = nil
                     } label: { Image(systemName: "globe").frame(width: 44, height: 44) }
@@ -5373,7 +5377,9 @@ struct WorldMapWorkspace: View {
             .padding(.horizontal, 18).padding(.top, wide ? 12 : 28).padding(.bottom, 10)
             Divider()
             Group {
-            if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
+            if showsBriefing {
+                DailyBriefingWorkspaceView(embedded: true, automaticallyRefresh: refreshesAutomatically)
+            } else if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
                 IntelligenceWorkspaceView(contextualEventID: id)
             } else {
                 ScrollViewReader { reader in
@@ -5385,7 +5391,7 @@ struct WorldMapWorkspace: View {
                             }
                             SignalMapInteractionKey()
                             IntelligenceOverviewPanel(automaticallyRefresh: false, embedded: true)
-                            BriefingOverviewCard(briefing: model.dailyBriefing, onOpen: onOpenBriefing)
+                            BriefingOverviewCard(briefing: model.dailyBriefing, onOpen: openBriefing)
                         }.padding(14)
                     }.refreshable { await model.refreshIntelligenceOverview(force: true) }
                     .onChange(of: profileCountry) { _ in reader.scrollTo("context-top", anchor: .top) }
@@ -5399,10 +5405,17 @@ struct WorldMapWorkspace: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func openBriefing() {
+        model.selectedIntelligenceEventID = nil; profileCountry = nil
+        withAnimation(.easeInOut(duration: 0.22)) {
+            showsBriefing = true; panelStop = 2; wideContext = true
+        }
+    }
     private func revealContext() {
         if panelStop == 0 { withAnimation(.easeInOut(duration: 0.22)) { panelStop = 1 } }
     }
     private func selectCountry(_ country: String) {
+        showsBriefing = false
         model.selectedIntelligenceEventID = nil
         model.selectedCountry = country
         profileCountry = country
@@ -5778,9 +5791,9 @@ private struct InteractiveCountryBubbleMap: View {
                 ZStack {
                     LinearGradient(
                         colors: [
-                            ClaritasPalette.shellBackgroundElevated(for: colorScheme),
-                            ClaritasPalette.shellBackground(for: colorScheme),
-                            ClaritasPalette.shellBackground(for: colorScheme)
+                            ClaritasPalette.mapBackground(for: colorScheme),
+                            ClaritasPalette.mapBackground(for: colorScheme),
+                            ClaritasPalette.mapBackground(for: colorScheme)
                         ],
                         startPoint: .topLeading,
                         endPoint: .bottomTrailing
@@ -6309,10 +6322,10 @@ struct SignalMapSnapshotReview: View {
 
     var body: some View {
         NavigationStack {
-            WorldMapWorkspace(refreshesAutomatically: false, onOpenBriefing: {})
+            WorldMapWorkspace(refreshesAutomatically: false)
                 .environmentObject(model)
                 .navigationTitle("Claritas")
-                .navigationBarTitleDisplayMode(.inline)
+                .modifier(ShellNavigationChrome())
         }
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-qa-map-light") ? .light : .dark)
         .task {
@@ -6327,6 +6340,9 @@ struct SignalMapSnapshotReview: View {
                     return date
                 }
                 model.installMapReview(try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json"))))
+                if ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot") {
+                    model.dailyBriefing = try decoder.decode(DailySignalBriefing.self, from: Data(contentsOf: documents.appendingPathComponent("DailyBriefing.json")))
+                }
                 try Data("ready".utf8).write(to: documents.appendingPathComponent("map-review-ready"))
             } catch {
                 try? Data(String(describing: error).utf8).write(to: documents.appendingPathComponent("map-review-error"))

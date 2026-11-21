@@ -53,9 +53,7 @@ struct PadOverviewView: View {
     }
 
     var body: some View {
-        WorldMapWorkspace {
-            destination = .briefing
-        }
+        WorldMapWorkspace()
     }
 
     @ViewBuilder
