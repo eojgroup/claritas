@@ -121,7 +121,17 @@ describe("WorldMapBubbles interaction", () => {
   });
   afterEach(() => {
     cleanup();
+    document.documentElement.classList.remove("dark");
     vi.unstubAllGlobals();
+  });
+  it("follows theme changes when embedded without an explicit theme and honours an explicit override", async () => {
+    const view = render(<WorldMapBubbles data={[]} />);
+    const ocean = () => view.container.querySelector("svg > rect")?.getAttribute("fill");
+    const light = ocean();
+    await act(async () => { document.documentElement.classList.add("dark"); });
+    expect(ocean()).not.toBe(light);
+    view.rerender(<WorldMapBubbles data={[]} dark={false} />);
+    expect(ocean()).toBe(light);
   });
   it("hides an unavailable image while keeping its event selectable", () => {
     const select = vi.fn();

@@ -2,56 +2,56 @@ import { useState } from "react";
 
 const themes = {
   light: {
-    canvas: "#F3E9D7",
-    surface: "#FFFAF1",
-    surfaceMuted: "#E9DCC8",
-    surfaceStrong: "#DFC8A9",
-    border: "#D5C1A4",
-    borderStrong: "#9A8067",
-    text: "#172F42",
-    textMuted: "#53616A",
-    textSubtle: "#6D6257",
-    inverseText: "#FFFAF1",
-    navy: "#172F42",
-    navyHover: "#2A5268",
-    blue: "#3E6A80",
-    blueHover: "#2A5268",
-    positiveText: "#244B61",
+    canvas: "#F2EBDD",
+    surface: "#FFFAF0",
+    surfaceMuted: "#EAE2D1",
+    surfaceStrong: "#D7C7A6",
+    border: "#C2CBB5",
+    borderStrong: "#768C70",
+    text: "#19382A",
+    textMuted: "#596B5A",
+    textSubtle: "#64745F",
+    inverseText: "#FFFAF0",
+    navy: "#203C50",
+    navyHover: "#2D6045",
+    blue: "#31566D",
+    blueHover: "#2D6045",
+    positiveText: "#2D6045",
     orangeSoft: "#F3CDAA",
     orangeMuted: "#E8B98D",
     orangeText: "#532A16",
     orange: "#E6A06A",
-    orangeStrong: "#934719",
-    accentText: "#172F42",
+    orangeStrong: "#A74720",
+    accentText: "#19382A",
     danger: "#A73B32",
     dangerSoft: "#F6D8D2",
-    infoSoft: "#D7E6EA",
+    infoSoft: "#DCE5D6",
   },
   dark: {
-    canvas: "#081119",
-    surface: "#11222E",
-    surfaceMuted: "#1B303E",
-    surfaceStrong: "#152A38",
-    border: "#283C47",
-    borderStrong: "#40525C",
-    text: "#F2EEE6",
-    textMuted: "#A9B5BA",
-    textSubtle: "#87979E",
-    inverseText: "#FFFAF1",
-    navy: "#315F72",
-    navyHover: "#477A8D",
-    blue: "#77A8BA",
-    blueHover: "#9BC1CF",
-    positiveText: "#A9CEDC",
+    canvas: "#081710",
+    surface: "#10261C",
+    surfaceMuted: "#1E392D",
+    surfaceStrong: "#183328",
+    border: "#355441",
+    borderStrong: "#6B896B",
+    text: "#F2EBDD",
+    textMuted: "#B7C0AF",
+    textSubtle: "#A1AE9B",
+    inverseText: "#FFFAF0",
+    navy: "#28475C",
+    navyHover: "#426B51",
+    blue: "#31566D",
+    blueHover: "#BBCDB6",
+    positiveText: "#9FC1A5",
     orangeSoft: "#503827",
     orangeMuted: "#9A6847",
     orangeText: "#FFF4E8",
-    orange: "#EDA36A",
+    orange: "#ECA168",
     orangeStrong: "#F0B888",
-    accentText: "#172F42",
+    accentText: "#19382A",
     danger: "#D96B62",
     dangerSoft: "#482C2B",
-    infoSoft: "#223E4C",
+    infoSoft: "#2F4D3B",
   },
 } as const;
 
@@ -59,12 +59,12 @@ type Mode = keyof typeof themes;
 type Theme = (typeof themes)[Mode];
 
 const chartSeries = [
-  { color: "#315F72", text: "#FFFAF1" },
-  { color: "#EDA36A", text: "#172F42" },
-  { color: "#77A8BA", text: "#172F42" },
-  { color: "#E8B98D", text: "#172F42" },
-  { color: "#934719", text: "#FFFAF1" },
-  { color: "#A9B8BF", text: "#172F42" },
+  { color: "#315E46", text: "#FFFAF0" },
+  { color: "#ECA168", text: "#19382A" },
+  { color: "#9FB7A3", text: "#19382A" },
+  { color: "#E8B98D", text: "#19382A" },
+  { color: "#A74720", text: "#FFFAF0" },
+  { color: "#A9B8BF", text: "#19382A" },
 ];
 
 function ColourSwatch({
@@ -139,13 +139,13 @@ export default function WebsiteColourPalettePreview() {
 
   const brandColors = [
     {
-      name: "Command navy",
+      name: "Midnight navy",
       value: theme.navy,
       foreground: theme.inverseText,
       role: "Navigation, primary actions, selected tabs, and high-value structure.",
     },
     {
-      name: "Intelligence blue",
+      name: "Evidence blue",
       value: theme.blue,
       foreground: theme.inverseText,
       role: "Trusted data, secondary actions, comparisons, and analytical series.",
@@ -204,7 +204,7 @@ export default function WebsiteColourPalettePreview() {
             </p>
             <h1 className="max-w-3xl text-4xl font-semibold md:text-5xl">Colour with a clear operational role</h1>
             <p className="max-w-3xl text-base leading-7 md:text-lg" style={{ color: theme.textMuted }}>
-              Navy creates hierarchy, blue structures analytical information, orange directs attention, and layered
+              Forest green and navy create hierarchy, beige softens surfaces, orange directs attention, and layered
               beige keeps dense intelligence surfaces calm.
             </p>
           </div>
@@ -283,7 +283,7 @@ export default function WebsiteColourPalettePreview() {
             <SectionLabel theme={theme}>Interaction contract</SectionLabel>
             <h2 className="text-2xl font-semibold">Controls stay readable in every state</h2>
             <p className="mt-2 max-w-2xl text-sm leading-6" style={{ color: theme.textMuted }}>
-              Selected controls use intentional foreground pairs. Light orange and beige use navy text; navy and blue
+              Selected controls use intentional foreground pairs. Light orange and beige use dark text; forest green and navy
               use warm light text.
             </p>
 
@@ -339,7 +339,7 @@ export default function WebsiteColourPalettePreview() {
                   type="email"
                 />
                 <p className="mt-2 text-xs" style={{ color: theme.textMuted }}>
-                  Focus uses navy, without relying on glow or low-contrast grey.
+                  Focus uses forest green, without relying on glow or low-contrast grey.
                 </p>
               </div>
 

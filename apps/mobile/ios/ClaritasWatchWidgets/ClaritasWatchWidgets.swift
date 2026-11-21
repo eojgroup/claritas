@@ -466,11 +466,11 @@ private struct ClaritasWatchWidgetView: View {
 }
 
 private enum ClaritasWatchWidgetPalette {
-    static let background = Color(red: 5.0 / 255.0, green: 16.0 / 255.0, blue: 25.0 / 255.0)
-    static let cream = Color(red: 244.0 / 255.0, green: 226.0 / 255.0, blue: 190.0 / 255.0)
-    static let sage = Color(red: 126.0 / 255.0, green: 224.0 / 255.0, blue: 196.0 / 255.0)
-    static let positive = Color(red: 104.0 / 255.0, green: 222.0 / 255.0, blue: 138.0 / 255.0)
-    static let warning = Color(red: 255.0 / 255.0, green: 187.0 / 255.0, blue: 92.0 / 255.0)
+    static let background = Color(red: 11.0 / 255.0, green: 27.0 / 255.0, blue: 40.0 / 255.0)
+    static let cream = Color(red: 242.0 / 255.0, green: 235.0 / 255.0, blue: 221.0 / 255.0)
+    static let sage = Color(red: 159.0 / 255.0, green: 183.0 / 255.0, blue: 163.0 / 255.0)
+    static let positive = Color(red: 159.0 / 255.0, green: 193.0 / 255.0, blue: 165.0 / 255.0)
+    static let warning = Color(red: 236.0 / 255.0, green: 161.0 / 255.0, blue: 104.0 / 255.0)
     static let muted = Color.white.opacity(0.55)
 }
 

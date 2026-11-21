@@ -206,7 +206,7 @@ struct LoginView: View {
                     .textCase(.uppercase)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 10)
-                    .foregroundStyle(ClaritasPalette.text)
+                    .foregroundStyle(colorScheme == .dark ? ClaritasPalette.text : ClaritasPalette.offWhite)
                     .background(ClaritasPalette.shellAccent(for: colorScheme))
                     .clipShape(Capsule())
                 }

@@ -247,8 +247,8 @@ function eventPointColor(
   isDark: boolean,
 ) {
   const colors = isDark
-    ? { low: "#7eb8c9", medium: "#e0b86e", high: "#ee9463", critical: "#ef625c" }
-    : { low: "#35758a", medium: "#9c7429", high: "#b9572f", critical: "#ad302e" };
+    ? { low: "#9abca8", medium: "#e0b86e", high: "#ee9463", critical: "#ef625c" }
+    : { low: "#3f6e58", medium: "#9c7429", high: "#b9572f", critical: "#ad302e" };
   return colors[severity ?? "low"];
 }
 
@@ -317,16 +317,16 @@ function choroplethColor(
   if (mode === "sequential") {
     const ratio = (value - min) / Math.max(max - min, 0.0001);
     return interpolateRgb(
-      dark ? [43, 57, 75] : [218, 227, 235],
-      dark ? [116, 91, 184] : [99, 68, 173],
+      dark ? [32, 55, 44] : [226, 229, 210],
+      dark ? [143, 171, 139] : [50, 101, 66],
       ratio
     );
   }
   if (mode === "relevance") {
     const ratio = clamp((value - min) / Math.max(max - min, 0.0001), 0, 1);
-    const low: [number, number, number] = dark ? [28, 48, 65] : [218, 228, 237];
-    const middle: [number, number, number] = dark ? [48, 91, 109] : [112, 157, 176];
-    const high: [number, number, number] = dark ? [216, 117, 67] : [190, 82, 43];
+    const low: [number, number, number] = dark ? [32, 55, 44] : [226, 229, 210];
+    const middle: [number, number, number] = dark ? [74, 110, 82] : [133, 162, 128];
+    const high: [number, number, number] = dark ? [213, 126, 70] : [182, 82, 39];
     return ratio < 0.55
       ? interpolateRgb(low, middle, ratio / 0.55)
       : interpolateRgb(middle, high, (ratio - 0.55) / 0.45);
@@ -410,7 +410,15 @@ export default memo(function WorldMapBubbles({
     viewRef.current = view;
   }, [view]);
 
-  const isDark = Boolean(dark);
+  const [, updateTheme] = useState(0);
+  useEffect(() => {
+    if (dark != null) return;
+    const root = document.documentElement;
+    const observer = new MutationObserver(() => updateTheme((version) => version + 1));
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, [dark]);
+  const isDark = dark ?? (typeof document !== "undefined" && document.documentElement.classList.contains("dark"));
   const isCompact = variant === "compact";
   const primaryIso = primaryCountry?.toUpperCase();
   const secondaryIso = secondaryCountry?.toUpperCase();
@@ -859,7 +867,7 @@ export default memo(function WorldMapBubbles({
   const featuredMarker = featuredIso
     ? markerByCountry.get(featuredIso)
     : undefined;
-  const labelColor = isDark ? "#f4eee6" : "#1d2b33";
+  const labelColor = isDark ? "#f2ebdd" : "#19382a";
   const pointLabelIds = useMemo(() => {
     const accepted = new Set<string>();
     const boxes: Array<{ x: number; y: number; width: number }> = [];
@@ -921,7 +929,7 @@ export default memo(function WorldMapBubbles({
         <rect
           width={size.width}
           height={size.height}
-          fill={isDark ? "#07121a" : "#e7edf0"}
+          fill={isDark ? "#0b1b28" : "#f2ebdd"}
         />
         <g transform={`translate(${view.x} ${view.y}) scale(${view.scale})`}>
           {WORLD_GEOMETRY.collection.features.map((countryFeature) => {
@@ -940,19 +948,19 @@ export default memo(function WorldMapBubbles({
                   : "#c96735"
                 : isSecondary
                   ? isDark
-                    ? "#4f92ad"
-                    : "#5d91a8"
+                    ? "#7d9e79"
+                    : "#6e946c"
                   : isFeatured
                     ? isDark
-                      ? "#536f80"
-                      : "#8fb1c2"
+                      ? "#7e8d73"
+                      : "#a6b698"
                     : marker
                       ? isDark
-                        ? "#36596c"
-                        : "#86a8b8"
+                        ? "#42674f"
+                        : "#91ac8b"
                       : isDark
-                        ? "#16283a"
-                        : "#d4dee7";
+                        ? "#20372c"
+                        : "#e2e5d2";
             const opacity = isPrimary
               ? 0.95
               : isSecondary
@@ -972,8 +980,8 @@ export default memo(function WorldMapBubbles({
                     ? "#e6f2f5"
                     : "#284b5a"
                 : isDark
-                  ? "#506b80"
-                  : "#91a5b5";
+                  ? "#6b896b"
+                  : "#98aa8d";
             return (
               <path
                 key={iso}
@@ -1037,7 +1045,7 @@ export default memo(function WorldMapBubbles({
                   y={-16 / view.scale}
                   textAnchor="middle"
                   fill={labelColor}
-                  stroke={isDark ? "#07121a" : "#eef2f3"}
+                  stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                   strokeWidth={3 / view.scale}
                   paintOrder="stroke"
                   fontSize={10 / view.scale}
@@ -1137,7 +1145,7 @@ export default memo(function WorldMapBubbles({
                     y={-(radius + 6 / view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
-                    stroke={isDark ? "#07121a" : "#eef2f3"}
+                    stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                     strokeWidth={3 / view.scale}
                     paintOrder="stroke"
                     fontSize={(isCompact ? 10 : 11) / view.scale}
@@ -1153,7 +1161,7 @@ export default memo(function WorldMapBubbles({
                     x={radius + 5 / view.scale}
                     y={radius + 7 / view.scale}
                     fill={labelColor}
-                    stroke={isDark ? "#07121a" : "#eef2f3"}
+                    stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                     strokeWidth={3 / view.scale}
                     paintOrder="stroke"
                     fontSize={9 / view.scale}
@@ -1209,7 +1217,7 @@ export default memo(function WorldMapBubbles({
                   <circle
                     r={radius + 4 / view.scale}
                     fill="none"
-                    stroke={isDark ? "#7ed4e6" : "#176b7c"}
+                    stroke={isDark ? "#a4cbb0" : "#2d6045"}
                     strokeWidth={1.75 / view.scale}
                     strokeDasharray={`${2.4 / view.scale} ${1.8 / view.scale}`}
                   />
@@ -1222,7 +1230,7 @@ export default memo(function WorldMapBubbles({
                     strokeWidth={2.2 / view.scale}
                   />
                 )}
-                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={isDark ? "#07121a" : "#ffffff"} strokeWidth={4} pointerEvents="none" />
+                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={isDark ? "#0b1b28" : "#ffffff"} strokeWidth={4} pointerEvents="none" />
                 <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none" />
                 {hasImage && eventPoints.filter((point) => point.imageUrl && !failedImageUrls.has(point.imageUrl)).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
                   <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
@@ -1235,7 +1243,7 @@ export default memo(function WorldMapBubbles({
                     y={hasImage ? -55 / view.scale : -(radius + 6 / view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
-                    stroke={isDark ? "#07121a" : "#eef2f3"}
+                    stroke={isDark ? "#0b1b28" : "#f2ebdd"}
                     strokeWidth={2.5 / view.scale}
                     paintOrder="stroke"
                     fontSize={10.5 / view.scale}
@@ -1350,10 +1358,10 @@ export default memo(function WorldMapBubbles({
           className="map-data-legend absolute bottom-3 left-3 rounded-xl border px-3 py-2 text-[11px] shadow-sm"
           style={{
             background: isDark
-              ? "rgba(10,22,31,0.9)"
-              : "rgba(255,255,255,0.92)",
+              ? "rgba(13,27,22,0.95)"
+              : "rgba(255,250,240,0.96)",
             color: labelColor,
-            borderColor: isDark ? "#3b4f5a" : "#bac6ca",
+            borderColor: isDark ? "#6b896b" : "#a8b49b",
             backdropFilter: "blur(14px)",
           }}
         >
@@ -1384,9 +1392,9 @@ export default memo(function WorldMapBubbles({
                 background: fillMode === "temperature"
                   ? "linear-gradient(90deg, rgb(55,113,166), rgb(239,209,126), rgb(191,54,45))"
                   : fillMode === "sequential"
-                    ? "linear-gradient(90deg, rgb(218,227,235), rgb(99,68,173))"
+                    ? isDark ? "linear-gradient(90deg, rgb(32,55,44), rgb(143,171,139))" : "linear-gradient(90deg, rgb(226,229,210), rgb(50,101,66))"
                     : fillMode === "relevance"
-                      ? "linear-gradient(90deg, rgb(208,221,225), rgb(218,181,126), rgb(188,83,34))"
+                      ? isDark ? "linear-gradient(90deg, rgb(32,55,44), rgb(74,110,82) 55%, rgb(213,126,70))" : "linear-gradient(90deg, rgb(226,229,210), rgb(133,162,128) 55%, rgb(182,82,39))"
                     : "linear-gradient(90deg, rgb(166,48,55), rgb(189,181,164), rgb(39,121,101))",
               }}
             />
@@ -1426,10 +1434,10 @@ export default memo(function WorldMapBubbles({
             left: tip.x,
             top: tip.y,
             background: isDark
-              ? "rgba(10,22,31,0.96)"
-              : "rgba(255,255,255,0.97)",
+              ? "rgba(13,27,22,0.97)"
+              : "rgba(255,250,240,0.98)",
             color: labelColor,
-            borderColor: isDark ? "#3b4f5a" : "#bac6ca",
+            borderColor: isDark ? "#6b896b" : "#a8b49b",
             maxWidth: 240,
             backdropFilter: "blur(14px)",
           }}
@@ -1442,13 +1450,13 @@ export default memo(function WorldMapBubbles({
             {tip.meta?.subtitle ??
               `${tip.value} ${tip.value === 1 ? "item" : "items"}`}
           </div>
-          <div style={{ color: isDark ? "#b4c1c6" : "#65747a" }}>
+          <div style={{ color: isDark ? "#b7c0af" : "#596b5a" }}>
             Rank {tip.rank} of {markers.length} in this view
           </div>
           {tip.meta?.lines?.map((line, index) => (
             <div
               key={`${tip.country}-${index}`}
-              style={{ color: isDark ? "#b4c1c6" : "#65747a" }}
+              style={{ color: isDark ? "#b7c0af" : "#596b5a" }}
             >
               {line}
             </div>

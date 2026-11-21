@@ -1738,6 +1738,13 @@ struct DailySignalBriefing: Codable, Identifiable {
     let updated_at: String
 
     var updatedDate: Date? { APIDateParser.parse(updated_at) }
+    var publishedDate: Date? { published_at.flatMap(APIDateParser.parse) ?? updatedDate }
+    var readingParagraphs: [String] {
+        update_text.replacingOccurrences(of: "\r\n", with: "\n")
+            .components(separatedBy: "\n\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
 
     enum CodingKeys: String, CodingKey {
         case id
