@@ -5,6 +5,18 @@ output_dir="$2"
 mkdir -p "$output_dir"
 bundle_id=$(/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' "$app_path/Info.plist")
 devices_file=$(mktemp)
+capture_failure() {
+  python3 - "$device_id" "$output_dir/$prefix$suffix" <<'PY'
+import subprocess,sys
+device,prefix=sys.argv[1:]
+commands=[['xcrun','simctl','io',device,'screenshot',prefix+'-failure.png'],
+          ['xcrun','simctl','spawn',device,'log','show','--style','compact','--last','2m','--predicate','process == "Claritas"']]
+with open(prefix+'-failure.log','w') as output:
+    for command in commands:
+        try: subprocess.run(command,stdout=output,stderr=subprocess.STDOUT,timeout=20,check=False)
+        except Exception as error: output.write(str(error)+'\n')
+PY
+}
 xcrun simctl list devices available --json > "$devices_file"
 while IFS=' ' read -r kind device_id; do
   xcrun simctl boot "$device_id" || true
@@ -25,12 +37,14 @@ while IFS=' ' read -r kind device_id; do
       if [[ "$appearance" == light ]]; then launch_args+=(-qa-map-light); suffix="-light"; fi
       xcrun simctl launch "$device_id" "$bundle_id" "${launch_args[@]}"
       ready=false
-      for _attempt in $(seq 1 30); do
-        if [[ -f "$container_path/Documents/map-review-error" ]]; then cat "$container_path/Documents/map-review-error"; exit 1; fi
+      # Cold hosted simulators can spend tens of seconds starting the scene.
+      # This bounded bootstrap wait does not change production read budgets.
+      for _attempt in $(seq 1 90); do
+        if [[ -f "$container_path/Documents/map-review-error" ]]; then cat "$container_path/Documents/map-review-error"; capture_failure; exit 1; fi
         if [[ -f "$container_path/Documents/map-review-ready" ]]; then ready=true; break; fi
         sleep 1
       done
-      [[ "$ready" == true ]] || { echo 'Native map review did not load'; exit 1; }
+      [[ "$ready" == true ]] || { echo "Native $kind $destination $appearance review was not ready within 90 seconds"; capture_failure; exit 1; }
       sleep 3
       xcrun simctl io "$device_id" screenshot "$output_dir/$prefix$suffix.png"
       xcrun simctl terminate "$device_id" "$bundle_id"

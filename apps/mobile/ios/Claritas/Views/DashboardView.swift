@@ -5230,6 +5230,13 @@ struct WorldMapWorkspace: View {
     var refreshesAutomatically = true
     @State private var showsBriefing = false
 
+    init(refreshesAutomatically: Bool = true, briefingInitiallyOpen: Bool = false) {
+        self.refreshesAutomatically = refreshesAutomatically
+        _showsBriefing = State(initialValue: briefingInitiallyOpen)
+        _panelStop = State(initialValue: briefingInitiallyOpen ? 2 : 1)
+        _wideContext = State(initialValue: briefingInitiallyOpen)
+    }
+
     private var points: [CountryBubblePoint] {
         (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
             guard let coordinate = CountryCentroidLookup.coordinate(for: country.country_iso2) else { return nil }
@@ -5298,11 +5305,6 @@ struct WorldMapWorkspace: View {
                     }
             }
             .clipped()
-        }
-        .onAppear {
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot") { openBriefing() }
-            #endif
         }
         .task(id: "\(model.overviewScope.requestKey)|\(scenePhase == .active)") {
             guard refreshesAutomatically, scenePhase == .active else { return }
@@ -6317,12 +6319,37 @@ enum CountryCentroidLookup {
 /// CI-only visual review of the actual native map with a captured overview.
 /// Data is staged in the simulator container; no fixture is bundled or used
 /// by production, and this launch path does not exist in App Store builds.
+@MainActor
 struct SignalMapSnapshotReview: View {
-    @StateObject private var model = AppModel()
+    @StateObject private var model: AppModel
+    private let fixtureError: String?
+
+    init() {
+        let review = AppModel()
+        var loadError: String?
+        do {
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .custom { decoder in
+                let value = try decoder.singleValueContainer().decode(String.self)
+                guard let date = APIDateParser.parse(value) else {
+                    throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid review date"))
+                }
+                return date
+            }
+            review.installMapReview(try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json"))))
+            if ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot") {
+                review.dailyBriefing = try decoder.decode(DailySignalBriefing.self, from: Data(contentsOf: documents.appendingPathComponent("DailyBriefing.json")))
+            }
+        } catch { loadError = String(describing: error) }
+        _model = StateObject(wrappedValue: review)
+        fixtureError = loadError
+    }
 
     var body: some View {
         NavigationStack {
-            WorldMapWorkspace(refreshesAutomatically: false)
+            WorldMapWorkspace(refreshesAutomatically: false,
+                              briefingInitiallyOpen: ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot"))
                 .environmentObject(model)
                 .navigationTitle("Claritas")
                 .modifier(ShellNavigationChrome())
@@ -6330,23 +6357,8 @@ struct SignalMapSnapshotReview: View {
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-qa-map-light") ? .light : .dark)
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            do {
-                let decoder = JSONDecoder()
-                decoder.dateDecodingStrategy = .custom { decoder in
-                    let value = try decoder.singleValueContainer().decode(String.self)
-                    guard let date = APIDateParser.parse(value) else {
-                        throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath, debugDescription: "Invalid review date"))
-                    }
-                    return date
-                }
-                model.installMapReview(try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json"))))
-                if ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot") {
-                    model.dailyBriefing = try decoder.decode(DailySignalBriefing.self, from: Data(contentsOf: documents.appendingPathComponent("DailyBriefing.json")))
-                }
-                try Data("ready".utf8).write(to: documents.appendingPathComponent("map-review-ready"))
-            } catch {
-                try? Data(String(describing: error).utf8).write(to: documents.appendingPathComponent("map-review-error"))
-            }
+            let filename = fixtureError == nil ? "map-review-ready" : "map-review-error"
+            try? Data((fixtureError ?? "ready").utf8).write(to: documents.appendingPathComponent(filename))
         }
     }
 }

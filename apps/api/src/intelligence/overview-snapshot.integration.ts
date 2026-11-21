@@ -81,7 +81,10 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     await readIntelligenceOverviewSnapshot(normalizeOverviewOptions(), measured);
     assert.equal(statements.length, 2);
     assert.ok(statements.every((sql) => !/intelligence_event(?:\s|_)|\bitem\b/.test(sql)), "Repeated global reads use only saved snapshot tables");
+    const intervalStart = statements.length;
     const interval = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ bucket: 0 }), measured);
+    assert.ok(!statements.slice(intervalStart).some((sql) => sql.includes("WITH eligible AS MATERIALIZED")),
+      "selecting an interval must reuse its published full-period analytics rather than scan the complete cohort again");
     assert.equal(interval.selection?.event_count, 2);
     assert.equal(interval.summary.event_count, high.summary.event_count, "the full chart remains available while an interval is selected");
     assert.equal(interval.events.length, 2, "interval selection retrieves older developments outside the initial card page");
