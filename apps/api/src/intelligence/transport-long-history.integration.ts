@@ -5,7 +5,7 @@ import { getTransportOverview } from "../connectors/transport";
 after(() => pool.end());
 
 test("long country history reads year-old daily samples without polluting the default cached window", async () => {
-  const country = "XY";
+  const country = "JP";
   const day = new Date(); day.setUTCHours(0, 0, 0, 0); day.setUTCDate(day.getUTCDate() - 365);
   await query(`INSERT INTO transport_country_activity_day(bucket,mode,country_iso2,peak_active_entities,observed_hour_mask,first_observed_at,last_observed_at,source_names)
     VALUES($1::timestamptz::date,'aviation',$2,42,1,$1::timestamptz,$1::timestamptz,ARRAY['long-history-fixture'])`, [day, country]);
