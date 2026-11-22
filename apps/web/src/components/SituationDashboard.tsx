@@ -36,10 +36,16 @@ export default function SituationDashboard(props: Props) {
   useEffect(() => {
     if (scopeView === "developments" || selectedId) return;
     const controller = new AbortController();
-    void readWithDeadline((signal) => fetchIntelligenceOverview({ hours: props.hours, country: country || undefined, topic: scopeView, priority: "all" }, signal), controller.signal, 8_000)
-      .then((value) => { if (!controller.signal.aborted) setScopeReporting({ key: reportingKey, events: [...value.events, ...(value.map_events ?? []), ...(value.visual_events ?? [])] }); })
+    let warmingRetry: ReturnType<typeof setTimeout> | undefined;
+    const read = () => void readWithDeadline((signal) => fetchIntelligenceOverview({ hours: props.hours, country: country || undefined, topic: scopeView, priority: "all" }, signal), controller.signal, 8_000)
+      .then((value) => {
+        if (controller.signal.aborted) return;
+        setScopeReporting({ key: reportingKey, events: [...value.events, ...(value.map_events ?? []), ...(value.visual_events ?? [])] });
+        if (value.snapshot?.status === "warming") warmingRetry = setTimeout(read, 15_000);
+      })
       .catch(() => { /* The current overview remains usable if optional topic reporting is unavailable. */ });
-    return () => controller.abort();
+    read();
+    return () => { controller.abort(); clearTimeout(warmingRetry); };
   }, [country, props.hours, scopeView, selectedId, reportingKey]);
   const relatedEvents = useMemo(() => [...new Map([...(overview?.events ?? []), ...(overview?.map_events ?? []), ...(overview?.visual_events ?? []),
     ...(scopeReporting.key === reportingKey ? scopeReporting.events : [])].map((event) => [event.id, event])).values()], [overview, scopeReporting, reportingKey]);

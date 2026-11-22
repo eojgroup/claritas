@@ -1749,7 +1749,12 @@ struct ScopeTransportExplorer: View {
             #endif
             topicOverview = nil
             let scope = IntelligenceOverviewScope(hours: model.overviewHours, country: country, topic: "transport", priority: "all")
-            if let value = try? await model.api.fetchIntelligenceOverview(scope: scope), !Task.isCancelled { topicOverview = value }
+            while !Task.isCancelled {
+                guard let value = try? await model.api.fetchIntelligenceOverview(scope: scope), !Task.isCancelled else { return }
+                topicOverview = value
+                guard value.snapshot?.isWarming == true else { return }
+                do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+            }
         }
         .sheet(item: $selectedEntity) { entity in
             NavigationStack {
