@@ -42,7 +42,7 @@ it("loads the overview and briefing without an optional-feed request burst and s
   }));
   render(<App />);
   expect(await screen.findByRole("button", { name: event.title })).toBeTruthy();
-  expect(requests.sort()).toEqual(["/api/auth/me", "/api/auth/providers", "/api/briefings/daily/latest", "/api/intelligence/overview?hours=24&priority=all"].sort());
+  expect(requests.sort()).toEqual(["/api/auth/me", "/api/auth/providers", "/api/briefings/daily/latest", "/api/intelligence/overview?hours=24&priority=all", "/api/market/countries"].sort());
   expect(peak).toBeLessThanOrEqual(3);
   expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("3");
   expect(screen.getByTestId("overview-map").getAttribute("data-country-total")).toBe("72");

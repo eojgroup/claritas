@@ -736,11 +736,16 @@ export type TransportHistoryWindow = {
   observed_origin_share: number | null;
 };
 
+export type TransportComparisonWindow = { start: string; end: string; days: number; observed_days: number; observation_hours: number; average_daily_entities: number | null };
+
 export type TransportHistory = {
   scope: "country" | "corridor";
   country: string;
   corridor_country: string | null;
-  requested_days: 90;
+  requested_days: 90 | 400;
+  activity_retention_days?: number;
+  movement_retention_days?: number;
+  comparisons?: Array<{ key: string; label: string; metric: string; current: TransportComparisonWindow; previous: TransportComparisonWindow; comparable: boolean; change_percent: number | null; notice: string }>;
   retention_days: number;
   available_from: string | null;
   available_to: string | null;
@@ -2038,12 +2043,12 @@ export async function fetchCountryLeadership(signal?: AbortSignal) {
   return (data.countries ?? []) as CountryLeadership[];
 }
 
-export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: string[] }) {
+export async function fetchMarketQuotes(params?: { refresh?: boolean; symbols?: string[]; signal?: AbortSignal }) {
   const sp = new URLSearchParams();
   if (typeof params?.refresh === "boolean") sp.set("refresh", params.refresh ? "true" : "false");
   if (params?.symbols && params.symbols.length > 0) sp.set("symbols", params.symbols.join(","));
   const suffix = sp.toString() ? `?${sp.toString()}` : "";
-  const resp = await fetch(`${API_BASE}/api/market/quotes${suffix}`, { credentials: "include" });
+  const resp = await fetch(`${API_BASE}/api/market/quotes${suffix}`, { credentials: "include", signal: params?.signal });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch market quotes"));
   const data = await resp.json();
   return (data.quotes ?? []) as MarketQuote[];
@@ -2085,8 +2090,8 @@ export async function fetchPolicyRates() {
   return (data.rates ?? []) as PolicyRate[];
 }
 
-export async function fetchCountryMarketOverview(): Promise<CountryMarketOverviewResponse> {
-  const resp = await fetch(`${API_BASE}/api/market/countries`, { credentials: "include" });
+export async function fetchCountryMarketOverview(signal?: AbortSignal): Promise<CountryMarketOverviewResponse> {
+  const resp = await fetch(`${API_BASE}/api/market/countries`, { credentials: "include", signal });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch country market overview"));
   return (await resp.json()) as CountryMarketOverviewResponse;
 }
@@ -2106,6 +2111,8 @@ export async function fetchTransportOverview(params: {
   mode?: TransportMode;
   entityLimit?: number;
   refresh?: boolean;
+  historyDays?: 90 | 400;
+  signal?: AbortSignal;
 }): Promise<TransportOverview> {
   const country = params.country?.trim().toUpperCase() ?? "";
   if (country && !/^[A-Z]{2}$/.test(country)) {
@@ -2122,9 +2129,10 @@ export async function fetchTransportOverview(params: {
   if (typeof params.entityLimit === "number") {
     sp.set("entity_limit", String(params.entityLimit));
   }
+  if (params.historyDays) sp.set("history_days", String(params.historyDays));
   if (params.refresh) sp.set("refresh", "true");
   const resp = await fetch(`${API_BASE}/api/transport/overview?${sp.toString()}`, {
-    credentials: "include",
+    credentials: "include", signal: params.signal,
   });
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch transport intelligence"));
   return (await resp.json()) as TransportOverview;
@@ -2133,10 +2141,11 @@ export async function fetchTransportOverview(params: {
 export async function fetchTransportEntity(
   mode: TransportMode,
   entityId: string,
+  signal?: AbortSignal,
 ): Promise<{ entity: TransportEntity; track: TransportTrackPoint[] }> {
   const resp = await fetch(
     `${API_BASE}/api/transport/entities/${mode}/${encodeURIComponent(entityId)}`,
-    { credentials: "include" },
+    { credentials: "include", signal },
   );
   if (!resp.ok) throw new Error(await readError(resp, "Failed to fetch transport track"));
   return (await resp.json()) as {

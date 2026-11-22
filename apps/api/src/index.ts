@@ -3714,7 +3714,12 @@ app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {
     const refresh =
       typeof req.query.refresh === "string" &&
       ["1", "true", "yes", "on"].includes(req.query.refresh.trim().toLowerCase());
+    const historyDays = req.query.history_days === "400" ? 400 : 90;
+    if (req.query.history_days != null && !["90", "400"].includes(String(req.query.history_days))) {
+      return res.status(400).json({ error: "history_days must be 90 or 400." });
+    }
     const overview = await getTransportOverview({
+      historyDays,
       detail,
       mode,
       country: country || undefined,

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   transportHistoryModeValue,
+  transportHistoryComparisons,
   transportHistoryWindow,
 } from "./transport-history";
 
@@ -111,4 +112,33 @@ test("mode-filtered history leaves the excluded mode absent rather than reportin
   assert.equal(transportHistoryModeValue("maritime", "aviation", 0), null);
   assert.equal(transportHistoryModeValue("aviation", "maritime", 0), null);
   assert.equal(transportHistoryModeValue(null, "aviation", 0), 0);
+});
+
+test("long-range comparisons use completed observed UTC windows and retain coverage", () => {
+  const end = new Date("2026-11-22T00:00:00Z");
+  const daily = (offset: number, value: number) => {
+    const date = new Date(end); date.setUTCDate(date.getUTCDate() - offset);
+    return { ...point(1), bucket: date.toISOString(), maritime_entities: value, observed_hours: 24 };
+  };
+  const series = Array.from({ length: 60 }, (_, i) => daily(i + 1, i < 30 ? 20 : 10));
+  const annual = Array.from({ length: 30 }, (_, i) => daily(366 + i, 5));
+  const comparisons = transportHistoryComparisons([...annual, ...series, daily(0, 99999)], new Date("2026-11-22T23:50:00Z"));
+  assert.equal(comparisons[0].change_percent, 100);
+  assert.equal(comparisons[0].current.average_daily_entities, 20);
+  assert.equal(comparisons[0].current.observation_hours, 720);
+  assert.equal(comparisons[1].change_percent, 300);
+  assert.equal(comparisons[1].previous.start, "2025-10-23T00:00:00.000Z");
+});
+
+test("missing history and zero baselines cannot manufacture a month or year percentage", () => {
+  const incomplete = transportHistoryComparisons([point(1, { observed_hours: 24, maritime_entities: 10 })], new Date("2026-08-03T00:00:00Z"));
+  assert.equal(incomplete[0].comparable, false);
+  assert.equal(incomplete[0].change_percent, null);
+  assert.equal(incomplete[1].previous.average_daily_entities, null);
+  const end = new Date("2026-11-22T00:00:00Z");
+  const zero = Array.from({ length: 60 }, (_, i) => {
+    const date = new Date(end); date.setUTCDate(date.getUTCDate() - i - 1);
+    return { ...point(1), bucket: date.toISOString(), maritime_entities: 0, observed_hours: 24 };
+  });
+  assert.equal(transportHistoryComparisons(zero, end)[0].change_percent, null);
 });

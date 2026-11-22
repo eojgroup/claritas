@@ -1,6 +1,8 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileText, Maximize2, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import type { DailySignalBriefing, IntelligenceEvent, IntelligenceOverview, OverviewTopic } from "../lib/api";
+import { fetchIntelligenceOverview } from "../lib/api";
+import { readWithDeadline } from "../lib/readDeadline";
 import SituationOverview from "./SituationOverview";
 import WorldMapBubbles from "./WorldMapBubbles";
 import { eventCoordinateContext, presentEvent } from "./eventPresentation";
@@ -8,8 +10,10 @@ import OverviewCountryProfile from "./OverviewCountryProfile";
 import CountryFlag from "./CountryFlag";
 import ModalSurface from "./ModalSurface";
 import { mapEventKind, MAP_EVENT_KINDS } from "./mapEventPresentation";
+import MarketScopeContext from "./MarketScopeContext";
 
 const IntelligenceWorkspace = lazy(() => import("./IntelligenceWorkspace"));
+const TransportScopeContext = lazy(() => import("./TransportScopeContext"));
 type Props = {
   overview: IntelligenceOverview | null; loading: boolean; error: string | null;
   hours: 24 | 72 | 168; topic: OverviewTopic | null; priority: "high" | "all";
@@ -26,6 +30,20 @@ export default function SituationDashboard(props: Props) {
   const { overview, country, selectedId, onSelect } = props;
   const [selectedEvent, setSelectedEvent] = useState<IntelligenceEvent | null>(null);
   const [profileCountry, setProfileCountry] = useState<string | null>(null);
+  const [scopeView, setScopeView] = useState<"developments" | "transport" | "markets">("developments");
+  const [scopeReporting, setScopeReporting] = useState<{ key: string; events: IntelligenceEvent[] }>({ key: "", events: [] });
+  const reportingKey = `${country ?? "global"}|${props.hours}|${scopeView}`;
+  useEffect(() => {
+    if (scopeView === "developments" || selectedId) return;
+    const controller = new AbortController();
+    void readWithDeadline((signal) => fetchIntelligenceOverview({ hours: props.hours, country: country || undefined, topic: scopeView, priority: "all" }, signal), controller.signal, 8_000)
+      .then((value) => { if (!controller.signal.aborted) setScopeReporting({ key: reportingKey, events: [...value.events, ...(value.map_events ?? []), ...(value.visual_events ?? [])] }); })
+      .catch(() => { /* The current overview remains usable if optional topic reporting is unavailable. */ });
+    return () => controller.abort();
+  }, [country, props.hours, scopeView, selectedId, reportingKey]);
+  const relatedEvents = useMemo(() => [...new Map([...(overview?.events ?? []), ...(overview?.map_events ?? []), ...(overview?.visual_events ?? []),
+    ...(scopeReporting.key === reportingKey ? scopeReporting.events : [])].map((event) => [event.id, event])).values()], [overview, scopeReporting, reportingKey]);
+  const relatedEventIds = scopeReporting.key === reportingKey ? scopeReporting.events.map((event) => event.id) : [];
   useEffect(() => {
     if (country && !selectedId) setProfileCountry(country);
     else if (!country) setProfileCountry(null);
@@ -133,9 +151,17 @@ export default function SituationDashboard(props: Props) {
         <button type="button" className="situation-panel-toggle" onClick={() => setPanelStop(panelStop === "peek" ? "half" : "peek")} aria-label={panelStop === "peek" ? "Show context" : "Show more map"} aria-expanded={panelStop !== "peek"} aria-controls="world-map-context">{panelStop === "peek" ? <ChevronUp size={20} /> : <ChevronDown size={20} />}</button>
       </header>
       <div ref={contextScroll} id="world-map-context" className="situation-context-scroll" inert={panelStop === "peek"}>
+        {!selectedId && <>
+          <nav className="scope-view-switch" aria-label="Explore selected scope">
+            {([['developments', 'Developments'], ['transport', 'Transport'], ['markets', 'Markets']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={scopeView === key} onClick={() => { setScopeView(key); revealContext(); }}>{label}</button>)}
+          </nav>
+          {overview && scopeView !== "transport" && <MarketScopeContext country={country} expanded={scopeView === "markets"} onToggle={() => setScopeView(scopeView === "markets" ? "developments" : "markets")} onSelectCountry={selectCountry} events={relatedEvents} relatedEventIds={relatedEventIds} onOpenEvent={selectEvent} />}
+        </>}
+        {!selectedId && scopeView === "transport" && <Suspense fallback={<p role="status">Loading transport explorer…</p>}><TransportScopeContext country={country} events={relatedEvents} relatedEventIds={relatedEventIds} onSelectCountry={selectCountry} onOpenEvent={selectEvent} /></Suspense>}
+        {(selectedId || scopeView === "developments") && <>
         {!selectedId && !profileCountry && overviewControls}
         {selectedId ? <><section id="overview-event-context" tabIndex={-1} className="situation-detail" aria-label="Selected development">
-          <header><span>Event context</span><button type="button" onClick={() => onSelect(null)}><X size={16} />Back to developments</button></header>
+          <header><span>Event context</span><button type="button" onClick={() => onSelect(null)}><X size={16} />{scopeView === "developments" ? "Back to developments" : `Back to ${scopeView}`}</button></header>
           <Suspense fallback={<p role="status">Loading development…</p>}>
             <IntelligenceWorkspace embedded initialEventId={selectedId}
               refreshVersion={events.find((event) => event.id === selectedId)?.last_activity_time}
@@ -156,6 +182,7 @@ export default function SituationDashboard(props: Props) {
           <SituationOverview variant="developments" {...props} onSelect={selectEvent} selectedId={selectedId} />
           {leadingCountries.length > 0 && <div className="situation-country-pulse" aria-label="Leading country activity">{leadingCountries.map((item) => <button type="button" key={item.country} onClick={() => selectCountry(item.country)}><CountryFlag country={item.country} /><span>{new Intl.DisplayNames(undefined, { type: "region" }).of(item.country) || item.country}</span><strong>{item.count.toLocaleString()}</strong></button>)}</div>}
           <p className="situation-map-coverage">Country shading and pins follow your topic, priority, country and time selection. Reports without precise coordinates contribute to country shading. A dark country means no located reporting in this selection, not that nothing happened.</p>
+        </>}
         </>}
       </div>
     </aside>

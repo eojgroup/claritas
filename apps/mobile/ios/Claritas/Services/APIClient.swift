@@ -396,6 +396,7 @@ final class APIClient {
         mode: TransportMode? = nil,
         country: String? = nil,
         entityLimit: Int? = nil,
+        historyDays: Int? = nil,
         refresh: Bool = false
     ) async throws -> TransportOverview {
         let normalizedCountry = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -416,6 +417,9 @@ final class APIClient {
         }
         if let entityLimit {
             items.append(URLQueryItem(name: "entity_limit", value: String(entityLimit)))
+        }
+        if let historyDays {
+            items.append(URLQueryItem(name: "history_days", value: String(historyDays)))
         }
         if refresh {
             items.append(URLQueryItem(name: "refresh", value: "true"))

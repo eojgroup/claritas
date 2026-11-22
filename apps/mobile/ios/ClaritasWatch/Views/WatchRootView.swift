@@ -476,6 +476,10 @@ private struct WatchSignalGlanceView: View {
                     }
 
                     WatchOverviewPulseCard()
+                    WatchScopeMarketsGlance(country: selectedCountry)
+                    NavigationLink {
+                        WatchScopedTransportBrowser(country: selectedCountry)
+                    } label: { Label("Browse transport", systemImage: "ferry") }.font(.caption2)
                     if let selectedCountry { WatchCountryContextView(country: selectedCountry) }
 
                     WatchCard {
@@ -2153,6 +2157,73 @@ private struct WatchEventPreview: View {
                   !Task.isCancelled, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return }
             image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
                 kCGImageSourceThumbnailMaxPixelSize: 320, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
+        }
+    }
+}
+
+@MainActor
+private struct WatchScopeMarketsGlance: View {
+    let country: String?
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var rows: [CountryMarketOverview] = []
+    var body: some View {
+        WatchCard {
+            VStack(alignment: .leading, spacing: 6) {
+                NavigationLink { WatchMarketsView().task { await model.loadOptionalContext("markets") } } label: { Label("Markets & economy", systemImage: "chart.line.uptrend.xyaxis") }.font(.caption.weight(.semibold))
+                ForEach(Array(rows.filter { country == nil || $0.country == country }.sorted { abs($0.composite_change_percent ?? 0) > abs($1.composite_change_percent ?? 0) }.prefix(3))) { row in
+                    Text("\(row.country) · \(row.currency ?? "FX") \(row.fx_change_percent.map { String(format: "%+.1f%%", $0) } ?? "—") vs EUR · \(row.fx_period_end ?? "period unavailable")")
+                        .font(.system(size: 9))
+                }
+                Text("Saved market observations; periods differ.").font(.system(size: 8)).foregroundStyle(.secondary)
+            }
+        }
+        .task { rows = (try? await model.readMarketCountries()) ?? [] }
+    }
+}
+
+@MainActor
+private struct WatchScopedTransportBrowser: View {
+    let country: String?
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var value: TransportOverview?
+    @State private var failed = false
+    @State private var retry = 0
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(country.map { "\($0) transport" } ?? "Global transport").font(.headline)
+                if let value {
+                    Text("\(value.summary.modes.maritime.active) vessels · \(value.summary.modes.aviation.active) flights").font(.caption)
+                    if let history = value.history {
+                        Text("Daily sampled vehicles · retained year").font(.caption.weight(.semibold))
+                        Chart(history.series) { point in
+                            if let date = point.date, point.observed_hours > 0 {
+                                BarMark(x: .value("Date", date), y: .value("Daily peak sample", (point.maritime_entities ?? 0) + (point.aviation_entities ?? 0)))
+                                    .foregroundStyle(WatchPalette.sage)
+                            }
+                        }.frame(height: 95)
+                        Text("\(history.observed_days) observed days · gaps mean missing data").font(.system(size: 9)).foregroundStyle(.secondary)
+                        ForEach(history.comparisons ?? []) { comparison in
+                            Text("\(comparison.label): \(comparison.comparable ? comparison.change_percent.map { String(format: "%+.1f%%", $0) } ?? "no baseline" : "insufficient coverage")")
+                                .font(.caption2)
+                        }
+                    } else { Text("Choose a country on the World map for retained history.").font(.caption2).foregroundStyle(.secondary) }
+                    ForEach(Array((value.ports ?? []).prefix(6))) { port in
+                        Text("\(port.location_name) · \(port.arrivals) in / \(port.departures) out").font(.caption2)
+                    }
+                    ForEach(Array(value.routes.prefix(6))) { route in
+                        Text("\(route.origin_country) → \(route.destination_country) · \(route.active_count)").font(.caption2)
+                    }
+                    Text("Partial AIS/ADS-B coverage; monitored samples, not complete national traffic.").font(.system(size: 8)).foregroundStyle(.secondary)
+                    Button { model.openOnPhone("transport", country: country) } label: { Label("Explore on iPhone", systemImage: "iphone") }.font(.caption2)
+                } else if failed { Button("Retry transport") { retry += 1 }.font(.caption2) }
+                else { ProgressView("Saved transport") }
+            }
+        }.navigationTitle("Transport")
+        .task(id: "\(country ?? "global")|\(retry)") {
+            failed = false; value = nil
+            do { let result = try await model.readScopedTransport(country: country); guard !Task.isCancelled else { return }; value = result }
+            catch { guard !Task.isCancelled else { return }; failed = true }
         }
     }
 }
