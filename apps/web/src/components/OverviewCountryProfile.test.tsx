@@ -16,9 +16,14 @@ it("publishes available country data while a provider is slow", async () => {
   expect(await screen.findByText("Swedish leadership reference")).toBeTruthy();
   expect(await screen.findByText("OMX")).toBeTruthy();
   expect(screen.getByRole("status").textContent).toContain("Loading");
-  await act(async () => { finishWeather([{ country: "SE", temp_c: 10, weather_desc: "Clear" }]); });
+  await act(async () => { finishWeather([{ country: "SE", location_name: "Stockholm", temp_c: 10, weather_desc: "Clear", observed_at: "2026-11-22T09:00:00Z",
+    forecast: [{ forecast_time: "2026-11-23T00:00:00Z", temp_min_c: 4, temp_max_c: 12, weather_main: "Rain", precipitation_probability: 80 }],
+    alerts: [{ event: "Heavy rain warning", area: "Stockholm", sender_name: "Weather service", starts_at: "2026-11-22T10:00:00Z", instruction: "Avoid flooded roads." }] }]); });
   await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
   expect(screen.getByText("10°C · Clear")).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Country weather" })).toBeTruthy();
+  expect(screen.getByText("4°–12°")).toBeTruthy();
+  expect(screen.getByText("Heavy rain warning · Stockholm")).toBeTruthy();
   view.unmount();
 });
 

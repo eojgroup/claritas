@@ -538,7 +538,9 @@ test("source replay corrects classification while later interpretations preserve
   await upsertIntelligenceSignal({ ...input, eventType: "corporate_development" });
   await upsertIntelligenceSignal({ ...input, eventType: "reported_development",
     metadata: { origin_domain: "podcast", epistemic_class: "model_interpretation" },
-    evidence: { ...input.evidence, domain: "podcast", confidence: 0.4, sourceRecordId: `${suffix}-podcast`, relationship: "model_interpretation" },
+    evidence: { ...input.evidence, domain: "podcast", confidence: 0.4, sourceRecordId: `${suffix}-podcast`, relationship: "model_interpretation",
+      metadata: { title: "Attributed podcast context", summary: "Transcript extract linked to this event." },
+      provenance: { episode_url: "https://example.org/episode" } },
   });
   const stored = await query("SELECT event_type,metadata FROM intelligence_event WHERE id=$1", [created.id]);
   assert.equal(stored.rows[0].event_type, "corporate_development");
@@ -551,6 +553,9 @@ test("source replay corrects classification while later interpretations preserve
   assert.equal(baseDetail?.context_included, false);
   assert.equal(baseDetail?.regional_reporting, null);
   assert.deepEqual(baseDetail?.context_signals, []);
+  const podcastEvidence = baseDetail?.evidence.find((record: any) => record.domain === "podcast");
+  assert.equal(podcastEvidence?.source_summary, "Transcript extract linked to this event.");
+  assert.equal(podcastEvidence?.source_url, "https://example.org/episode");
   assert.equal(baseDetail?.event.origin_domain, "news");
   const detail = await getIntelligenceEvent(created.id, { includeContext: true });
   assert.ok(detail?.regional_reporting === null || (!Array.isArray(detail?.regional_reporting)

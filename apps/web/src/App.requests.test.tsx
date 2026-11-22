@@ -83,6 +83,9 @@ it("loads the overview and briefing without an optional-feed request burst and s
   await waitFor(() => expect(requests).toContain("/api/intelligence/overview?hours=24&country=SE&priority=high"));
   expect(await screen.findByRole("button", { name: "Clear SE ×" })).toBeTruthy();
   expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
-  fireEvent.click(within(screen.getByRole("navigation", { name: "Main navigation" })).getByRole("button", { name: "Weather" }));
+  const navigation = within(screen.getByRole("navigation", { name: "Main navigation" }));
+  for (const name of ["News", "Social signals", "Podcasts", "Transport", "Weather", "Markets", "Imagery"]) {
+    expect(navigation.queryByRole("button", { name })).toBeNull();
+  }
   await waitFor(() => expect(requests).toContain("/api/weather/country-latest"));
 });

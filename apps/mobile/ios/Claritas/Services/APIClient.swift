@@ -383,6 +383,14 @@ final class APIClient {
         return try await request(URLRequest(url: url), as: CountryMarketOverviewResponse.self)
     }
 
+    func fetchCountryMarketDetail(country: String) async throws -> CountryMarketDetail {
+        let country = country.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        guard country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil else {
+            throw APIError(status: 400, message: "Country must be an ISO alpha-2 code.")
+        }
+        return try await request(URLRequest(url: baseURL.appendingPathComponent("/api/market/countries/\(country)")), as: CountryMarketDetail.self)
+    }
+
     func fetchTransportOverview(
         detail: String = "aggregate",
         mode: TransportMode? = nil,
@@ -686,6 +694,12 @@ final class APIClient {
         let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
         let url = baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)/weather")
         return try await request(URLRequest(url: url), as: EventWeatherEnvelope.self).weather
+    }
+
+    func fetchEventTransport(id: String) async throws -> EventTransportDetail? {
+        let encoded = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? id
+        let url = baseURL.appendingPathComponent("/api/intelligence/events/\(encoded)/transport")
+        return try await request(URLRequest(url: url), as: EventTransportEnvelope.self).transport
     }
 
     func fetchEventGibsContext(id: String) async throws -> GibsEventContext? {

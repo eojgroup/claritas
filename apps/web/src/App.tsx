@@ -17,7 +17,6 @@ import {
   Bell,
   Settings,
   User,
-  Newspaper,
   Moon,
   Sun,
   LogOut,
@@ -30,11 +29,6 @@ import {
   CheckCheck,
   Podcast,
   RefreshCw,
-  Route,
-  Radio,
-  CloudSun,
-  TrendingUp,
-  Satellite,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -873,7 +867,17 @@ export default function ClaritasDashboard() {
   const [authProvidersLoading, setAuthProvidersLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
   const [authRetry, setAuthRetry] = useState(0);
-  const [activeView, setActiveView] = useState<AppView>("dashboard");
+  const [activeView, setActiveViewState] = useState<AppView>("dashboard");
+  // Old links and notifications retain their scope inside the world workspace.
+  const setActiveView = useCallback((view: AppView) => {
+    if (OVERVIEW_DRILLDOWN_VIEWS.has(view)) {
+      if (view === "weather" || view === "markets" || view === "transport") setOverviewTopic(view);
+      else if (view !== "earth-observation" && view !== "intelligence") setOverviewTopic(null);
+      if (view !== "earth-observation" && view !== "intelligence") setSelectedIntelligenceEventId(null);
+      setOverviewBucket(null);
+      setActiveViewState("dashboard");
+    } else setActiveViewState(view);
+  }, []);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [isRefreshingAccess, setIsRefreshingAccess] = useState(false);
@@ -1110,7 +1114,7 @@ export default function ClaritasDashboard() {
     applyEventDeepLink();
     window.addEventListener("popstate", applyEventDeepLink);
     return () => window.removeEventListener("popstate", applyEventDeepLink);
-  }, []);
+  }, [setActiveView]);
 
   useEffect(() => {
     const legalIds = new Set(legalPolicies.map((policy) => policy.id));
@@ -1147,7 +1151,7 @@ export default function ClaritasDashboard() {
     handleHash();
     window.addEventListener("hashchange", handleHash);
     return () => window.removeEventListener("hashchange", handleHash);
-  }, [profileSections]);
+  }, [profileSections, setActiveView]);
 
   useEffect(() => {
     if (activeView === "profile") {
@@ -1226,7 +1230,7 @@ export default function ClaritasDashboard() {
     if (!isAdmin && activeView === "admin") {
       setActiveView("dashboard");
     }
-  }, [activeView, isAdmin]);
+  }, [activeView, isAdmin, setActiveView]);
 
   useEffect(() => {
     let active = true;
@@ -3454,6 +3458,13 @@ export default function ClaritasDashboard() {
 
 
   const aiSearchPreview = useMemo(() => {
+    const words = stripDashboardSearchTopicTokens(query).trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+    const eventMatches = [...new Map([...(overview?.events ?? []), ...(overview?.map_events ?? [])].map((event) => [event.id, event])).values()]
+      .filter((event) => words.every((word) => `${event.title} ${event.summary} ${event.location_name ?? ""}`.toLocaleLowerCase().includes(word)))
+      .filter((event) => effectiveSearchTopic === "all" || (event.signal_domains ?? [event.origin_domain]).some((domain) => domain === (effectiveSearchTopic === "podcasts" ? "podcast" : effectiveSearchTopic === "markets" ? "market" : effectiveSearchTopic)))
+      .slice(0, 8).map((event) => ({ key: `event-${event.id}`, eventId: event.id, kind: "Development", view: "dashboard" as const,
+        title: event.title, subtitle: `${event.location_name || event.primary_country_iso2 || "Global"} · ${new Date(event.last_activity_time).toLocaleString()}`,
+        href: null, country: event.primary_country_iso2, symbol: null }));
     const news = newsSearchScope.slice(0, 8).map((item) => {
       const countries = getNewsSignalCountries(item);
       const chronologyTimestamp = newsChronology(item).timestamp;
@@ -3531,19 +3542,19 @@ export default function ClaritasDashboard() {
     }));
 
     if (effectiveSearchTopic === "news") {
-      return news;
+      return [...eventMatches, ...news].slice(0, 8);
     }
     if (effectiveSearchTopic === "weather") {
-      return weather;
+      return [...eventMatches, ...weather].slice(0, 8);
     }
     if (effectiveSearchTopic === "podcasts") {
-      return podcastRows;
+      return [...eventMatches, ...podcastRows].slice(0, 8);
     }
     if (effectiveSearchTopic === "markets") {
-      return markets;
+      return [...eventMatches, ...markets].slice(0, 8);
     }
-    return [...news.slice(0, 3), ...podcastRows.slice(0, 3), ...weather.slice(0, 1), ...markets.slice(0, 1)];
-  }, [effectiveSearchTopic, getSourceLabel, marketCountryRows, newsSearchScope, podcastSearchScope, selectedNewsCountry, weatherSearchScope]);
+    return [...eventMatches, ...news.slice(0, 3), ...podcastRows.slice(0, 3), ...weather.slice(0, 1), ...markets.slice(0, 1)].slice(0, 8);
+  }, [query, overview, effectiveSearchTopic, getSourceLabel, marketCountryRows, newsSearchScope, podcastSearchScope, selectedNewsCountry, weatherSearchScope]);
 
   const signalNotifications = useMemo<SignalNotification[]>(() => {
     const items: SignalNotification[] = [];
@@ -3791,7 +3802,7 @@ export default function ClaritasDashboard() {
       context?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
       context?.focus?.({ preventScroll: true });
     }, 0);
-  }, []);
+  }, [setActiveView]);
 
   const handleOpenImagery = useCallback((eventId?: string) => {
     if (eventId) {
@@ -3803,7 +3814,7 @@ export default function ClaritasDashboard() {
       }
     }
     setActiveView("earth-observation");
-  }, []);
+  }, [setActiveView]);
 
   const handleClearSelection = () => {
     setSelectedCountry(null);
@@ -3828,6 +3839,11 @@ export default function ClaritasDashboard() {
   }, []);
 
   const handleSearchResult = (result: (typeof aiSearchPreview)[number]) => {
+    if ("eventId" in result) {
+      handleOpenIntelligence(result.eventId);
+      setSearchOpen(false);
+      return;
+    }
     setActiveView(result.view);
     if ("newsItemId" in result) {
       setSelectedDashboardNewsId(result.newsItemId);
@@ -3977,19 +3993,13 @@ export default function ClaritasDashboard() {
       icon: LayoutGrid,
       group: "core",
     },
-    { id: "news", label: "News", view: "news" as const, icon: Newspaper, group: "sources" },
-    { id: "social", label: "Social signals", view: "social" as const, icon: Radio, group: "sources" },
-    { id: "podcasts", label: "Podcasts", view: "podcasts" as const, icon: Podcast, group: "sources" },
-    { id: "transport", label: "Transport", view: "transport" as const, icon: Route, group: "sources" },
-    { id: "weather", label: "Weather", view: "weather" as const, icon: CloudSun, group: "sources" },
-    { id: "markets", label: "Markets", view: "markets" as const, icon: TrendingUp, group: "sources" },
-    { id: "earth-observation", label: "Imagery", view: "earth-observation" as const, icon: Satellite, group: "sources" },
     ...(isAdmin
       ? [{ id: "admin", label: "Admin", view: "admin" as const, icon: Settings, group: "operations" }]
       : []),
     { id: "profile", label: "Profile", view: "profile" as const, icon: User, group: "account" },
     { id: "legal", label: "Policies", view: "legal" as const, icon: FileText, group: "account" },
   ];
+  const mobileNavItems = navItems.filter((item) => ["dashboard", "profile", "admin"].includes(item.id));
 
   const viewMeta = {
     dashboard: {
@@ -4487,7 +4497,7 @@ export default function ClaritasDashboard() {
                 <div className="live-state hidden lg:flex items-center gap-2 text-xs text-[color:var(--shell-muted)]">
                   <span className="h-2 w-2 rounded-full bg-[color:var(--signal-emerald)]" />
                   <span className="font-semibold text-[color:var(--shell-ink)]">
-                    {activeView === "dashboard" ? "Overview" : "Sources"}
+                    {activeView === "dashboard" ? "Overview" : activeView === "admin" ? "Operations" : activeView === "profile" ? "Account" : "Policies"}
                   </span>
                   <span>{activeView === "dashboard" ? overview?.generated_at ? `Updated ${formatExactTimestamp(overview.generated_at)}` : "Loading…" : `Updated ${latestEventLabel}`}</span>
                 </div>
@@ -8328,9 +8338,8 @@ export default function ClaritasDashboard() {
           </main>
         </div>
       </div>
-      <nav className="mobile-ops-nav app-safe-bottom" aria-label="Primary mobile navigation">
-        {navItems
-          .filter((item) => ["dashboard", "news", "social", "profile", "admin"].includes(item.id))
+      <nav className="mobile-ops-nav app-safe-bottom" aria-label="Primary mobile navigation" style={{ gridTemplateColumns: `repeat(${mobileNavItems.length}, minmax(0, 1fr))` }}>
+        {mobileNavItems
           .map((item) => {
             const Icon = item.icon;
             const active = activeView === item.view;

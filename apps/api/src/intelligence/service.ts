@@ -496,8 +496,15 @@ export async function getIntelligenceEvent(eventId: string, options: { displayLa
                 CASE WHEN global_source.id IS NOT NULL THEN
                   'Structured GDELT event near ' || COALESCE(global_source.action_geo_name,'an unspecified location')
                 END,
-                NULLIF(evidence.metadata->>'description','')) AS source_summary,
-              COALESCE(source_item.url,podcast_item.url,global_source.url,evidence.provenance->>'url') AS source_url,
+                NULLIF(evidence.metadata->>'summary',''),NULLIF(evidence.metadata->>'description','')) AS source_summary,
+              COALESCE(source_item.url,podcast_item.url,global_source.url,evidence.provenance->>'url',
+                evidence.provenance->>'episode_url',evidence.provenance->>'source_url') AS source_url,
+              COALESCE((SELECT jsonb_agg(to_jsonb(excerpt) ORDER BY start_ms) FROM (
+                SELECT segment.id::text AS segment_id,segment.start_ms,segment.end_ms,segment.timing_method,
+                  left(COALESCE(NULLIF(link.quote,''),segment.text),1400) AS quote,segment.source_url
+                FROM intelligence_signal_evidence link JOIN evidence_segment segment ON segment.id=link.evidence_segment_id
+                WHERE link.signal_id=podcast_signal.id ORDER BY segment.start_ms,segment.id LIMIT 3
+              ) excerpt),'[]'::jsonb) AS transcript_excerpts,
               global_source.event_code AS gdelt_event_code,
               global_source.event_root_code AS gdelt_event_root_code,
               global_source.actor1_name AS gdelt_actor1_name,

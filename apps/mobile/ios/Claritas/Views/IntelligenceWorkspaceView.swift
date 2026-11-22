@@ -36,6 +36,18 @@ struct IntelligenceWorkspaceView: View {
     @State private var weatherLoaded = false
     @State private var weatherError: String?
     @State private var weatherRetry = 0
+    @State private var showsMovements = false
+
+    init(contextualEventID: String? = nil, onOpenEvent: ((IntelligenceEvent) -> Void)? = nil) {
+        self.contextualEventID = contextualEventID
+        self.onOpenEvent = onOpenEvent
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") {
+            _visualLayer = State(initialValue: "transport")
+            _showsMovements = State(initialValue: true)
+        }
+        #endif
+    }
 
     var body: some View {
         BrandBackground {
@@ -62,6 +74,12 @@ struct IntelligenceWorkspaceView: View {
         .task(id: selectedID) { await loadDetail() }
         .onChange(of: selectedID) { _ in
             visualLayer = nil; weatherVisual = nil; weatherLoaded = false; weatherError = nil
+            showsMovements = false
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") {
+                visualLayer = "transport"; showsMovements = true
+            }
+            #endif
         }
         .task(id: "\(selectedID ?? "none")|\(visualLayer ?? "none")|\(weatherRetry)") {
             guard visualLayer == "weather", !weatherLoaded, let selectedID else { return }
@@ -362,6 +380,22 @@ struct IntelligenceWorkspaceView: View {
                 }
 
                 eventVisuals(detail)
+
+                let signalGroups = Dictionary(grouping: detail.evidence.filter { !isContextAssessment($0) }, by: signalGroup)
+                if !signalGroups.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 8) {
+                            ForEach(signalGroups.keys.sorted(), id: \.self) { domain in
+                                Button {
+                                    evidenceFilter = domain; evidenceFilterEventID = detail.event.id; showsEvidence = true
+                                } label: {
+                                    Label("\(signalDomainLabel(domain)) · \(signalGroups[domain]?.count ?? 0)", systemImage: signalDomainIcon(domain))
+                                        .font(.caption.weight(.semibold)).padding(.horizontal, 12).frame(minHeight: 44)
+                                }.buttonStyle(.bordered)
+                            }
+                        }
+                    }.accessibilityLabel("Related sources in this event")
+                }
 
                 if detail.evidence.contains(where: { !isContextAssessment($0) }) {
                     BrandCard {
@@ -681,8 +715,11 @@ struct IntelligenceWorkspaceView: View {
                         .foregroundStyle(Color.secondary.opacity(0.5))
                         .annotation(position: .trailing) { Text(baseline.formatted()).font(.caption2) }
                 }.frame(height: 100)
-                Text("\(metadata["event_type"]?.string == "departure" ? "Departures" : metadata["event_type"]?.string == "arrival" ? "Arrivals" : "Movements") · Same completed UTC hours. Telemetry coverage; a change alone does not establish disruption.")
+                Text("Arrivals and departures · Same completed UTC hours. Telemetry coverage; a change alone does not establish disruption.")
                     .font(.caption2).foregroundStyle(.secondary)
+                DisclosureGroup("Explore this anomaly’s movements", isExpanded: $showsMovements) {
+                    if showsMovements { EventMovementDetailView(eventID: detail.event.id).id(detail.event.id) }
+                }.font(.subheadline).padding(.vertical, 8)
             }
         }
     }
@@ -792,6 +829,13 @@ struct IntelligenceWorkspaceView: View {
                 }
                 if let attribution = item.attribution, !attribution.isEmpty {
                     Text(attribution).font(.caption2).foregroundStyle(.secondary)
+                }
+                ForEach(item.transcript_excerpts ?? []) { excerpt in
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text(excerpt.timeLabel).font(.caption.weight(.semibold))
+                        Text(excerpt.quote).font(.caption)
+                        Text("Attributed transcript · not independent confirmation").font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
                 if let license = item.license, !license.isEmpty {
                     Text(license).font(.caption2).foregroundStyle(.secondary)
@@ -981,7 +1025,13 @@ struct IntelligenceWorkspaceView: View {
             if self.selectedID == selectedID, detailRequestID == requestID { detailLoading = false }
         }
         do {
-            let loaded = try await model.api.fetchIntelligenceEvent(id: selectedID, includeContext: includeContext || showsContext)
+            let loaded: IntelligenceEventDetail
+            #if DEBUG
+            if let fixture = model.mapReviewEvent, fixture.event.id == selectedID { loaded = fixture }
+            else { loaded = try await model.api.fetchIntelligenceEvent(id: selectedID, includeContext: includeContext || showsContext) }
+            #else
+            loaded = try await model.api.fetchIntelligenceEvent(id: selectedID, includeContext: includeContext || showsContext)
+            #endif
             guard !Task.isCancelled, self.selectedID == selectedID, detailRequestID == requestID else { return }
             detail = loaded
             if contextualEventID != nil, model.selectedIntelligenceEventID == loaded.event.id {
@@ -2446,6 +2496,76 @@ private struct IntelligenceHeadlineNotice: View {
                 .foregroundStyle(.secondary)
             } label: {
                 Text(disclosure).font(.caption2)
+            }
+        }
+    }
+}
+
+/// Optional drill-down anchored to the selected anomaly, never a global transport page.
+private struct EventMovementDetailView: View {
+    let eventID: String
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var data: EventTransportDetail?
+    @State private var loading = true
+    @State private var failed = false
+    @State private var retry = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if loading { ProgressView("Loading anomaly movements") }
+            else if failed {
+                Text("Movement details could not be loaded.").font(.caption)
+                Button("Retry movements") { retry += 1 }.frame(minHeight: 44)
+            } else if let data {
+                Text(data.location_name).font(.headline)
+                if let end = data.window_end {
+                    Text("Comparison ends \(end.formatted(date: .abbreviated, time: .shortened)) · \(data.source_name ?? "Retained telemetry")")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                if !data.hours.isEmpty {
+                    Text("Tracked movements by hour").font(.caption.weight(.semibold))
+                    Chart(data.hours) { hour in
+                        BarMark(x: .value("UTC hour", hour.utcHour), y: .value("Movements", hour.arrivals + hour.departures))
+                            .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                    }.frame(height: 140).chartXAxisLabel("UTC hour")
+                }
+                if !data.movements.isEmpty {
+                    Text("Recent movements in this comparison").font(.caption.weight(.semibold))
+                    ForEach(data.movements) { movement in
+                        HStack(alignment: .top) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(movement.entity_name ?? "Vessel \(movement.entity_id)").font(.caption.weight(.semibold))
+                                Text("\(movement.event_type.capitalized) · \(movement.vehicle_category ?? "Vessel")")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(movement.observed_at.formatted(date: .omitted, time: .shortened)).font(.caption2.monospacedDigit())
+                        }.padding(.vertical, 4)
+                    }
+                    Text("Movement times use your device time zone.").font(.caption2).foregroundStyle(.secondary)
+                }
+                if data.coverage == "summary_only" {
+                    Text("Only the retained comparison summary is available.").font(.caption)
+                }
+                Text(data.notice).font(.caption2).foregroundStyle(.secondary)
+            } else { Text("No retained movement details for this event.").font(.caption) }
+        }
+        .task(id: "\(eventID)|\(retry)") {
+            loading = true; failed = false; data = nil
+            do {
+                let result: EventTransportDetail?
+                #if DEBUG
+                if let fixture = model.mapReviewTransport { result = fixture }
+                else { result = try await model.api.fetchEventTransport(id: eventID) }
+                #else
+                result = try await model.api.fetchEventTransport(id: eventID)
+                #endif
+                guard !Task.isCancelled else { return }
+                data = result; loading = false
+            } catch {
+                guard !Task.isCancelled else { return }
+                loading = false; failed = true
             }
         }
     }

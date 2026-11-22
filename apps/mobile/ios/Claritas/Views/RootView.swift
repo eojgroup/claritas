@@ -35,7 +35,7 @@ struct RootView: View {
             case .profile: return "Profile"
             case .policies: return "Policies"
             case .briefing: return "Daily briefing"
-            case .more: return "More"
+            case .more: return "Account"
             }
         }
 
@@ -85,82 +85,32 @@ struct RootView: View {
         }
         .preferredColorScheme(dark ? .dark : .light)
         .task {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+            #endif
             await model.bootstrap()
         }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             guard let destination = note.object as? String else { return }
-            // A source opened from event context must dismiss the context first.
-            if destination != "intelligence" {
-                model.selectedIntelligenceEventID = nil
-            }
             if let rawCountry = note.userInfo?["country"] as? String {
-                let country = rawCountry.trimmingCharacters(in: .whitespacesAndNewlines)
-                if country.isEmpty {
-                    model.selectedCountry = nil
-                } else {
-                    model.selectedCountry = country.uppercased()
-                }
+                let country = rawCountry.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+                if country.isEmpty || country == "GLOBAL" { model.selectedCountry = nil }
+                else if country.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil { model.selectedCountry = country }
             }
-            if destination == "intelligence", let eventID = note.userInfo?["eventID"] as? String, !eventID.isEmpty {
+            model.selectedIntelligenceEventID = nil
+            if let eventID = note.userInfo?["eventID"] as? String, UUID(uuidString: eventID) != nil {
                 model.selectedIntelligenceEventID = eventID
-            }
-            if let category = note.userInfo?["category"] as? String, !category.isEmpty {
-                model.setNewsCategory(category)
-            }
-            if let newsID = note.userInfo?["newsID"] as? Int {
-                model.selectedNewsItemID = newsID
-            } else if let newsID = note.userInfo?["newsID"] as? String,
-                      let parsedNewsID = Int(newsID), parsedNewsID > 0 {
-                model.selectedNewsItemID = parsedNewsID
-            }
-            if destination == "news",
-               let newsID = model.selectedNewsItemID,
-               let snapshot = note.userInfo?["newsSnapshot"] as? Data,
-               let item = NewsHandoffSnapshot.decode(snapshot, expectedID: newsID) {
-                model.selectNewsItem(item)
-            }
-            let next: Tab
-            switch destination {
-            case "news":
-                next = .news
-            case "social":
-                next = .more
-                compactMorePath = [.social]
-            case "weather":
-                next = .more
-                compactMorePath = [.weather]
-            case "markets":
-                next = .more
-                compactMorePath = [.markets]
-            case "transport":
-                next = .more
-                compactMorePath = [.transport]
-            case "intelligence":
-                next = .dashboard
-            case "earth-observation":
-                next = .more
-                compactMorePath = [.earthObservation]
-            case "briefing":
-                next = .more
-                compactMorePath = [.briefing]
-            default: next = .dashboard
-            }
-            tab = next
-            if horizontalSizeClass == .regular {
-                switch destination {
-                case "news": sidebarSelection = .news
-                case "social": sidebarSelection = .social
-                case "weather": sidebarSelection = .weather
-                case "markets": sidebarSelection = .markets
-                case "transport": sidebarSelection = .transport
-                case "intelligence": sidebarSelection = .overview
-                case "earth-observation": sidebarSelection = .earthObservation
-                case "briefing": sidebarSelection = .briefing
-                default: sidebarSelection = .overview
+            } else if destination == "news", let snapshot = note.userInfo?["newsSnapshot"] as? Data {
+                let newsID = (note.userInfo?["newsID"] as? Int) ?? Int(note.userInfo?["newsID"] as? String ?? "")
+                if let newsID, let report = NewsHandoffSnapshot.decode(snapshot, expectedID: newsID) {
+                    model.selectedIntelligenceEventID = report.linked_events.first?.id
                 }
-            } else {
-                sidebarSelection = .overview
             }
+            model.overviewBucket = nil
+            model.overviewTopic = ["weather", "markets", "transport"].contains(destination) ? destination : nil
+            compactMorePath = []
+            tab = destination == "briefing" ? .briefing : .dashboard
+            sidebarSelection = destination == "briefing" ? .briefing : .overview
         }
         .onOpenURL { url in
             openWidgetURL(url)
@@ -174,7 +124,7 @@ struct RootView: View {
     private var compactShell: some View {
         TabView(selection: $tab) {
             compactTab(.dashboard)
-            compactTab(.news)
+            compactTab(.briefing)
             compactTab(.more)
         }
         .tint(ClaritasPalette.shellAccent(for: dark ? ColorScheme.dark : ColorScheme.light))
@@ -231,8 +181,7 @@ struct RootView: View {
 
     private var resolvedSidebarSelection: Tab {
         if let sidebarSelection,
-           sidebarSelection != .more,
-           (sidebarSelection != .admin || model.isAdmin) {
+           sidebarItems.contains(sidebarSelection) {
             return sidebarSelection
         }
         return .overview
@@ -240,8 +189,8 @@ struct RootView: View {
 
     private var sidebarItems: [Tab] {
         model.isAdmin
-            ? [.overview, .briefing, .transport, .admin, .profile, .policies]
-            : [.overview, .briefing, .transport, .profile, .policies]
+            ? [.overview, .briefing, .admin, .profile, .policies]
+            : [.overview, .briefing, .profile, .policies]
     }
 
     private var sidebar: some View {
@@ -249,11 +198,6 @@ struct RootView: View {
             Section("Workspace") {
                 sidebarLink(.overview)
                 sidebarLink(.briefing)
-            }
-            Section("Source lenses") {
-                sidebarLink(.news)
-                sidebarLink(.social)
-                sidebarLink(.transport)
             }
             if model.isAdmin {
                 Section("Operations") {
@@ -313,26 +257,8 @@ struct RootView: View {
             PadOverviewView(destination: $sidebarSelection)
         case .dashboard:
             DashboardView()
-        case .news:
-            NewsWorkspaceView()
-        case .social:
-            SocialSignalsView()
-        case .podcasts:
-            PodcastWorkspaceView()
-        case .weather:
-            WeatherWorkspaceView()
-        case .markets:
-            MarketsWorkspaceView()
-        case .transport:
-            TransportWorkspaceView()
-        case .intelligence:
-            if horizontalSizeClass == .regular {
-                PadOverviewView(destination: $sidebarSelection)
-            } else {
-                DashboardView()
-            }
-        case .earthObservation:
-            EarthObservationWorkspaceView()
+        case .news, .social, .podcasts, .weather, .markets, .transport, .intelligence, .earthObservation:
+            WorldMapWorkspace()
         case .admin:
             AdminWorkspaceView()
         case .profile:
@@ -375,33 +301,11 @@ struct RootView: View {
             }
         }
 
-        let destination: Tab
-        switch domain {
-        case "news": destination = .news
-        case "markets": destination = .markets
-        case "weather": destination = .weather
-        case "transport": destination = .transport
-        default: destination = .overview
-        }
-
-        if horizontalSizeClass == .regular {
-            sidebarSelection = destination
-        } else {
-            switch destination {
-            case .overview:
-                compactMorePath = []
-                tab = .dashboard
-            case .news:
-                compactMorePath = []
-                tab = .news
-            case .markets, .weather, .transport:
-                compactMorePath = [destination]
-                tab = .more
-            default:
-                compactMorePath = []
-                tab = .dashboard
-            }
-        }
+        model.overviewTopic = ["weather", "markets", "transport"].contains(domain) ? domain : nil
+        model.overviewBucket = nil
+        compactMorePath = []
+        sidebarSelection = .overview
+        tab = .dashboard
     }
 
 }
@@ -416,69 +320,9 @@ private struct CompactMoreView: View {
                 VStack(alignment: .leading, spacing: 18) {
                     BrandSectionHeader(
                         kicker: "Claritas",
-                        title: "More",
-                        detail: "Source lenses, governed imagery, account, and reference tools."
+                        title: "Account",
+                        detail: "Manage your profile, delivery preferences and account settings."
                     )
-
-                    BrandCard(title: "Source lenses", icon: "waveform.path.ecg") {
-                        destinationRow(
-                            title: "Daily briefing",
-                            detail: "Today’s concise cross-source picture and key takeaways",
-                            icon: "sparkles",
-                            destination: DailyBriefingWorkspaceView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "News reporting",
-                            detail: "Original reporting linked into canonical event threads",
-                            icon: "newspaper",
-                            destination: NewsWorkspaceView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "Social signals",
-                            detail: "Attributed posts kept separate as unverified claims",
-                            icon: "dot.radiowaves.left.and.right",
-                            destination: SocialSignalsView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "Podcast intelligence",
-                            detail: "Overall conclusions and attributed episode evidence",
-                            icon: "mic.fill",
-                            destination: PodcastWorkspaceView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "Weather lens",
-                            detail: "Official alerts and environmental context",
-                            icon: "cloud.sun",
-                            destination: WeatherWorkspaceView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "Market lens",
-                            detail: "Market response and economic exposure",
-                            icon: "chart.line.uptrend.xyaxis",
-                            destination: MarketsWorkspaceView()
-                        )
-                        Divider()
-                        destinationRow(
-                            title: "Transport lens",
-                            detail: "Flight, shipping, corridor, and country activity",
-                            icon: "point.topleft.down.to.point.bottomright.curvepath",
-                            destination: TransportWorkspaceView()
-                        )
-                    }
-
-                    BrandCard(title: "Evidence tools", icon: "checkmark.seal") {
-                        destinationRow(
-                            title: "Imagery evidence library",
-                            detail: "Governed source assets; event-linked imagery remains available in each investigation",
-                            icon: "sensor.tag.radiowaves.forward",
-                            destination: EarthObservationWorkspaceView()
-                        )
-                    }
 
                     if model.isAdmin {
                         BrandCard(title: "Operations", icon: "shield.lefthalf.filled") {

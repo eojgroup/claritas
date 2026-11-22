@@ -5231,10 +5231,19 @@ struct WorldMapWorkspace: View {
     @State private var showsBriefing = false
 
     init(refreshesAutomatically: Bool = true, briefingInitiallyOpen: Bool = false) {
+        var briefing = briefingInitiallyOpen
+        var reviewContext = false
+        #if DEBUG
+        let arguments = ProcessInfo.processInfo.arguments
+        briefing = briefing || arguments.contains("-qa-briefing-snapshot")
+        reviewContext = arguments.contains("-qa-country-snapshot") || arguments.contains("-qa-event-snapshot")
+        self.refreshesAutomatically = refreshesAutomatically && !arguments.contains("-qa-map-snapshot")
+        #else
         self.refreshesAutomatically = refreshesAutomatically
-        _showsBriefing = State(initialValue: briefingInitiallyOpen)
-        _panelStop = State(initialValue: briefingInitiallyOpen ? 2 : 1)
-        _wideContext = State(initialValue: briefingInitiallyOpen)
+        #endif
+        _showsBriefing = State(initialValue: briefing)
+        _panelStop = State(initialValue: briefing || reviewContext ? 2 : 1)
+        _wideContext = State(initialValue: briefing || reviewContext)
     }
 
     private var points: [CountryBubblePoint] {
@@ -5318,8 +5327,12 @@ struct WorldMapWorkspace: View {
             if id != nil { showsBriefing = false; profileCountry = nil; revealContext() }
         }
         .onChange(of: model.selectedCountry) { country in
-            if country != profileCountry { profileCountry = nil }
+            if model.selectedIntelligenceEventID == nil {
+                showsBriefing = false; profileCountry = country
+                if country != nil { revealContext() }
+            }
         }
+        .onAppear { if model.selectedIntelligenceEventID == nil { profileCountry = model.selectedCountry } }
     }
 
     private var panelHandle: some View {
@@ -6321,6 +6334,12 @@ enum CountryCentroidLookup {
 /// by production, and this launch path does not exist in App Store builds.
 @MainActor
 struct SignalMapSnapshotReview: View {
+    private struct ContextFixture: Decodable {
+        let event: IntelligenceEventDetail
+        let transport: EventTransportDetail?
+        let weather: [CountryWeather]
+        let market: CountryMarketDetail
+    }
     @StateObject private var model: AppModel
     private let fixtureError: String?
 
@@ -6338,6 +6357,17 @@ struct SignalMapSnapshotReview: View {
                 return date
             }
             review.installMapReview(try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json"))))
+            review.authStatus = .authed
+            UserDefaults.standard.set(!ProcessInfo.processInfo.arguments.contains("-qa-map-light"), forKey: "THEME_DARK")
+            if ProcessInfo.processInfo.arguments.contains("-qa-country-snapshot") || ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") {
+                let context = try decoder.decode(ContextFixture.self, from: Data(contentsOf: documents.appendingPathComponent("WorldContext.json")))
+                review.weather = context.weather
+                review.countryMarkets = [context.market.summary]
+                review.mapReviewEvent = context.event
+                review.mapReviewTransport = context.transport
+                if ProcessInfo.processInfo.arguments.contains("-qa-country-snapshot") { review.selectedCountry = context.weather.first?.country }
+                if ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") { review.selectIntelligenceEvent(context.event.event) }
+            }
             if ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot") {
                 review.dailyBriefing = try decoder.decode(DailySignalBriefing.self, from: Data(contentsOf: documents.appendingPathComponent("DailyBriefing.json")))
             }
@@ -6347,16 +6377,15 @@ struct SignalMapSnapshotReview: View {
     }
 
     var body: some View {
-        NavigationStack {
-            WorldMapWorkspace(refreshesAutomatically: false,
-                              briefingInitiallyOpen: ProcessInfo.processInfo.arguments.contains("-qa-briefing-snapshot"))
-                .environmentObject(model)
-                .navigationTitle("Claritas")
-                .modifier(ShellNavigationChrome())
-        }
+        RootView().environmentObject(model)
         .preferredColorScheme(ProcessInfo.processInfo.arguments.contains("-qa-map-light") ? .light : .dark)
         .task {
             let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            if ProcessInfo.processInfo.arguments.contains("-qa-landscape"),
+               let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first {
+                scene.requestGeometryUpdate(.iOS(interfaceOrientations: .landscapeLeft))
+                try? await Task.sleep(nanoseconds: 500_000_000)
+            }
             let filename = fixtureError == nil ? "map-review-ready" : "map-review-error"
             try? Data((fixtureError ?? "ready").utf8).write(to: documents.appendingPathComponent(filename))
         }
