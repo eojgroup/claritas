@@ -3,6 +3,7 @@ import { fetchEventWeather, type EventWeatherVisual as Weather, type Intelligenc
 import EventWeatherVisual from "./EventWeatherVisual";
 import SatelliteImage from "./SatelliteImage";
 import { sortEarthObservationsForDisplay } from "./earthObservationPresentation";
+import EventTransportDetails from "./EventTransportDetails";
 
 /** Visual summaries reuse the selected event's already-loaded evidence. */
 export default function EventSignalVisuals({ detail, onOpenEvent }: { detail: IntelligenceEventDetail; onOpenEvent?: (id: string) => void }) {
@@ -10,6 +11,7 @@ export default function EventSignalVisuals({ detail, onOpenEvent }: { detail: In
   const [weather, setWeather] = useState<Weather | null>(null);
   const [weatherLoaded, setWeatherLoaded] = useState(false);
   const [weatherError, setWeatherError] = useState(false);
+  const [movementDetails, setMovementDetails] = useState(false);
   const country = detail.event?.primary_country_iso2;
   useEffect(() => {
     if (layer !== "weather" || weatherLoaded || !country) return;
@@ -24,7 +26,7 @@ export default function EventSignalVisuals({ detail, onOpenEvent }: { detail: In
   const current = Number(comparison?.metadata?.current);
   const baseline = Number(comparison?.metadata?.baseline);
   const comparable = comparison && Number.isFinite(current) && Number.isFinite(baseline) && current >= 0 && baseline >= 0;
-  const movement = comparison?.metadata?.event_type === "departure" ? "departures" : comparison?.metadata?.event_type === "arrival" ? "arrivals" : "arrivals and departures";
+  const movement = "arrivals and departures";
   const maximum = Math.max(1, current || 0, baseline || 0);
   const images = (detail.news_images ?? []).slice(0, 3);
   const scene = sortEarthObservationsForDisplay(detail.earth_observations ?? [])
@@ -47,6 +49,9 @@ export default function EventSignalVisuals({ detail, onOpenEvent }: { detail: In
         <div><span>Observed</span><i style={{ width: `${current / maximum * 100}%` }} /><strong>{current.toLocaleString()}</strong></div>
         <div><span>Baseline</span><i style={{ width: `${baseline / maximum * 100}%` }} /><strong>{baseline.toLocaleString()}</strong></div>
       </div><p>Observed telemetry coverage; a change alone does not establish disruption.</p>
+      <details open={movementDetails} onToggle={(event) => setMovementDetails(event.currentTarget.open)}><summary>Explore this anomaly’s movements</summary>
+        {movementDetails && <EventTransportDetails eventId={detail.event.id} />}
+      </details>
     </figure>}
     {selected === "images" && hasImages && <div className="event-photo-strip">
     {scene && <figure>

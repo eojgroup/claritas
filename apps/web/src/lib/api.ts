@@ -1253,6 +1253,7 @@ export type IntelligenceEvent = HeadlineTranslationPresentation & {
 };
 
 export type IntelligenceEvidence = HeadlineTranslationPresentation & {
+  transcript_excerpts?: Array<{ segment_id: string; start_ms: number; end_ms: number | null; timing_method: string; quote: string; source_url: string | null }>;
   image_url?: string | null;
   id: string;
   domain: string;
@@ -2578,6 +2579,21 @@ export async function fetchEventWeather(id: string, signal?: AbortSignal): Promi
     const response = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}/weather`, { credentials: "include", signal: requestSignal });
     if (!response.ok) throw new Error(await readError(response, "Weather context could not be loaded"));
     return (await response.json()).weather;
+  }, signal);
+}
+
+export type EventTransportDetail = {
+  current: number; baseline: number; observed_at: string; confidence: number | null;
+  location_name: string; country?: string; source_name?: string; notice: string;
+  coverage: string; window_start?: string; window_end?: string;
+  hours: Array<{ observed_at: string; arrivals: number; departures: number }>;
+  movements: Array<{ id: string; entity_id: string; entity_name: string | null; event_type: string; vehicle_category: string | null; observed_at: string; source_name: string }>;
+};
+export async function fetchEventTransport(id: string, signal?: AbortSignal): Promise<EventTransportDetail | null> {
+  return readWithDeadline(async (requestSignal) => {
+    const response = await fetch(`${API_BASE}/api/intelligence/events/${encodeURIComponent(id)}/transport`, { credentials: "include", signal: requestSignal });
+    if (!response.ok) throw new Error(await readError(response, "Movement details could not be loaded"));
+    return (await response.json()).transport;
   }, signal);
 }
 

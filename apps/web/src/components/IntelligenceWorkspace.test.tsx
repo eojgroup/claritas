@@ -187,7 +187,7 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getByText("Observed")).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Active fire hotspot" })).toBeTruthy();
     screen.getAllByText("Connection & provenance").forEach((summary) => fireEvent.click(summary));
-    expect(screen.getAllByRole("link", { name: /Open source/i }).some((link) => link.getAttribute("href") === "https://firms.modaps.eosdis.nasa.gov/")).toBe(true);
+    expect(screen.getAllByRole("link", { name: /Read source/i }).some((link) => link.getAttribute("href") === "https://firms.modaps.eosdis.nasa.gov/")).toBe(true);
     expect(screen.getByText("Attribution: NASA FIRMS")).toBeTruthy();
     expect(screen.getByText(/Correlation does not establish causation/i)).toBeTruthy();
   });
@@ -588,13 +588,14 @@ describe("IntelligenceWorkspace", () => {
     expect(screen.getByRole("button", { name: "Retry event" })).toBeTruthy();
   });
 
-  it("opens imagery with the selected event id", async () => {
+  it("inspects imagery inside the selected event without opening a standalone page", async () => {
     const onOpenImagery = vi.fn();
     render(<IntelligenceWorkspace initialEventId={event.id} onOpenImagery={onOpenImagery} />);
     await screen.findByRole("heading", { name: event.title });
     fireEvent.click(screen.getByText(/Imagery assessment ·/));
-    fireEvent.click(await screen.findByRole("button", { name: "Inspect event imagery" }));
-    expect(onOpenImagery).toHaveBeenCalledWith(event.id);
+    await waitFor(() => expect(document.getElementById("event-imagery-assessment")?.hasAttribute("open")).toBe(true));
+    expect(onOpenImagery).not.toHaveBeenCalled();
+    expect(fetchEventGibsContext).toHaveBeenCalledWith(event.id);
   });
 
   it("requires a separate explicit opt-in before emailing important watched events", async () => {

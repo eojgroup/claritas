@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileText, Maximize2, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
 import type { DailySignalBriefing, IntelligenceEvent, IntelligenceOverview, OverviewTopic } from "../lib/api";
 import SituationOverview from "./SituationOverview";
@@ -26,6 +26,10 @@ export default function SituationDashboard(props: Props) {
   const { overview, country, selectedId, onSelect } = props;
   const [selectedEvent, setSelectedEvent] = useState<IntelligenceEvent | null>(null);
   const [profileCountry, setProfileCountry] = useState<string | null>(null);
+  useEffect(() => {
+    if (country && !selectedId) setProfileCountry(country);
+    else if (!country) setProfileCountry(null);
+  }, [country, selectedId]);
   const [expandedMap, setExpandedMap] = useState(false);
   const [wideContext, setWideContext] = useState(false);
   const contextScroll = useRef<HTMLDivElement>(null);

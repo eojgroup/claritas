@@ -259,6 +259,27 @@ final class WatchAppModel: ObservableObject {
         connectivity.requestContext()
     }
 
+    func readEvent(id: String) async throws -> IntelligenceEventDetail {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchIntelligenceEvent(id: id)
+    }
+    func readEventTransport(id: String) async throws -> EventTransportDetail? {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchEventTransport(id: id)
+    }
+    func readEventImage(path: String) async throws -> Data {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchStoredImage(path: path)
+    }
+    func readCountryWeather(country: String) async throws -> CountryWeather? {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchCountryWeather().first { $0.country.uppercased() == country.uppercased() }
+    }
+    func readCountryMarket(country: String) async throws -> CountryMarketOverview? {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchCountryMarkets().countries.first { $0.country.uppercased() == country.uppercased() }
+    }
+
     func openOnPhone(
         _ destination: String,
         country: String? = nil,

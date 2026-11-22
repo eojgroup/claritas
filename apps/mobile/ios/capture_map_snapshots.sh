@@ -27,13 +27,17 @@ while IFS=' ' read -r kind device_id; do
   mkdir -p "$container_path/Documents"
   cp apps/mobile/ios/Tests/Fixtures/MapOverview.json "$container_path/Documents/MapOverview.json"
   cp apps/mobile/ios/Tests/Fixtures/DailyBriefing.json "$container_path/Documents/DailyBriefing.json"
-  for destination in map briefing; do
+  cp apps/mobile/ios/Tests/Fixtures/WorldContext.json "$container_path/Documents/WorldContext.json"
+  for destination in map briefing country event; do
     for appearance in dark light; do
       rm -f "$container_path/Documents/map-review-ready" "$container_path/Documents/map-review-error"
       launch_args=(-qa-map-snapshot)
       suffix=""
       prefix="$kind"
       if [[ "$destination" == briefing ]]; then launch_args+=(-qa-briefing-snapshot); prefix="$kind-briefing"; fi
+      if [[ "$destination" == country ]]; then launch_args+=(-qa-country-snapshot); prefix="$kind-country"; fi
+      if [[ "$destination" == event ]]; then launch_args+=(-qa-event-snapshot); prefix="$kind-event"; fi
+      if [[ "$kind" == ipad && ( "$destination" == country || "$destination" == event ) ]]; then launch_args+=(-qa-landscape); fi
       if [[ "$appearance" == light ]]; then launch_args+=(-qa-map-light); suffix="-light"; fi
       xcrun simctl launch "$device_id" "$bundle_id" "${launch_args[@]}"
       ready=false
@@ -62,4 +66,6 @@ PY
 )
 [[ -f "$output_dir/iphone.png" && -f "$output_dir/ipad.png" && -f "$output_dir/iphone-light.png" && -f "$output_dir/ipad-light.png" ]]
 [[ -f "$output_dir/iphone-briefing.png" && -f "$output_dir/ipad-briefing.png" && -f "$output_dir/iphone-briefing-light.png" && -f "$output_dir/ipad-briefing-light.png" ]]
+[[ -f "$output_dir/iphone-country.png" && -f "$output_dir/ipad-country.png" && -f "$output_dir/iphone-country-light.png" && -f "$output_dir/ipad-country-light.png" ]]
+[[ -f "$output_dir/iphone-event.png" && -f "$output_dir/ipad-event.png" && -f "$output_dir/iphone-event-light.png" && -f "$output_dir/ipad-event-light.png" ]]
 rm -f "$devices_file"

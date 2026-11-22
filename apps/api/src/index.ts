@@ -140,6 +140,7 @@ import {
 } from "./intelligence/service";
 import { getEventBackboneHealth, startEventBackbone } from "./intelligence/event-bus";
 import { getEventWeather } from "./intelligence/event-weather";
+import { getEventTransport } from "./intelligence/event-transport";
 import { parseInvestigationSource, resolveInvestigationSource } from "./intelligence/source-resolution";
 import { getRapidSourceStatus, runFirmsNow, runUsgsNow, startRapidSourceWorker } from "./intelligence/rapid-sources";
 import {
@@ -2103,6 +2104,21 @@ app.get("/api/intelligence/events/:id/weather", requireAuthenticated, async (req
     const weather = await workspaceReadCache.get(sharedReadKey("event-weather", { id: req.params.id, activity: detail.event.last_activity_time }),
       () => getEventWeather(detail.event));
     return res.json({ weather });
+  } catch (error) {
+    return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
+  }
+});
+
+app.get("/api/intelligence/events/:id/transport", requireAuthenticated, async (req, res) => {
+  try {
+    if (!UUID_PATTERN.test(req.params.id)) return res.status(400).json({ error: "Event id must be a UUID." });
+    const displayLanguage = normalizeIntelligenceDisplayLanguage(req.query.display_language);
+    const detail = await eventReadCache.get(sharedReadKey("event", { id: req.params.id, displayLanguage, includeContext: false }),
+      () => getIntelligenceEvent(req.params.id, { displayLanguage }));
+    if (!detail) return res.status(404).json({ error: "Intelligence event not found." });
+    const transport = await workspaceReadCache.get(sharedReadKey("event-transport", { id: req.params.id, activity: detail.event.last_activity_time }),
+      () => getEventTransport(detail.event, detail.evidence));
+    return res.json({ transport });
   } catch (error) {
     return res.status(500).json({ error: error instanceof Error ? error.message : String(error) });
   }

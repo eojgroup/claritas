@@ -1,5 +1,7 @@
 import Foundation
 import SwiftUI
+import Charts
+import ImageIO
 
 private enum WatchPulseFocus: Hashable {
     case overview
@@ -53,12 +55,6 @@ struct WatchRootView: View {
                 TabView(selection: $page) {
                     WatchSignalGlanceView().tag(Page.map)
                     WatchBriefingView().tag(Page.briefing)
-                    WatchNewsView().tag(Page.news)
-                    WatchSocialSignalsView().tag(Page.social)
-                    WatchPulseView(focus: pulseFocus)
-                        .id(pulseFocus)
-                        .tag(Page.pulse)
-                    WatchTransportPulseView().tag(Page.transport)
                 }
                 .tabViewStyle(.verticalPage)
             }
@@ -111,22 +107,12 @@ struct WatchRootView: View {
                 || rawCountry?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil
         else { return }
 
-        switch domain {
-        case "news": page = .news
-        case "markets":
-            pulseFocus = .markets
-            page = .pulse
-        case "weather":
-            pulseFocus = .weather
-            page = .pulse
-        case "transport": page = .transport
-        default:
-            pulseFocus = .overview
-            page = .map
-        }
+        model.overviewTopic = ["markets", "weather", "transport"].contains(domain) ? domain : nil
+        page = .map
 
         Task {
             await model.selectCountry(rawCountry)
+            await model.refreshOverview()
         }
     }
 }
@@ -159,7 +145,7 @@ private struct WatchEventContextView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(events.prefix(2)) { event in
+                ForEach(events.prefix(8)) { event in
                     WatchCard {
                         VStack(alignment: .leading, spacing: 5) {
                             HStack {
@@ -186,13 +172,11 @@ private struct WatchEventContextView: View {
                                     .font(.system(size: 9))
                                     .foregroundStyle(WatchPalette.sage)
                             }
-                            Button {
-                                model.openOnPhone("intelligence", country: event.primary_country_iso2, eventID: event.id)
+                            NavigationLink {
+                                WatchSelectedEventView(event: event)
                             } label: {
-                                Label("See evidence on iPhone", systemImage: "iphone")
-                            }
-                            .buttonStyle(.bordered)
-                            .font(.caption2)
+                                Label("Read event & sources", systemImage: "arrow.up.right")
+                            }.buttonStyle(.bordered).font(.caption2)
                         }
                     }
                 }
@@ -404,17 +388,16 @@ private struct WatchSignalGlanceView: View {
     @State private var selectedCountry: String?
 
     private var points: [WatchMapPoint] {
-        WatchMapData.points(
-            layer: layer,
-            region: region,
-            news: model.news,
-            podcasts: model.podcasts,
-            weather: model.weather,
-            markets: model.markets,
-            leadership: model.leadership,
-            events: model.intelligenceEvents,
-            transport: model.transport
-        )
+        if layer == .signals {
+            return (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
+                guard let coordinate = WatchCountryCentroids.values[country.country_iso2], region.contains(longitude: coordinate.longitude, latitude: coordinate.latitude) else { return nil }
+                return WatchMapPoint(iso: country.country_iso2, valueLabel: "\(country.attention_score ?? 0)/100",
+                    detail: "\(country.event_count) updates · \(country.high_priority_count) high priority", magnitude: Double(country.attention_score ?? 0),
+                    longitude: coordinate.longitude, latitude: coordinate.latitude, rank: index + 1)
+            }
+        }
+        return WatchMapData.points(layer: layer, region: region, news: model.news, podcasts: model.podcasts,
+            weather: model.weather, markets: model.markets, leadership: model.leadership, events: model.intelligenceEvents, transport: model.transport)
     }
 
     var body: some View {
@@ -493,6 +476,7 @@ private struct WatchSignalGlanceView: View {
                     }
 
                     WatchOverviewPulseCard()
+                    if let selectedCountry { WatchCountryContextView(country: selectedCountry) }
 
                     WatchCard {
                         VStack(alignment: .leading, spacing: 5) {
@@ -503,7 +487,7 @@ private struct WatchSignalGlanceView: View {
                             }
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
-                            Text("News 30 · events 25 · transport 15 · weather 10 · markets 10 · podcasts 10")
+                            Text("Country markers show signal relevance. Select a country for conditions, then an event for its sources and imagery.")
                                 .font(.system(size: 8))
                                 .foregroundStyle(.secondary)
                         }
@@ -538,6 +522,7 @@ private struct WatchSignalGlanceView: View {
                 }
                 .padding(.horizontal, 3)
             }
+            .task(id: layer) { if layer == .weather { await model.loadOptionalContext("weather") } }
             .navigationTitle("Claritas")
             .containerBackground(WatchPalette.navy.gradient, for: .navigation)
         }
@@ -606,6 +591,7 @@ private enum WatchMapLayer: String, CaseIterable, Identifiable {
     case weather
     case leadership
 
+    static let allCases: [WatchMapLayer] = [.signals, .weather]
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -1993,5 +1979,175 @@ private struct WatchOverviewFilters: View {
         .onChange(of: model.overviewHours) { _ in Task { await model.refreshOverview() } }
         .onChange(of: model.overviewTopic) { _ in Task { await model.refreshOverview() } }
         .onChange(of: model.overviewPriority) { _ in Task { await model.refreshOverview() } }
+    }
+}
+
+@MainActor
+private struct WatchCountryContextView: View {
+    let country: String
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var weather: CountryWeather?
+    @State private var market: CountryMarketOverview?
+    @State private var weatherLoading = true
+    @State private var marketLoading = true
+    @State private var weatherFailed = false
+    @State private var marketFailed = false
+    @State private var retry = 0
+
+    var body: some View {
+        WatchCard {
+            VStack(alignment: .leading, spacing: 7) {
+                WatchSectionLabel(title: "Country conditions", icon: "cloud.sun")
+                if let weather {
+                    Text("\(weather.temp_c.map { String(format: "%.0f°C", $0) } ?? "—") · \(weather.weather_desc ?? weather.weather_main ?? "Weather")")
+                        .font(.caption.weight(.semibold))
+                    Text("\(weather.location_name ?? country) · reference location").font(.system(size: 9)).foregroundStyle(.secondary)
+                    if let wind = weather.wind_speed { Text("Wind \(wind.formatted()) m/s").font(.caption2) }
+                    ForEach(Array((weather.forecast ?? []).prefix(3))) { day in
+                        HStack {
+                            Text(APIDateParser.parse(day.forecast_time)?.formatted(.dateTime.weekday(.abbreviated)) ?? String(day.forecast_time.prefix(10)))
+                            Spacer()
+                            Text("\(day.temp_min_c.map { String(format: "%.0f", $0) } ?? "—")–\(day.temp_max_c.map { String(format: "%.0f°C", $0) } ?? "—")")
+                        }.font(.system(size: 9))
+                    }
+                    if let count = weather.alert_count, count > 0 { Text("\(count) official weather alerts").font(.caption2).foregroundStyle(WatchPalette.orange) }
+                    Text(weather.observedDate?.formatted(date: .abbreviated, time: .shortened) ?? weather.observed_at)
+                        .font(.system(size: 8)).foregroundStyle(.secondary)
+                } else if weatherLoading { ProgressView("Weather").font(.caption2) }
+                else { Text(weatherFailed ? "Weather unavailable" : "No retained weather sample").font(.caption2).foregroundStyle(.secondary) }
+                if let market {
+                    Divider()
+                    Text("Markets & economy").font(.caption.weight(.semibold))
+                    if let change = market.index_change_percent { Text("\(market.index_name ?? market.index_source ?? "Benchmark") · \(change.formatted(.number.precision(.fractionLength(1))))%") .font(.caption2) }
+                    if let change = market.fx_change_percent { Text("\(market.currency ?? "FX") vs EUR · \(change.formatted(.number.precision(.fractionLength(1))))%") .font(.caption2) }
+                    if let growth = market.gdp_growth { Text("GDP growth \(growth.formatted())% · \(market.gdp_year.map { String($0) } ?? "")").font(.system(size: 9)) }
+                } else if marketLoading { ProgressView("Market context").font(.caption2) }
+                if weatherFailed || marketFailed { Button("Retry conditions") { retry += 1 }.font(.caption2) }
+            }
+        }
+        .task(id: "\(country)|\(retry)") {
+            weather = nil; market = nil; weatherLoading = true; marketLoading = true; weatherFailed = false; marketFailed = false
+            async let weatherRead: Void = loadWeather()
+            async let marketRead: Void = loadMarket()
+            _ = await (weatherRead, marketRead)
+        }
+    }
+    private func loadWeather() async {
+        do { let value = try await model.readCountryWeather(country: country); guard !Task.isCancelled else { return }; weather = value; weatherLoading = false }
+        catch { guard !Task.isCancelled else { return }; weatherFailed = true; weatherLoading = false }
+    }
+    private func loadMarket() async {
+        do { let value = try await model.readCountryMarket(country: country); guard !Task.isCancelled else { return }; market = value; marketLoading = false }
+        catch { guard !Task.isCancelled else { return }; marketFailed = true; marketLoading = false }
+    }
+}
+
+@MainActor
+private struct WatchSelectedEventView: View {
+    let event: IntelligenceEvent
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var detail: IntelligenceEventDetail?
+    @State private var failed = false
+    @State private var retry = 0
+    @State private var movements: EventTransportDetail?
+    @State private var showsMovements = false
+    @State private var movementFailed = false
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 9) {
+                Text(event.title).font(.headline)
+                Text(event.location_name ?? event.primary_country_iso2 ?? "Location unresolved").font(.caption2).foregroundStyle(.secondary)
+                Text(event.summary).font(.caption)
+                if let detail {
+                    if let photo = detail.news_images.first {
+                        WatchEventPreview(path: photo.preview_url)
+                        Text("Publisher photo · \(photo.publisher)").font(.system(size: 8)).foregroundStyle(.secondary)
+                    } else if let photo = detail.context_images.first {
+                        WatchEventPreview(path: photo.displayURL)
+                        Text(photo.attribution).font(.system(size: 8)).foregroundStyle(.secondary)
+                    } else if let scene = detail.earth_observations.first(where: { $0.preferredDisplayAsset != nil }), let asset = scene.preferredDisplayAsset {
+                        WatchEventPreview(path: asset.url)
+                        Text("Satellite · \(scene.mission)").font(.system(size: 8)).foregroundStyle(.secondary)
+                    }
+                    if let anomaly = detail.evidence.first(where: { $0.domain == "transport" && $0.evidence_type == "rolling_baseline_anomaly" }),
+                       let current = anomaly.metadata?.object?["current"]?.number, let baseline = anomaly.metadata?.object?["baseline"]?.number {
+                        Text("Tracked movements").font(.caption.weight(.semibold))
+                        Text("Observed \(current.formatted()) · baseline \(baseline.formatted())").font(.caption2)
+                        DisclosureGroup("Movement details", isExpanded: $showsMovements) {
+                            if let movements {
+                                Text(movements.location_name).font(.caption2)
+                                if !movements.hours.isEmpty {
+                                    Chart(movements.hours) { hour in
+                                        BarMark(x: .value("UTC hour", hour.utcHour), y: .value("Tracked movements", hour.arrivals + hour.departures))
+                                            .foregroundStyle(WatchPalette.sage)
+                                    }.frame(height: 85)
+                                }
+                                ForEach(Array(movements.movements.prefix(4))) { movement in
+                                    Text("\(movement.event_type) · \(movement.entity_name ?? movement.entity_id)").font(.system(size: 9))
+                                }
+                                Text(movements.notice).font(.system(size: 8)).foregroundStyle(.secondary)
+                            } else if movementFailed { Text("Movement detail unavailable").font(.caption2) }
+                            else { ProgressView() }
+                        }.font(.caption2)
+                    }
+                    NavigationLink {
+                        ScrollView {
+                            VStack(alignment: .leading, spacing: 12) {
+                                ForEach(detail.evidence) { source in
+                                    VStack(alignment: .leading, spacing: 5) {
+                                        Text(source.domain == "social" ? "Social · unverified claim" : source.domain.capitalized).font(.caption.weight(.semibold)).foregroundStyle(WatchPalette.orange)
+                                        Text(source.source_title ?? source.metadata?.object?["title"]?.string ?? source.evidence_type.replacingOccurrences(of: "_", with: " ")).font(.caption.weight(.semibold))
+                                        if let text = source.source_summary ?? source.metadata?.object?["summary"]?.string { Text(text).font(.caption2) }
+                                        Text(source.attribution ?? source.source_name ?? "Attributed source").font(.system(size: 8)).foregroundStyle(.secondary)
+                                        if source.domain == "podcast" { Text("Transcript interpretation · not independent confirmation").font(.system(size: 8)).foregroundStyle(.secondary) }
+                                        ForEach(source.transcript_excerpts ?? []) { excerpt in
+                                            Text(excerpt.timeLabel).font(.system(size: 9, weight: .semibold))
+                                            Text(excerpt.quote).font(.caption2)
+                                        }
+                                    }
+                                    Divider()
+                                }
+                            }
+                        }.navigationTitle("Event sources")
+                    } label: { Label("Sources · \(detail.evidence.count)", systemImage: "link") }.font(.caption2)
+                } else if failed {
+                    Text("Event detail unavailable").font(.caption2)
+                    Button("Retry event") { retry += 1 }.font(.caption2)
+                } else { ProgressView("Loading evidence").font(.caption2) }
+                Button { model.openOnPhone("intelligence", country: event.primary_country_iso2, eventID: event.id) }
+                    label: { Label("Continue on iPhone", systemImage: "iphone") }.font(.caption2).buttonStyle(.bordered)
+            }.padding(.horizontal, 3)
+        }
+        .navigationTitle("Event")
+        .containerBackground(WatchPalette.navy.gradient, for: .navigation)
+        .task(id: retry) {
+            failed = false
+            do { let value = try await model.readEvent(id: event.id); guard !Task.isCancelled else { return }; detail = value }
+            catch { guard !Task.isCancelled else { return }; failed = true }
+        }
+        .task(id: showsMovements) {
+            guard showsMovements, movements == nil else { return }
+            do { let value = try await model.readEventTransport(id: event.id); guard !Task.isCancelled else { return }; movements = value; movementFailed = value == nil }
+            catch { guard !Task.isCancelled else { return }; movementFailed = true }
+        }
+    }
+}
+
+@MainActor
+private struct WatchEventPreview: View {
+    let path: String
+    @EnvironmentObject private var model: WatchAppModel
+    @State private var image: CGImage?
+    var body: some View {
+        Group {
+            if let image { Image(decorative: image, scale: 1).resizable().scaledToFit().clipShape(RoundedRectangle(cornerRadius: 8)) }
+        }
+        .task(id: path) {
+            guard StoredImagePath.isValid(path), let data = try? await model.readEventImage(path: path),
+                  !Task.isCancelled, let source = CGImageSourceCreateWithData(data as CFData, nil) else { return }
+            image = CGImageSourceCreateThumbnailAtIndex(source, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                kCGImageSourceThumbnailMaxPixelSize: 320, kCGImageSourceCreateThumbnailWithTransform: true] as CFDictionary)
+        }
     }
 }

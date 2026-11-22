@@ -564,24 +564,24 @@ final class AppModel: ObservableObject {
     }
 
     /// Read existing optional data only when its workspace or layer is visible.
-    func loadOptionalContext(_ context: String) async {
+    func loadOptionalContext(_ context: String, force: Bool = false) async {
         guard authStatus == .authed, hasPaidAccess else { return }
         let generation = dataGeneration
         switch context {
         case "weather":
-            guard weather.isEmpty, !isRefreshingWeather else { return }
+            guard !isRefreshingWeather, force || weather.isEmpty || widgetFreshness.weather.map({ Date().timeIntervalSince($0) >= 600 }) != false else { return }
             isRefreshingWeather = true
             defer { isRefreshingWeather = false }
             _ = await loadInitialValue(generation: generation, fetch: {
                 try await self.api.fetchCountryWeather()
             }, apply: { self.weather = $0; self.widgetFreshness.weather = Date() })
         case "leadership":
-            guard leadership.isEmpty else { return }
+            guard force || leadership.isEmpty else { return }
             _ = await loadInitialValue(generation: generation, fetch: {
                 try await self.api.fetchCountryLeadership()
             }, apply: { self.leadership = $0 })
         case "markets":
-            guard countryMarkets.isEmpty else { return }
+            guard force || countryMarkets.isEmpty || widgetFreshness.markets.map({ Date().timeIntervalSince($0) >= 600 }) != false else { return }
             await refreshMarketQuotes(forceRefresh: false)
         case "news":
             guard countryStats.isEmpty else { return }
@@ -597,6 +597,8 @@ final class AppModel: ObservableObject {
     }
 
     #if DEBUG
+    var mapReviewEvent: IntelligenceEventDetail?
+    var mapReviewTransport: EventTransportDetail?
     /// Loaded only by the simulator capture entry point; never bundled data.
     func installMapReview(_ overview: IntelligenceOverview) {
         intelligenceOverview = overview

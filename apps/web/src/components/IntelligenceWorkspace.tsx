@@ -632,7 +632,10 @@ export default function IntelligenceWorkspace({
                 {detail.event.priority_reasons?.length ? <details><summary>Why prioritised</summary><ul>{detail.event.priority_reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul></details> : null}
               </section>
               <EventSignalVisuals key={detail.event.id} detail={detail} onOpenEvent={selectEvent} />
-              <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={onOpenImagery} />
+              <EventConnections key={`connections-${detail.event.id}`} detail={detail} selectedFamily={selectedFamily} onSelectFamily={setSelectedFamily} onOpenImagery={() => {
+                setImageryExpanded(true);
+                document.getElementById("event-imagery-assessment")?.scrollIntoView?.({ behavior: "smooth", block: "nearest" });
+              }} />
               <details className="event-optional-context" open={contextExpanded} onToggle={(event) => setContextExpanded(event.currentTarget.open)}>
                 <summary>Explore surrounding context</summary>
                 {contextLoading && <p role="status">Loading surrounding context…</p>}
@@ -646,7 +649,6 @@ export default function IntelligenceWorkspace({
                 {imageryExpanded && <div className="mt-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div><div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--shell-muted)]"><Satellite className="h-3.5 w-3.5" /><span id="satellite-context-heading">Satellite assessment</span></div><div className="mt-2 inline-flex rounded-full border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-[color:var(--shell-ink)]">{satelliteAssessment}</div><p className="mt-2 max-w-2xl text-xs leading-5 text-[color:var(--shell-muted)]">Event-linked scenes may help assess visible conditions or change at the stated location. Browse layers provide regional context only; neither establishes cause by itself.</p></div>
-                  {onOpenImagery && <button type="button" onClick={() => onOpenImagery(detail.event.id)} className="rounded-full border border-[color:var(--shell-border)] px-3 py-1.5 text-xs font-semibold text-[color:var(--shell-ink)]">Inspect event imagery</button>}
                 </div>
                 {gibsTrueColor && (
                   <article className="mt-3 grid overflow-hidden rounded-lg border border-[color:var(--shell-border)] bg-[color:var(--shell-bg)] sm:grid-cols-[minmax(12rem,14rem)_minmax(0,1fr)]" aria-label="NASA GIBS true-color event context">

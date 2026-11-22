@@ -1,0 +1,1507 @@
+{
+  "event": {
+    "event": {
+      "id": "9abee22f-9af4-471f-a579-170123384d02",
+      "dedupe_key": "6bc943ecdcc9cf54984a526f2c6e378f88239cfaa2d76d11772c982985067bd3",
+      "event_type": "transport_activity_change",
+      "title": "Sydney movement anomaly",
+      "summary": "Observed arrivals and departures are 200% above the rolling baseline for the same completed UTC hours. Coverage reflects Claritas telemetry sources, not total traffic; the change alone does not establish disruption.",
+      "status": "active",
+      "severity": "high",
+      "confidence": 0.95,
+      "start_time": "2026-11-22T09:31:54.960Z",
+      "last_activity_time": "2026-11-22T09:31:54.960Z",
+      "end_time": null,
+      "primary_location_id": "6b34b57e-5928-47a2-a66f-4d54f0ae25e5",
+      "primary_country_iso2": "AU",
+      "geography": null,
+      "source_diversity": 1,
+      "domain_count": 1,
+      "relevance_score": 0.5517,
+      "urgency_score": 1,
+      "materiality_score": 1,
+      "score_components": {
+        "anomaly": {
+          "baseline": 4,
+          "anomalous": true,
+          "direction": "above",
+          "magnitude": 1,
+          "confidence": 0.95,
+          "methodology": "median(previous-equivalent, 7d same-hour, 28d same-hour); minimum baseline 3; coverage weighted",
+          "percentChange": 2
+        },
+        "severity": 0.75,
+        "freshness": 0.9994556861772487,
+        "domain_count": 1,
+        "base_relevance": 0.5517,
+        "domain_diversity": 0.2,
+        "source_diversity": 1,
+        "source_reliability": 0.72,
+        "location_importance": 0.5,
+        "physical_observation": false,
+        "visual_analysis_bonus": 0,
+        "aggregation_methodology": "evidence-diversity-v5",
+        "related_event_bonus_cap": 0.06,
+        "visual_analysis_bonus_cap": 0.04
+      },
+      "assessment_kind": "deterministic",
+      "metadata": {
+        "methodology": "median(previous-equivalent, 7d same-hour, 28d same-hour); minimum baseline 3; coverage weighted",
+        "coverage_qualified": true,
+        "canonical_signal_rank": 0.811,
+        "canonical_evidence_key": "transport:transport_movement_event:372184"
+      },
+      "created_at": "2026-11-22T09:37:24.164Z",
+      "updated_at": "2026-11-22T09:37:24.164Z",
+      "location_name": "Australia",
+      "origin_domain": "transport",
+      "signal_domains": [
+        "transport"
+      ],
+      "news_priority": 0,
+      "priority_score": 0.7532986905910495,
+      "location_type": "country",
+      "latitude": null,
+      "longitude": null,
+      "monitoring_tier": 3,
+      "evidence_count": 1,
+      "expires_at": "2026-11-24T09:31:54.960Z",
+      "earth_observation_state": "not_requested",
+      "priority_reasons": [
+        "Time-sensitive development"
+      ],
+      "freshness_state": "active",
+      "earth_observation_available": false
+    },
+    "context_included": false,
+    "social_context": [],
+    "regional_reporting": null,
+    "signal_coverage": [
+      {
+        "domain": "news",
+        "label": "News",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "earth_observation",
+        "label": "Earth observation",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "imagery",
+        "label": "Imagery",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "transport",
+        "label": "Transport",
+        "count": 1,
+        "state": "linked"
+      },
+      {
+        "domain": "podcast",
+        "label": "Podcasts",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "social",
+        "label": "Socials",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "weather",
+        "label": "Weather",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "market",
+        "label": "Markets",
+        "count": 0,
+        "state": "none"
+      },
+      {
+        "domain": "model_interpretation",
+        "label": "Model interpretation",
+        "count": 0,
+        "state": "none"
+      }
+    ],
+    "context_signals": [],
+    "understanding": {
+      "what_happened": "Observed arrivals and departures are 200% above the rolling baseline for the same completed UTC hours. Coverage reflects Claritas telemetry sources, not total traffic; the change alone does not establish disruption.",
+      "where": "Australia",
+      "location_basis": "named_location",
+      "coordinates": null,
+      "why_interesting": "High-severity signal with 55/100 relevance; 1 linked domain and 1 evidence record; no linked publisher story yet; no processed physical observation yet. Correlation supplies context and does not establish causation.",
+      "linked_news_count": 0,
+      "physical_observation_count": 0
+    },
+    "evidence": [
+      {
+        "id": "80300f31-edfa-4c01-8425-e431c0a735db",
+        "event_id": "9abee22f-9af4-471f-a579-170123384d02",
+        "domain": "transport",
+        "evidence_type": "rolling_baseline_anomaly",
+        "source_record_type": "transport_movement_event",
+        "source_record_id": "372184",
+        "source_id": null,
+        "observed_at": "2026-11-22T09:31:54.960Z",
+        "published_at": null,
+        "location_id": "6b34b57e-5928-47a2-a66f-4d54f0ae25e5",
+        "confidence": 0.95,
+        "relationship": "derived",
+        "provenance": {
+          "provider": "aisstream",
+          "methodology": "median(previous-equivalent, 7d same-hour, 28d same-hour); minimum baseline 3; coverage weighted"
+        },
+        "license": null,
+        "attribution": "aisstream",
+        "correlation_score": 1,
+        "correlation_factors": {
+          "basis": "no_candidate_passed_anchored_threshold",
+          "entity": 0,
+          "country": 1,
+          "spatial": 0,
+          "decision": "created",
+          "location": 0,
+          "temporal": 0.6341933333333334,
+          "event_type": 1,
+          "instrument": 0,
+          "methodology": "multi-dimension-v2; max_hours=1; max_distance_km=1; threshold=0.4",
+          "source_reliability": 0.95
+        },
+        "metadata": {
+          "current": 12,
+          "baseline": 4,
+          "event_type": "arrival",
+          "percent_change": 2,
+          "vehicle_category": null,
+          "comparison_hours_utc": 9,
+          "signal_urgency_score": 1,
+          "signal_relevance_score": 0.5517,
+          "signal_materiality_score": 1
+        },
+        "created_at": "2026-11-22T09:37:24.164Z",
+        "source_name": null,
+        "image_url": null,
+        "location_name": "Australia",
+        "source_title": null,
+        "source_summary": null,
+        "source_url": null,
+        "gdelt_event_code": null,
+        "gdelt_event_root_code": null,
+        "gdelt_actor1_name": null,
+        "gdelt_actor2_name": null,
+        "gdelt_action_geo_name": null,
+        "gdelt_country_iso2": null,
+        "gdelt_mention_count": null,
+        "gdelt_source_count": null,
+        "gdelt_article_count": null
+      }
+    ],
+    "linked_news": [],
+    "news_images": [],
+    "context_images": [],
+    "locations": [
+      {
+        "relationship": "primary",
+        "distance_km": null,
+        "confidence": 0.95,
+        "id": "6b34b57e-5928-47a2-a66f-4d54f0ae25e5",
+        "slug": "country-au",
+        "location_type": "country",
+        "canonical_name": "Australia",
+        "country_iso2": "AU",
+        "latitude": null,
+        "longitude": null,
+        "bbox": null,
+        "importance_score": 0.5,
+        "monitoring_tier": 3,
+        "attribution": "ISO 3166 country code",
+        "license": "ISO reference data; verify redistribution terms"
+      }
+    ],
+    "earth_observations": [],
+    "related_events": [],
+    "epistemic_notice": "Reported events, observed signals, derived metrics, model interpretations and Claritas assessments are labelled separately. Correlation does not establish causation."
+  },
+  "transport": {
+    "current": 12,
+    "baseline": 4,
+    "observed_at": "2026-11-22T09:31:54.960Z",
+    "confidence": 0.95,
+    "location_name": "Sydney",
+    "notice": "Tracked arrivals and departures for the same completed UTC hours. Telemetry coverage is partial; a change does not by itself establish disruption.",
+    "country": "AU",
+    "source_name": "aisstream",
+    "window_start": "2026-11-22T00:00:00.000Z",
+    "window_end": "2026-11-22T09:00:00.000Z",
+    "coverage": "retained_movements",
+    "hours": [
+      {
+        "observed_at": "2026-11-22T00:00:00.000Z",
+        "arrivals": 6,
+        "departures": 1
+      },
+      {
+        "observed_at": "2026-11-22T01:00:00.000Z",
+        "arrivals": 1,
+        "departures": 0
+      },
+      {
+        "observed_at": "2026-11-22T04:00:00.000Z",
+        "arrivals": 2,
+        "departures": 0
+      },
+      {
+        "observed_at": "2026-11-22T05:00:00.000Z",
+        "arrivals": 1,
+        "departures": 0
+      },
+      {
+        "observed_at": "2026-11-22T06:00:00.000Z",
+        "arrivals": 1,
+        "departures": 0
+      }
+    ],
+    "movements": [
+      {
+        "id": "371825",
+        "entity_id": "538011487",
+        "event_type": "arrival",
+        "vehicle_category": "tanker",
+        "observed_at": "2026-11-22T06:37:05.522Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371641",
+        "entity_id": "563252600",
+        "event_type": "arrival",
+        "vehicle_category": "tanker",
+        "observed_at": "2026-11-22T05:02:04.136Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371630",
+        "entity_id": "503200240",
+        "event_type": "arrival",
+        "vehicle_category": "service",
+        "observed_at": "2026-11-22T04:51:22.304Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371602",
+        "entity_id": "503004510",
+        "event_type": "arrival",
+        "vehicle_category": "service",
+        "observed_at": "2026-11-22T04:38:46.821Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371261",
+        "entity_id": "503161600",
+        "event_type": "arrival",
+        "vehicle_category": "service",
+        "observed_at": "2026-11-22T01:25:11.017Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371217",
+        "entity_id": "636020773",
+        "event_type": "departure",
+        "vehicle_category": null,
+        "observed_at": "2026-11-22T00:57:20.184Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371204",
+        "entity_id": "503131890",
+        "event_type": "arrival",
+        "vehicle_category": "service",
+        "observed_at": "2026-11-22T00:48:26.325Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371196",
+        "entity_id": "636023389",
+        "event_type": "arrival",
+        "vehicle_category": "tanker",
+        "observed_at": "2026-11-22T00:45:05.021Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371168",
+        "entity_id": "503041110",
+        "event_type": "arrival",
+        "vehicle_category": "service",
+        "observed_at": "2026-11-22T00:24:06.089Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371149",
+        "entity_id": "538005391",
+        "event_type": "arrival",
+        "vehicle_category": null,
+        "observed_at": "2026-11-22T00:16:18.872Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371121",
+        "entity_id": "311000692",
+        "event_type": "arrival",
+        "vehicle_category": "cargo",
+        "observed_at": "2026-11-22T00:04:56.543Z",
+        "source_name": "aisstream"
+      },
+      {
+        "id": "371107",
+        "entity_id": "503079580",
+        "event_type": "arrival",
+        "vehicle_category": null,
+        "observed_at": "2026-11-22T00:01:46.179Z",
+        "source_name": "aisstream"
+      }
+    ]
+  },
+  "weather": [
+    {
+      "country": "JP",
+      "temp_c": 6.25,
+      "apparent_temp_c": 3.95,
+      "humidity": 31,
+      "pressure_hpa": 1023,
+      "visibility_m": 10000,
+      "location_name": "Tatsuno",
+      "precipitation_mm": null,
+      "observed_at": "2026-11-22T06:37:46.000Z",
+      "weather_main": "Clouds",
+      "weather_desc": "scattered clouds",
+      "weather_code": 802,
+      "cloud_cover": 40,
+      "wind_speed": 3.09,
+      "wind_direction": 270,
+      "wind_gust": null,
+      "is_day": true,
+      "source_name": "openweather",
+      "source_kind": "forecast_model",
+      "attribution": "Weather data provided by OpenWeather",
+      "icon_code": "03d",
+      "forecast": [
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 2.63,
+          "sunrise_at": null,
+          "temp_max_c": 3.64,
+          "temp_min_c": -3.32,
+          "wind_speed": 1.57,
+          "weather_code": 500,
+          "weather_main": "Rain",
+          "forecast_time": "2026-11-22T00:00:00+00:00",
+          "precipitation_mm": 1.2,
+          "apparent_temp_max_c": 2.3,
+          "apparent_temp_min_c": -3.32,
+          "precipitation_probability": 93
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 3.11,
+          "sunrise_at": null,
+          "temp_max_c": 4.88,
+          "temp_min_c": -0.16,
+          "wind_speed": 2.02,
+          "weather_code": 500,
+          "weather_main": "Rain",
+          "forecast_time": "2026-11-22T03:00:00+00:00",
+          "precipitation_mm": 0.8200000000000001,
+          "apparent_temp_max_c": 3.32,
+          "apparent_temp_min_c": -0.16,
+          "precipitation_probability": 91
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 2.08,
+          "sunrise_at": null,
+          "temp_max_c": 5.36,
+          "temp_min_c": 2.95,
+          "wind_speed": 1.79,
+          "weather_code": 802,
+          "weather_main": "Clouds",
+          "forecast_time": "2026-11-22T09:00:00+00:00",
+          "precipitation_mm": 0,
+          "apparent_temp_max_c": 4.01,
+          "apparent_temp_min_c": 2.95,
+          "precipitation_probability": 0
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 4.66,
+          "sunrise_at": null,
+          "temp_max_c": 9.74,
+          "temp_min_c": -3.95,
+          "wind_speed": 2.71,
+          "weather_code": 800,
+          "weather_main": "Clear",
+          "forecast_time": "2026-11-22T15:00:00+00:00",
+          "precipitation_mm": 0,
+          "apparent_temp_max_c": 8.38,
+          "apparent_temp_min_c": -3.95,
+          "precipitation_probability": 0
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 11.11,
+          "sunrise_at": null,
+          "temp_max_c": 7,
+          "temp_min_c": -0.93,
+          "wind_speed": 3.8,
+          "weather_code": 501,
+          "weather_main": "Rain",
+          "forecast_time": "2026-11-23T15:00:00+00:00",
+          "precipitation_mm": 31.050000000000004,
+          "apparent_temp_max_c": 4.42,
+          "apparent_temp_min_c": -4.03,
+          "precipitation_probability": 100
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 8.26,
+          "sunrise_at": null,
+          "temp_max_c": 4.66,
+          "temp_min_c": -2.94,
+          "wind_speed": 3.94,
+          "weather_code": 800,
+          "weather_main": "Clear",
+          "forecast_time": "2026-11-24T15:00:00+00:00",
+          "precipitation_mm": 0,
+          "apparent_temp_max_c": 1.77,
+          "apparent_temp_min_c": -6.13,
+          "precipitation_probability": 0
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 7.08,
+          "sunrise_at": null,
+          "temp_max_c": 8.41,
+          "temp_min_c": -2.52,
+          "wind_speed": 4.23,
+          "weather_code": 802,
+          "weather_main": "Clouds",
+          "forecast_time": "2026-11-25T15:00:00+00:00",
+          "precipitation_mm": 0,
+          "apparent_temp_max_c": 5.94,
+          "apparent_temp_min_c": -5.08,
+          "precipitation_probability": 0
+        },
+        {
+          "uv_index": null,
+          "sunset_at": null,
+          "wind_gust": 4.77,
+          "sunrise_at": null,
+          "temp_max_c": 11.64,
+          "temp_min_c": -0.08,
+          "wind_speed": 2.51,
+          "weather_code": 800,
+          "weather_main": "Clear",
+          "forecast_time": "2026-11-26T15:00:00+00:00",
+          "precipitation_mm": 0,
+          "apparent_temp_max_c": 10.06,
+          "apparent_temp_min_c": -0.08,
+          "precipitation_probability": 0
+        }
+      ],
+      "air_quality": {
+        "pm10": 1.58,
+        "label": "Fair",
+        "ozone": 95.56,
+        "pm2_5": 1.01,
+        "us_aqi": null,
+        "aqi_scale": "OpenWeather 1-5",
+        "observed_at": "2026-11-22T06:37:46+00:00",
+        "european_aqi": null,
+        "provider_aqi": 2,
+        "carbon_monoxide": 142.05,
+        "sulphur_dioxide": 1.99,
+        "nitrogen_dioxide": 5.51
+      },
+      "alerts": [],
+      "alert_count": 0
+    }
+  ],
+  "market": {
+    "summary": {
+      "country": "JP",
+      "country_name": "Japan",
+      "region": "Asia",
+      "currency": "JPY",
+      "index_symbol": null,
+      "index_name": null,
+      "index_value": null,
+      "index_previous_value": null,
+      "index_change_percent": null,
+      "index_period_end": null,
+      "index_observed_at": null,
+      "index_source": null,
+      "index_frequency": null,
+      "index_scope": null,
+      "fx_symbol": "EUR/JPY",
+      "fx_rate": 174.35,
+      "fx_previous_rate": 175.84,
+      "fx_change_percent": 0.8473612374886311,
+      "fx_period_end": "2026-11-20",
+      "filing_count_7d": 0,
+      "latest_filing_at": null,
+      "gdp_growth": 1.19311288444599,
+      "gdp_year": 2025,
+      "inflation": 3.17253034260247,
+      "inflation_year": 2025,
+      "unemployment": 2.451,
+      "unemployment_year": 2025,
+      "current_account": 4.86496093471918,
+      "current_account_year": 2025,
+      "macro_latest_year": 2025,
+      "macro_source": "world_bank_wdi",
+      "composite_change_percent": 0.8474,
+      "composite_basis": [
+        "currency_vs_eur"
+      ],
+      "freshness": "current"
+    },
+    "fx_history": [
+      {
+        "period_end": "2026-07-20T00:00:00.000Z",
+        "value": 185.54,
+        "percent_change": -0.05925127928899654
+      },
+      {
+        "period_end": "2026-07-21T00:00:00.000Z",
+        "value": 185.82,
+        "percent_change": 0.1509108548021887
+      },
+      {
+        "period_end": "2026-07-22T00:00:00.000Z",
+        "value": 186.03,
+        "percent_change": 0.11301259283178489
+      },
+      {
+        "period_end": "2026-07-23T00:00:00.000Z",
+        "value": 186.23,
+        "percent_change": 0.10750954147180636
+      },
+      {
+        "period_end": "2026-07-24T00:00:00.000Z",
+        "value": 186.38,
+        "percent_change": 0.08054556193954898
+      },
+      {
+        "period_end": "2026-07-27T00:00:00.000Z",
+        "value": 186.37,
+        "percent_change": -0.00536538255176966
+      },
+      {
+        "period_end": "2026-07-28T00:00:00.000Z",
+        "value": 186.32,
+        "percent_change": -0.026828352202612482
+      },
+      {
+        "period_end": "2026-07-29T00:00:00.000Z",
+        "value": 186.27,
+        "percent_change": -0.02683555173893515
+      },
+      {
+        "period_end": "2026-07-30T00:00:00.000Z",
+        "value": 186.99,
+        "percent_change": 0.38653567402158195
+      },
+      {
+        "period_end": "2026-07-31T00:00:00.000Z",
+        "value": 184.03,
+        "percent_change": -1.5829723514626526
+      },
+      {
+        "period_end": "2026-08-03T00:00:00.000Z",
+        "value": 180.73,
+        "percent_change": -1.79318589360431
+      },
+      {
+        "period_end": "2026-08-04T00:00:00.000Z",
+        "value": 181.26,
+        "percent_change": 0.2932551319648091
+      },
+      {
+        "period_end": "2026-08-05T00:00:00.000Z",
+        "value": 182.08,
+        "percent_change": 0.4523888337195414
+      },
+      {
+        "period_end": "2026-08-06T00:00:00.000Z",
+        "value": 182.17,
+        "percent_change": 0.049428822495589664
+      },
+      {
+        "period_end": "2026-08-07T00:00:00.000Z",
+        "value": 182.64,
+        "percent_change": 0.25800076851292264
+      },
+      {
+        "period_end": "2026-08-10T00:00:00.000Z",
+        "value": 183.31,
+        "percent_change": 0.3668418747262425
+      },
+      {
+        "period_end": "2026-08-11T00:00:00.000Z",
+        "value": 183.72,
+        "percent_change": 0.22366483006928117
+      },
+      {
+        "period_end": "2026-08-12T00:00:00.000Z",
+        "value": 183.67,
+        "percent_change": -0.027215327672547307
+      },
+      {
+        "period_end": "2026-08-13T00:00:00.000Z",
+        "value": 183.77,
+        "percent_change": 0.05444547285895496
+      },
+      {
+        "period_end": "2026-08-14T00:00:00.000Z",
+        "value": 183.93,
+        "percent_change": 0.08706535343092625
+      },
+      {
+        "period_end": "2026-08-17T00:00:00.000Z",
+        "value": 184.59,
+        "percent_change": 0.358832164410372
+      },
+      {
+        "period_end": "2026-08-18T00:00:00.000Z",
+        "value": 184.87,
+        "percent_change": 0.15168752370118277
+      },
+      {
+        "period_end": "2026-08-19T00:00:00.000Z",
+        "value": 184.62,
+        "percent_change": -0.13523016173527802
+      },
+      {
+        "period_end": "2026-08-20T00:00:00.000Z",
+        "value": 185.45,
+        "percent_change": 0.4495720940309811
+      },
+      {
+        "period_end": "2026-08-21T00:00:00.000Z",
+        "value": 185.66,
+        "percent_change": 0.1132380695605395
+      },
+      {
+        "period_end": "2026-08-24T00:00:00.000Z",
+        "value": 185.6,
+        "percent_change": -0.03231713885597509
+      },
+      {
+        "period_end": "2026-08-25T00:00:00.000Z",
+        "value": 185.7,
+        "percent_change": 0.05387931034481763
+      },
+      {
+        "period_end": "2026-08-26T00:00:00.000Z",
+        "value": 185.62,
+        "percent_change": -0.04308023694129526
+      },
+      {
+        "period_end": "2026-08-27T00:00:00.000Z",
+        "value": 185.61,
+        "percent_change": -0.00538735050101824
+      },
+      {
+        "period_end": "2026-08-28T00:00:00.000Z",
+        "value": 185.92,
+        "percent_change": 0.16701686331555
+      },
+      {
+        "period_end": "2026-08-31T00:00:00.000Z",
+        "value": 185.22,
+        "percent_change": -0.3765060240963791
+      },
+      {
+        "period_end": "2026-09-01T00:00:00.000Z",
+        "value": 185.63,
+        "percent_change": 0.22135838462369328
+      },
+      {
+        "period_end": "2026-09-02T00:00:00.000Z",
+        "value": 184.78,
+        "percent_change": -0.4579001239023883
+      },
+      {
+        "period_end": "2026-09-03T00:00:00.000Z",
+        "value": 181.21,
+        "percent_change": -1.9320272756791823
+      },
+      {
+        "period_end": "2026-09-04T00:00:00.000Z",
+        "value": 181.59,
+        "percent_change": 0.20970145135477125
+      },
+      {
+        "period_end": "2026-09-07T00:00:00.000Z",
+        "value": 179.85,
+        "percent_change": -0.9582025441929654
+      },
+      {
+        "period_end": "2026-09-08T00:00:00.000Z",
+        "value": 179.2,
+        "percent_change": -0.3614122880177928
+      },
+      {
+        "period_end": "2026-09-09T00:00:00.000Z",
+        "value": 178.59,
+        "percent_change": -0.3404017857142727
+      },
+      {
+        "period_end": "2026-09-10T00:00:00.000Z",
+        "value": 179.09,
+        "percent_change": 0.27997088302815776
+      },
+      {
+        "period_end": "2026-09-11T00:00:00.000Z",
+        "value": 178.56,
+        "percent_change": -0.29594058853090743
+      },
+      {
+        "period_end": "2026-09-14T00:00:00.000Z",
+        "value": 178.52,
+        "percent_change": -0.022401433691754402
+      },
+      {
+        "period_end": "2026-09-15T00:00:00.000Z",
+        "value": 178.86,
+        "percent_change": 0.19045485099709047
+      },
+      {
+        "period_end": "2026-09-16T00:00:00.000Z",
+        "value": 178.88,
+        "percent_change": 0.011181930001114004
+      },
+      {
+        "period_end": "2026-09-17T00:00:00.000Z",
+        "value": 178.75,
+        "percent_change": -0.07267441860464574
+      },
+      {
+        "period_end": "2026-09-18T00:00:00.000Z",
+        "value": 180.94,
+        "percent_change": 1.225174825174813
+      },
+      {
+        "period_end": "2026-09-21T00:00:00.000Z",
+        "value": 180.7,
+        "percent_change": -0.13264065436057182
+      },
+      {
+        "period_end": "2026-09-22T00:00:00.000Z",
+        "value": 180.17,
+        "percent_change": -0.29330381848367004
+      },
+      {
+        "period_end": "2026-09-23T00:00:00.000Z",
+        "value": 180.2,
+        "percent_change": 0.016650940778162315
+      },
+      {
+        "period_end": "2026-09-24T00:00:00.000Z",
+        "value": 180.57,
+        "percent_change": 0.20532741398446852
+      },
+      {
+        "period_end": "2026-09-25T00:00:00.000Z",
+        "value": 179.7,
+        "percent_change": -0.48180760923741683
+      },
+      {
+        "period_end": "2026-09-28T00:00:00.000Z",
+        "value": 178.5,
+        "percent_change": -0.6677796327211993
+      },
+      {
+        "period_end": "2026-09-29T00:00:00.000Z",
+        "value": 178.41,
+        "percent_change": -0.05042016806723337
+      },
+      {
+        "period_end": "2026-09-30T00:00:00.000Z",
+        "value": 178.27,
+        "percent_change": -0.07847093772770375
+      },
+      {
+        "period_end": "2026-10-01T00:00:00.000Z",
+        "value": 178.49,
+        "percent_change": 0.12340831323274237
+      },
+      {
+        "period_end": "2026-10-02T00:00:00.000Z",
+        "value": 176.99,
+        "percent_change": -0.8403832147459211
+      },
+      {
+        "period_end": "2026-10-05T00:00:00.000Z",
+        "value": 177.28,
+        "percent_change": 0.16385106503191693
+      },
+      {
+        "period_end": "2026-10-06T00:00:00.000Z",
+        "value": 178.15,
+        "percent_change": 0.49074909747293116
+      },
+      {
+        "period_end": "2026-10-07T00:00:00.000Z",
+        "value": 176.85,
+        "percent_change": -0.7297221442604584
+      },
+      {
+        "period_end": "2026-10-08T00:00:00.000Z",
+        "value": 177.05,
+        "percent_change": 0.1130901894260683
+      },
+      {
+        "period_end": "2026-10-09T00:00:00.000Z",
+        "value": 177.34,
+        "percent_change": 0.16379553798362423
+      },
+      {
+        "period_end": "2026-10-12T00:00:00.000Z",
+        "value": 177.33,
+        "percent_change": -0.005638885756165113
+      },
+      {
+        "period_end": "2026-10-13T00:00:00.000Z",
+        "value": 176.91,
+        "percent_change": -0.2368465572661238
+      },
+      {
+        "period_end": "2026-10-14T00:00:00.000Z",
+        "value": 177.39,
+        "percent_change": 0.27132440223842647
+      },
+      {
+        "period_end": "2026-10-15T00:00:00.000Z",
+        "value": 177.06,
+        "percent_change": -0.18603077963808
+      },
+      {
+        "period_end": "2026-10-16T00:00:00.000Z",
+        "value": 177.82,
+        "percent_change": 0.42923302835196075
+      },
+      {
+        "period_end": "2026-10-19T00:00:00.000Z",
+        "value": 177.63,
+        "percent_change": -0.10684962321448888
+      },
+      {
+        "period_end": "2026-10-20T00:00:00.000Z",
+        "value": 177.34,
+        "percent_change": -0.16326071046557367
+      },
+      {
+        "period_end": "2026-10-21T00:00:00.000Z",
+        "value": 177.36,
+        "percent_change": 0.01127777151235243
+      },
+      {
+        "period_end": "2026-10-22T00:00:00.000Z",
+        "value": 175.97,
+        "percent_change": -0.783716734325679
+      },
+      {
+        "period_end": "2026-10-23T00:00:00.000Z",
+        "value": 175.51,
+        "percent_change": -0.2614081945786273
+      },
+      {
+        "period_end": "2026-10-26T00:00:00.000Z",
+        "value": 176.15,
+        "percent_change": 0.36465158680418774
+      },
+      {
+        "period_end": "2026-10-27T00:00:00.000Z",
+        "value": 175.97,
+        "percent_change": -0.10218563724099239
+      },
+      {
+        "period_end": "2026-10-28T00:00:00.000Z",
+        "value": 175.86,
+        "percent_change": -0.06251065522531185
+      },
+      {
+        "period_end": "2026-10-29T00:00:00.000Z",
+        "value": 175.92,
+        "percent_change": 0.03411804844761779
+      },
+      {
+        "period_end": "2026-10-30T00:00:00.000Z",
+        "value": 175.68,
+        "percent_change": -0.13642564802182067
+      },
+      {
+        "period_end": "2026-11-02T00:00:00.000Z",
+        "value": 177.1,
+        "percent_change": 0.8082877959927126
+      },
+      {
+        "period_end": "2026-11-03T00:00:00.000Z",
+        "value": 176.95,
+        "percent_change": -0.08469791078486999
+      },
+      {
+        "period_end": "2026-11-04T00:00:00.000Z",
+        "value": 178.3,
+        "percent_change": 0.7629273806160075
+      },
+      {
+        "period_end": "2026-11-05T00:00:00.000Z",
+        "value": 177.85,
+        "percent_change": -0.252383623107133
+      },
+      {
+        "period_end": "2026-11-06T00:00:00.000Z",
+        "value": 176.77,
+        "percent_change": -0.6072533033455119
+      },
+      {
+        "period_end": "2026-11-09T00:00:00.000Z",
+        "value": 176.79,
+        "percent_change": 0.011314137014184489
+      },
+      {
+        "period_end": "2026-11-10T00:00:00.000Z",
+        "value": 177.38,
+        "percent_change": 0.33372928333050833
+      },
+      {
+        "period_end": "2026-11-11T00:00:00.000Z",
+        "value": 177.18,
+        "percent_change": -0.11275228323373021
+      },
+      {
+        "period_end": "2026-11-12T00:00:00.000Z",
+        "value": 176.96,
+        "percent_change": -0.12416751326335129
+      },
+      {
+        "period_end": "2026-11-13T00:00:00.000Z",
+        "value": 176.83,
+        "percent_change": -0.0734629294755873
+      },
+      {
+        "period_end": "2026-11-16T00:00:00.000Z",
+        "value": 175.78,
+        "percent_change": -0.5937906463835407
+      },
+      {
+        "period_end": "2026-11-17T00:00:00.000Z",
+        "value": 175.05,
+        "percent_change": -0.415291842075316
+      },
+      {
+        "period_end": "2026-11-18T00:00:00.000Z",
+        "value": 174.85,
+        "percent_change": -0.11425307055128453
+      },
+      {
+        "period_end": "2026-11-19T00:00:00.000Z",
+        "value": 175.84,
+        "percent_change": 0.566199599656847
+      },
+      {
+        "period_end": "2026-11-20T00:00:00.000Z",
+        "value": 174.35,
+        "percent_change": -0.8473612374886308
+      }
+    ],
+    "index_history": [],
+    "filings": [],
+    "related_instruments": [],
+    "macro_indicators": [
+      {
+        "instrument_id": "101",
+        "source_name": "world_bank_wdi",
+        "source_url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG?locations=JP",
+        "symbol": "NY.GDP.MKTP.KD.ZG:JP",
+        "canonical_symbol": "WB:NY.GDP.MKTP.KD.ZG:JP",
+        "company_name": "Japan · GDP growth",
+        "instrument_type": "macro",
+        "asset_class": "macro",
+        "scope": "country",
+        "exchange": null,
+        "country": "JP",
+        "related_countries": [
+          {
+            "country": "JP",
+            "is_primary": true,
+            "relationship": "economic_indicator"
+          }
+        ],
+        "currency": null,
+        "market_code": null,
+        "market_name": null,
+        "market_kind": "macro",
+        "unit": "% annual",
+        "frequency": "annual",
+        "value_semantics": "rate",
+        "attribution": "The World Bank: World Development Indicators",
+        "license": "CC BY 4.0",
+        "original_publisher": null,
+        "price": 1.19311288444599,
+        "change": 1.4331971204876859,
+        "percent_change": -596.9559451786661,
+        "high_price": null,
+        "low_price": null,
+        "open_price": null,
+        "previous_close": -0.240084236041696,
+        "volume": null,
+        "period_end": "2025-12-31T00:00:00.000Z",
+        "observed_at": "2026-11-11T12:00:00.000Z",
+        "history": [
+          {
+            "value": 0.704986495111257,
+            "period_end": "2016-12-31"
+          },
+          {
+            "value": 1.62345062245441,
+            "period_end": "2017-12-31"
+          },
+          {
+            "value": 0.834143845965585,
+            "period_end": "2018-12-31"
+          },
+          {
+            "value": -0.308496921143259,
+            "period_end": "2019-12-31"
+          },
+          {
+            "value": -4.28327942675573,
+            "period_end": "2020-12-31"
+          },
+          {
+            "value": 3.56419531474475,
+            "period_end": "2021-12-31"
+          },
+          {
+            "value": 1.33164750653741,
+            "period_end": "2022-12-31"
+          },
+          {
+            "value": 0.720785304749811,
+            "period_end": "2023-12-31"
+          },
+          {
+            "value": -0.240084236041696,
+            "period_end": "2024-12-31"
+          },
+          {
+            "value": 1.19311288444599,
+            "period_end": "2025-12-31"
+          }
+        ],
+        "payload": {
+          "scope": "country",
+          "market": {
+            "code": null,
+            "kind": "macro",
+            "name": null
+          },
+          "provider": "world-bank",
+          "instrument": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "data_url": "https://data.worldbank.org/indicator/NY.GDP.MKTP.KD.ZG?locations=JP",
+            "provider": "world-bank",
+            "short_name": "GDP growth",
+            "attribution": "The World Bank: World Development Indicators",
+            "indicator_code": "NY.GDP.MKTP.KD.ZG",
+            "indicator_name": "GDP growth (annual %)",
+            "value_semantics": "rate"
+          },
+          "provider_payload": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "provider": "world-bank",
+            "short_name": "GDP growth",
+            "attribution": "The World Bank: World Development Indicators",
+            "country_iso3": "JPN",
+            "indicator_code": "NY.GDP.MKTP.KD.ZG",
+            "indicator_name": "GDP growth (annual %)",
+            "value_semantics": "rate",
+            "observation_status": null,
+            "source_last_updated": "2026-11-11"
+          }
+        }
+      },
+      {
+        "instrument_id": "301",
+        "source_name": "world_bank_wdi",
+        "source_url": "https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG?locations=JP",
+        "symbol": "FP.CPI.TOTL.ZG:JP",
+        "canonical_symbol": "WB:FP.CPI.TOTL.ZG:JP",
+        "company_name": "Japan · Inflation",
+        "instrument_type": "macro",
+        "asset_class": "macro",
+        "scope": "country",
+        "exchange": null,
+        "country": "JP",
+        "related_countries": [
+          {
+            "country": "JP",
+            "is_primary": true,
+            "relationship": "economic_indicator"
+          }
+        ],
+        "currency": null,
+        "market_code": null,
+        "market_name": null,
+        "market_kind": "macro",
+        "unit": "% annual",
+        "frequency": "annual",
+        "value_semantics": "rate",
+        "attribution": "The World Bank: World Development Indicators",
+        "license": "CC BY 4.0",
+        "original_publisher": null,
+        "price": 3.17253034260247,
+        "change": 0.4339935262500698,
+        "percent_change": 15.847642568053132,
+        "high_price": null,
+        "low_price": null,
+        "open_price": null,
+        "previous_close": 2.7385368163524,
+        "volume": null,
+        "period_end": "2025-12-31T00:00:00.000Z",
+        "observed_at": "2026-11-11T12:00:00.000Z",
+        "history": [
+          {
+            "value": -0.127258844489753,
+            "period_end": "2016-12-31"
+          },
+          {
+            "value": 0.484199796126385,
+            "period_end": "2017-12-31"
+          },
+          {
+            "value": 0.989094598021848,
+            "period_end": "2018-12-31"
+          },
+          {
+            "value": 0.468776159383949,
+            "period_end": "2019-12-31"
+          },
+          {
+            "value": -0.024995834027731,
+            "period_end": "2020-12-31"
+          },
+          {
+            "value": -0.233352779398263,
+            "period_end": "2021-12-31"
+          },
+          {
+            "value": 2.49770278172254,
+            "period_end": "2022-12-31"
+          },
+          {
+            "value": 3.26813365933163,
+            "period_end": "2023-12-31"
+          },
+          {
+            "value": 2.7385368163524,
+            "period_end": "2024-12-31"
+          },
+          {
+            "value": 3.17253034260247,
+            "period_end": "2025-12-31"
+          }
+        ],
+        "payload": {
+          "scope": "country",
+          "market": {
+            "code": null,
+            "kind": "macro",
+            "name": null
+          },
+          "provider": "world-bank",
+          "instrument": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "data_url": "https://data.worldbank.org/indicator/FP.CPI.TOTL.ZG?locations=JP",
+            "provider": "world-bank",
+            "short_name": "Inflation",
+            "attribution": "The World Bank: World Development Indicators",
+            "indicator_code": "FP.CPI.TOTL.ZG",
+            "indicator_name": "Inflation, consumer prices (annual %)",
+            "value_semantics": "rate"
+          },
+          "provider_payload": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "provider": "world-bank",
+            "short_name": "Inflation",
+            "attribution": "The World Bank: World Development Indicators",
+            "country_iso3": "JPN",
+            "indicator_code": "FP.CPI.TOTL.ZG",
+            "indicator_name": "Inflation, consumer prices (annual %)",
+            "value_semantics": "rate",
+            "observation_status": null,
+            "source_last_updated": "2026-11-11"
+          }
+        }
+      },
+      {
+        "instrument_id": "674",
+        "source_name": "world_bank_wdi",
+        "source_url": "https://data.worldbank.org/indicator/BN.CAB.XOKA.GD.ZS?locations=JP",
+        "symbol": "BN.CAB.XOKA.GD.ZS:JP",
+        "canonical_symbol": "WB:BN.CAB.XOKA.GD.ZS:JP",
+        "company_name": "Japan · Current account",
+        "instrument_type": "macro",
+        "asset_class": "macro",
+        "scope": "country",
+        "exchange": null,
+        "country": "JP",
+        "related_countries": [
+          {
+            "country": "JP",
+            "is_primary": true,
+            "relationship": "economic_indicator"
+          }
+        ],
+        "currency": null,
+        "market_code": null,
+        "market_name": null,
+        "market_kind": "macro",
+        "unit": "% GDP",
+        "frequency": "annual",
+        "value_semantics": "rate",
+        "attribution": "The World Bank: World Development Indicators",
+        "license": "CC BY 4.0",
+        "original_publisher": null,
+        "price": 4.86496093471918,
+        "change": 0.24293683453895998,
+        "percent_change": 5.256070268640256,
+        "high_price": null,
+        "low_price": null,
+        "open_price": null,
+        "previous_close": 4.62202410018022,
+        "volume": null,
+        "period_end": "2025-12-31T00:00:00.000Z",
+        "observed_at": "2026-11-11T12:00:00.000Z",
+        "history": [
+          {
+            "value": 3.85588282294836,
+            "period_end": "2016-12-31"
+          },
+          {
+            "value": 4.0325404216365,
+            "period_end": "2017-12-31"
+          },
+          {
+            "value": 3.43924007536727,
+            "period_end": "2018-12-31"
+          },
+          {
+            "value": 3.36672218972422,
+            "period_end": "2019-12-31"
+          },
+          {
+            "value": 2.89117777881579,
+            "period_end": "2020-12-31"
+          },
+          {
+            "value": 3.76057343034322,
+            "period_end": "2021-12-31"
+          },
+          {
+            "value": 2.0281112293848,
+            "period_end": "2022-12-31"
+          },
+          {
+            "value": 3.61127531871254,
+            "period_end": "2023-12-31"
+          },
+          {
+            "value": 4.62202410018022,
+            "period_end": "2024-12-31"
+          },
+          {
+            "value": 4.86496093471918,
+            "period_end": "2025-12-31"
+          }
+        ],
+        "payload": {
+          "scope": "country",
+          "market": {
+            "code": null,
+            "kind": "macro",
+            "name": null
+          },
+          "provider": "world-bank",
+          "instrument": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "data_url": "https://data.worldbank.org/indicator/BN.CAB.XOKA.GD.ZS?locations=JP",
+            "provider": "world-bank",
+            "short_name": "Current account",
+            "attribution": "The World Bank: World Development Indicators",
+            "indicator_code": "BN.CAB.XOKA.GD.ZS",
+            "indicator_name": "Current account balance (% of GDP)",
+            "value_semantics": "rate"
+          },
+          "provider_payload": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "provider": "world-bank",
+            "short_name": "Current account",
+            "attribution": "The World Bank: World Development Indicators",
+            "country_iso3": "JPN",
+            "indicator_code": "BN.CAB.XOKA.GD.ZS",
+            "indicator_name": "Current account balance (% of GDP)",
+            "value_semantics": "rate",
+            "observation_status": null,
+            "source_last_updated": "2026-11-11"
+          }
+        }
+      },
+      {
+        "instrument_id": "488",
+        "source_name": "world_bank_wdi",
+        "source_url": "https://data.worldbank.org/indicator/SL.UEM.TOTL.ZS?locations=JP",
+        "symbol": "SL.UEM.TOTL.ZS:JP",
+        "canonical_symbol": "WB:SL.UEM.TOTL.ZS:JP",
+        "company_name": "Japan · Unemployment",
+        "instrument_type": "macro",
+        "asset_class": "macro",
+        "scope": "country",
+        "exchange": null,
+        "country": "JP",
+        "related_countries": [
+          {
+            "country": "JP",
+            "is_primary": true,
+            "relationship": "economic_indicator"
+          }
+        ],
+        "currency": null,
+        "market_code": null,
+        "market_name": null,
+        "market_kind": "macro",
+        "unit": "% labour force",
+        "frequency": "annual",
+        "value_semantics": "rate",
+        "attribution": "The World Bank: World Development Indicators",
+        "license": "CC BY 4.0",
+        "original_publisher": null,
+        "price": 2.451,
+        "change": -0.04899999999999993,
+        "percent_change": -1.959999999999995,
+        "high_price": null,
+        "low_price": null,
+        "open_price": null,
+        "previous_close": 2.5,
+        "volume": null,
+        "period_end": "2025-12-31T00:00:00.000Z",
+        "observed_at": "2026-11-11T12:00:00.000Z",
+        "history": [
+          {
+            "value": 3.132,
+            "period_end": "2016-12-31"
+          },
+          {
+            "value": 2.822,
+            "period_end": "2017-12-31"
+          },
+          {
+            "value": 2.467,
+            "period_end": "2018-12-31"
+          },
+          {
+            "value": 2.351,
+            "period_end": "2019-12-31"
+          },
+          {
+            "value": 2.809,
+            "period_end": "2020-12-31"
+          },
+          {
+            "value": 2.808,
+            "period_end": "2021-12-31"
+          },
+          {
+            "value": 2.614,
+            "period_end": "2022-12-31"
+          },
+          {
+            "value": 2.6,
+            "period_end": "2023-12-31"
+          },
+          {
+            "value": 2.5,
+            "period_end": "2024-12-31"
+          },
+          {
+            "value": 2.451,
+            "period_end": "2025-12-31"
+          }
+        ],
+        "payload": {
+          "scope": "country",
+          "market": {
+            "code": null,
+            "kind": "macro",
+            "name": null
+          },
+          "provider": "world-bank",
+          "instrument": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "data_url": "https://data.worldbank.org/indicator/SL.UEM.TOTL.ZS?locations=JP",
+            "provider": "world-bank",
+            "short_name": "Unemployment",
+            "attribution": "The World Bank: World Development Indicators",
+            "indicator_code": "SL.UEM.TOTL.ZS",
+            "indicator_name": "Unemployment, total (% of total labor force) (modeled ILO estimate)",
+            "value_semantics": "rate"
+          },
+          "provider_payload": {
+            "dataset": "World Development Indicators",
+            "license": "CC BY 4.0",
+            "provider": "world-bank",
+            "short_name": "Unemployment",
+            "attribution": "The World Bank: World Development Indicators",
+            "country_iso3": "JPN",
+            "indicator_code": "SL.UEM.TOTL.ZS",
+            "indicator_name": "Unemployment, total (% of total labor force) (modeled ILO estimate)",
+            "value_semantics": "rate",
+            "observation_status": null,
+            "source_last_updated": "2026-11-11"
+          }
+        }
+      }
+    ],
+    "methodology": {
+      "index": "Latest OECD national share-price index observation. It is a monthly direction benchmark rather than a live tradable quote.",
+      "fx": "Daily local-currency performance against EUR, sign-inverted from ECB units-per-EUR reference-rate changes.",
+      "composite": "Mixed-frequency regime score: 75% latest national equity-benchmark direction and 25% ECB currency-vs-EUR; weights are renormalized when a component is unavailable.",
+      "filings": "Count of SEC filing events mapped to the country during the trailing seven days; activity is contextual and not directional.",
+      "macro": "Latest annual World Development Indicators for GDP growth, inflation, unemployment, and current-account balance. Years can differ by indicator and values are not blended into the higher-frequency market regime."
+    }
+  }
+}

@@ -1,8 +1,11 @@
 import SwiftUI
+import Charts
 
 struct CountryProfileView: View {
     @EnvironmentObject private var model: AppModel
     let selectedCountry: String?
+    @State private var showsMarketHistory = false
+    @State private var isRefreshingContext = false
 
     private var iso: String? {
         selectedCountry?.uppercased()
@@ -59,8 +62,14 @@ struct CountryProfileView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Country profile")
-                .font(.headline)
+            HStack {
+                Text("Country profile").font(.headline)
+                Spacer()
+                Button { Task { await refreshContext() } } label: {
+                    if isRefreshingContext { ProgressView().controlSize(.small).frame(width: 44, height: 44) }
+                    else { Image(systemName: "arrow.clockwise").frame(width: 44, height: 44) }
+                }.disabled(isRefreshingContext).accessibilityLabel("Refresh country context")
+            }
 
             if let iso {
                 VStack(alignment: .leading, spacing: 10) {
@@ -93,6 +102,42 @@ struct CountryProfileView: View {
                         Button("Load transport context") {
                             Task { await model.loadOptionalContext("transport") }
                         }.font(.caption.weight(.semibold)).frame(minHeight: 44)
+                    }
+
+                    if let latestWeather {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Weather outlook")
+                                .font(.headline)
+                            Text("\(latestWeather.location_name ?? countryName) · country reference location")
+                                .font(.caption).foregroundStyle(.secondary)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
+                                CountryMetric(label: "Feels like", value: "\(format(latestWeather.apparent_temp_c))°C", detail: latestWeather.weather_desc ?? "Current condition")
+                                CountryMetric(label: "Wind / gust", value: "\(format(latestWeather.wind_speed)) / \(format(latestWeather.wind_gust))", detail: "m/s")
+                                CountryMetric(label: "Air quality", value: latestWeather.air_quality?.label ?? "—", detail: "OpenWeather provider scale")
+                                CountryMetric(
+                                    label: "Daily range",
+                                    value: latestWeather.forecast?.first.map { "\(format($0.temp_min_c))–\(format($0.temp_max_c))°C" } ?? "—",
+                                    detail: latestWeather.forecast?.first?.precipitation_probability.map { "\(Int($0))% precipitation" } ?? "No forecast"
+                                )
+                            }
+                            if let forecast = latestWeather.forecast, !forecast.isEmpty {
+                                Chart(forecast) { day in
+                                    if let date = APIDateParser.parse(day.forecast_time), let low = day.temp_min_c, let high = day.temp_max_c {
+                                        BarMark(x: .value("Day", date, unit: .day), yStart: .value("Low °C", low), yEnd: .value("High °C", high), width: .ratio(0.35))
+                                            .foregroundStyle(ClaritasPalette.orange)
+                                    }
+                                }.frame(height: 140).chartYAxisLabel("Forecast °C")
+                            }
+                            ForEach(latestWeather.alerts ?? []) { alert in
+                                DisclosureGroup(alert.event) {
+                                    Text(alert.description ?? alert.headline ?? alert.event).font(.caption)
+                                    if let instruction = alert.instruction { Text(instruction).font(.caption.weight(.semibold)) }
+                                    Text("\(alert.sender_name) · \(alert.area ?? countryName)").font(.caption2).foregroundStyle(.secondary)
+                                }.font(.subheadline)
+                            }
+                            Text("Updated \(formatDate(latestWeather.observedDate)) · \(latestWeather.attribution ?? latestWeather.source_name ?? "Weather reference")")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
                     }
 
                     if let marketOverview {
@@ -139,23 +184,9 @@ struct CountryProfileView: View {
                             Text("OECD and ECB form the directional regime. Annual World Bank indicators remain a separate macro layer so unlike frequencies are not silently blended.")
                                 .font(.caption2)
                                 .foregroundStyle(.secondary)
-                        }
-                    }
-
-                    if let latestWeather {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Weather outlook")
-                                .font(.headline)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 10)], spacing: 10) {
-                                CountryMetric(label: "Feels like", value: "\(format(latestWeather.apparent_temp_c))°C", detail: latestWeather.weather_desc ?? "Current condition")
-                                CountryMetric(label: "Wind / gust", value: "\(format(latestWeather.wind_speed)) / \(format(latestWeather.wind_gust))", detail: "m/s")
-                                CountryMetric(label: "Air quality", value: latestWeather.air_quality?.label ?? "—", detail: "OpenWeather provider scale")
-                                CountryMetric(
-                                    label: "Next day",
-                                    value: latestWeather.forecast?.first.map { "\(format($0.temp_min_c))–\(format($0.temp_max_c))°C" } ?? "—",
-                                    detail: latestWeather.forecast?.first?.precipitation_probability.map { "\(Int($0))% precipitation" } ?? "No forecast"
-                                )
-                            }
+                            DisclosureGroup("Market history & instruments", isExpanded: $showsMarketHistory) {
+                                if showsMarketHistory { CountryMarketHistoryView(country: iso).id(iso) }
+                            }.font(.subheadline)
                         }
                     }
 
@@ -189,9 +220,9 @@ struct CountryProfileView: View {
                         }
                     }
 
-                    Text("Sources: \(topSourceLabels)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    if !countryNews.isEmpty {
+                        Text("Sources: \(topSourceLabels)").font(.caption).foregroundStyle(.secondary)
+                    }
 
                     if let latestHeadline = countryNews.first {
                         Text("Latest headline: \(latestHeadline.presentationTitle)")
@@ -267,9 +298,10 @@ struct CountryProfileView: View {
         }
         .task(id: selectedCountry) {
             guard selectedCountry != nil else { return }
-            await model.loadOptionalContext("leadership")
-            await model.loadOptionalContext("weather")
-            await model.loadOptionalContext("markets")
+            async let leadership: Void = model.loadOptionalContext("leadership")
+            async let weather: Void = model.loadOptionalContext("weather")
+            async let markets: Void = model.loadOptionalContext("markets")
+            _ = await (leadership, weather, markets)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -277,6 +309,16 @@ struct CountryProfileView: View {
     private func format(_ value: Double?) -> String {
         guard let value else { return "—" }
         return value.formatted(.number.precision(.fractionLength(1)))
+    }
+
+    private func refreshContext() async {
+        guard !isRefreshingContext else { return }
+        isRefreshingContext = true
+        defer { isRefreshingContext = false }
+        async let weather: Void = model.loadOptionalContext("weather", force: true)
+        async let markets: Void = model.loadOptionalContext("markets", force: true)
+        async let leadership: Void = model.loadOptionalContext("leadership", force: true)
+        _ = await (weather, markets, leadership)
     }
 
     private func signedPercent(_ value: Double?) -> String {
@@ -317,5 +359,49 @@ private struct CountryMetric: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
         .brandGlass(cornerRadius: 12)
+    }
+}
+
+private struct CountryMarketHistoryView: View {
+    let country: String
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var detail: CountryMarketDetail?
+    @State private var failed = false
+    @State private var retry = 0
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let detail {
+                history(detail.index_history, label: detail.summary.index_name ?? "National benchmark")
+                history(detail.fx_history, label: "\(detail.summary.currency ?? "FX") vs EUR")
+                ForEach(detail.related_instruments) { instrument in
+                    HStack {
+                        Text(instrument.company_name ?? instrument.symbol).font(.caption.weight(.semibold))
+                        Spacer()
+                        if let change = instrument.percent_change { Text("\(change.formatted(.number.precision(.fractionLength(1))))%").font(.caption.monospacedDigit()) }
+                    }
+                }
+            } else if failed {
+                Button("Retry market history") { retry += 1 }.frame(minHeight: 44)
+            } else { ProgressView("Loading market history") }
+        }
+        .task(id: "\(country)|\(retry)") {
+            detail = nil; failed = false
+            do { let value = try await model.api.fetchCountryMarketDetail(country: country); guard !Task.isCancelled else { return }; detail = value }
+            catch { guard !Task.isCancelled else { return }; failed = true }
+        }
+    }
+    @ViewBuilder
+    private func history(_ points: [CountryMarketDetail.Point], label: String) -> some View {
+        if !points.isEmpty {
+            Text(label).font(.caption.weight(.semibold))
+            Chart(points) { point in
+                if let date = point.date {
+                    LineMark(x: .value("Period", date), y: .value(label, point.value))
+                        .foregroundStyle(ClaritasPalette.dataBlue(for: colorScheme))
+                }
+            }.frame(height: 140)
+            if let last = points.last { Text("\(last.period_end) · \(last.value.formatted())").font(.caption2).foregroundStyle(.secondary) }
+        }
     }
 }

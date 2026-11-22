@@ -1653,8 +1653,21 @@ struct CountryWeather: Codable, Identifiable {
     let forecast: [DailyWeatherForecast]?
     let air_quality: AirQuality?
     let alert_count: Int?
+    var alerts: [CountryWeatherAlert]? = nil
     var id: String { country + observed_at }
     var observedDate: Date? { APIDateParser.parse(observed_at) }
+}
+
+struct CountryWeatherAlert: Codable, Identifiable {
+    let event: String
+    let source_name: String
+    let sender_name: String
+    let starts_at: String
+    let headline: String?
+    let description: String?
+    let instruction: String?
+    let area: String?
+    var id: String { source_name + event + starts_at + (area ?? "") }
 }
 
 struct DailyWeatherForecast: Codable, Identifiable {
@@ -2046,6 +2059,20 @@ struct CountryMarketMethodology: Codable {
     let composite: String
     let filings: String
     let macro: String?
+}
+
+struct CountryMarketDetail: Codable {
+    struct Point: Codable, Identifiable {
+        let period_end: String
+        let value: Double
+        let percent_change: Double?
+        var id: String { period_end }
+        var date: Date? { APIDateParser.parse(period_end) }
+    }
+    let summary: CountryMarketOverview
+    let index_history: [Point]
+    let fx_history: [Point]
+    let related_instruments: [MarketQuote]
 }
 
 struct CountryMarketOverviewResponse: Codable {
@@ -3125,6 +3152,21 @@ enum SignalDomainPresentation {
 }
 
 struct IntelligenceEvidence: Codable, Identifiable {
+    struct TranscriptExcerpt: Codable, Identifiable {
+        let segment_id: String
+        let start_ms: Int
+        let end_ms: Int?
+        let timing_method: String
+        let quote: String
+        let source_url: String?
+        var id: String { segment_id }
+        var timeLabel: String {
+            if timing_method == "unknown" { return "Transcript excerpt" }
+            let seconds = max(0, start_ms / 1000)
+            return (timing_method == "inferred" ? "Approx. " : "") + String(format: "%d:%02d", seconds / 60, seconds % 60)
+        }
+    }
+    var transcript_excerpts: [TranscriptExcerpt]? = nil
     let id: String
     let domain: String
     let evidence_type: String
@@ -3613,6 +3655,39 @@ struct IntelligenceNewsImage: Codable, Identifiable {
 }
 
 struct EventWeatherEnvelope: Codable { let weather: EventWeatherVisual? }
+
+struct EventTransportEnvelope: Codable { let transport: EventTransportDetail? }
+struct EventTransportDetail: Codable {
+    struct Hour: Codable, Identifiable {
+        var id: Date { observed_at }
+        var utcHour: Int { var calendar = Calendar(identifier: .gregorian); calendar.timeZone = TimeZone(secondsFromGMT: 0)!; return calendar.component(.hour, from: observed_at) }
+        let observed_at: Date
+        let arrivals: Int
+        let departures: Int
+    }
+    struct Movement: Codable, Identifiable {
+        let id: String
+        let entity_id: String
+        let entity_name: String?
+        let event_type: String
+        let vehicle_category: String?
+        let observed_at: Date
+        let source_name: String
+    }
+    let current: Double
+    let baseline: Double
+    let observed_at: Date
+    let confidence: Double?
+    let location_name: String
+    let country: String?
+    let source_name: String?
+    let notice: String
+    let coverage: String
+    let window_start: Date?
+    let window_end: Date?
+    let hours: [Hour]
+    let movements: [Movement]
+}
 
 struct EventWeatherVisual: Codable {
     struct Forecast: Codable, Identifiable {

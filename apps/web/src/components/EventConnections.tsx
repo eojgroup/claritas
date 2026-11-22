@@ -88,12 +88,17 @@ export default function EventConnections({ detail, onOpenImagery, selectedFamily
             <div className="event-record-meta"><span>{sourceFamilyLabel(evidenceFamily(item))}</span><span className={`evidence-relationship-${item.relationship}`}>{evidenceFamily(item) === "social" ? "Unverified claim" : relationshipLabel(item.relationship)}</span><time dateTime={item.observed_at}>{dateLabel(item.observed_at)}</time></div>
             <h5 dir="auto">{title(item)}</h5>
             <HeadlineTranslation value={item} showSummaryNotice />
-            {summary(item) && <p className="event-record-summary line-clamp-2">{summary(item)}</p>}
+            {summary(item) && ((summary(item)?.length ?? 0) > 180 ? <details className="event-source-reading"><summary>{summary(item)?.slice(0, 180)}…</summary><p className="event-record-summary">{summary(item)}</p></details> : <p className="event-record-summary">{summary(item)}</p>)}
+            {url && <a className="event-source-action" href={url} target="_blank" rel="noreferrer">{evidenceFamily(item) === "podcast" ? "Open episode" : evidenceFamily(item) === "social" ? "Open attributed post" : "Read source"} <ExternalLink size={12} /></a>}
+            {item.transcript_excerpts?.map((excerpt) => <blockquote key={excerpt.segment_id} className="event-transcript-excerpt">
+              <strong>{excerpt.timing_method === "unknown" ? "Transcript excerpt" : `${excerpt.timing_method === "inferred" ? "Approx. " : ""}${Math.floor(excerpt.start_ms / 60000)}:${String(Math.floor(excerpt.start_ms / 1000) % 60).padStart(2, "0")}`}</strong>
+              <p>{excerpt.quote}</p><small>Attributed transcript · does not independently confirm this event</small>
+            </blockquote>)}
             <details className="event-record-inspection"><summary>Connection & provenance</summary>
             <div className="event-record-connection"><span className="event-link-chip">{evidenceFamily(item) === "social" && item.correlation_factors?.decision !== "created" ? "Context match" : linkage.label}</span>{dimensions.map((dimension) => <span className="event-dimension-chip" key={dimension}>{dimension}</span>)}</div>
             {(matchedEntities.length > 0 || item.location_name) && <p className="event-matched-values">{item.location_name && <span>Place: {item.location_name}</span>}{matchedEntities.length > 0 && <span>Shared mentions: {matchedEntities.map((value) => value.replace(/^instrument:/, "$").replace(/^[a-z_]+:/, "")).join(", ")}</span>}</p>}
             <p className="event-link-explanation"><strong>Why shown:</strong> {linkage.explanation}</p>
-            <div className="event-record-provenance"><span>{item.source_name || item.source_record_type}</span>{item.published_at && <span>Published {dateLabel(item.published_at)}</span>}{item.attribution && <span>Attribution: {item.attribution}</span>}{url && <a href={url} target="_blank" rel="noreferrer">Open source <ExternalLink size={12} /></a>}{item.native_route && <a href={item.native_route}>Source explorer <ArrowUpRight size={12} /></a>}</div></details>
+            <div className="event-record-provenance"><span>{item.source_name || item.source_record_type}</span>{item.published_at && <span>Published {dateLabel(item.published_at)}</span>}{item.attribution && <span>Attribution: {item.attribution}</span>}</div></details>
           </li>;
         })}
       </ol>
