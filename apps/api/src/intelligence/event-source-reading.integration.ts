@@ -10,7 +10,7 @@ test("event reading includes bounded timestamped excerpts only from the attached
   const source = (await query(`INSERT INTO source(name,api_base_url) VALUES($1,'https://example.org') RETURNING id`, [key])).rows[0].id;
   let eventId: string | undefined;
   try {
-    const item = (await query(`INSERT INTO item(source_id,kind,title,url,event_time) VALUES($1,'podcast_episode','Episode','https://example.org/episode',now()) RETURNING id`, [source])).rows[0].id;
+    const item = (await query(`INSERT INTO item(source_id,kind,title,url,event_time,payload) VALUES($1,'podcast_episode','Episode','https://example.org/episode',now(),'{}') RETURNING id`, [source])).rows[0].id;
     const feed = (await query(`INSERT INTO podcast_feed(source_id,podcast_index_id,title,feed_url) VALUES($1,$2,'Publisher','https://example.org/feed') RETURNING id`, [source, item])).rows[0].id;
     const episode = (await query(`INSERT INTO podcast_episode(item_id,feed_id,podcast_index_id,transcript_status) VALUES($1,$2,$1,'available') RETURNING id`, [item, feed])).rows[0].id;
     const signal = (await query(`INSERT INTO intelligence_signal(episode_id,signal_type,title,summary,canonical_key,extraction_method)
