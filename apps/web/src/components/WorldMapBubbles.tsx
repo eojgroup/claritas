@@ -62,6 +62,7 @@ export type WorldMapPoint = {
 
 export type WorldMapBubblesProps = {
   data: BubbleDatum[];
+  corridors?: Array<{origin:string;destination:string;label:string;weight:number}>;
   onSelect?: (countryIso2: string) => void;
   dark?: boolean;
   legend?: boolean;
@@ -363,6 +364,7 @@ export default memo(function WorldMapBubbles({
   showBubbles = true,
   points = NO_EVENT_POINTS,
   onSelectPoint,
+  corridors = [],
 }: WorldMapBubblesProps) {
   const countryContexts = useCountryContexts();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -1019,6 +1021,11 @@ export default memo(function WorldMapBubbles({
             );
           })}
 
+          {corridors.map((route) => {
+            const from = WORLD_GEOMETRY.centroidByIso.get(route.origin), to = WORLD_GEOMETRY.centroidByIso.get(route.destination);
+            const a = from && projection(from), b = to && projection(to); if (!a || !b) return null;
+            return <path key={`${route.origin}:${route.destination}:${route.label}`} d={`M${a[0]},${a[1]} Q${(a[0]+b[0])/2},${Math.min(a[1],b[1])-Math.min(80,Math.abs(a[0]-b[0])/4)} ${b[0]},${b[1]}`} fill="none" stroke="var(--shell-accent)" strokeWidth={Math.min(5,1+Math.log2(1+route.weight)) / view.scale} opacity="0.8" role="button" tabIndex={0} aria-label={route.label} onClick={(e)=>{e.stopPropagation();onSelect?.(route.destination);}} onKeyDown={(e)=>{if(e.key==='Enter')onSelect?.(route.destination);}}><title>{route.label}</title></path>;
+          })}
           {!showBubbles && featuredMarker && (() => {
             const point = projection(featuredMarker.coordinate);
             if (!point) return null;

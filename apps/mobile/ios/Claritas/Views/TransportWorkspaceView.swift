@@ -1663,3 +1663,282 @@ private final class TransportEntityAnnotation: NSObject, MKAnnotation {
         coordinate = CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
     }
 }
+
+/// Saved transport browsing stays in the World scope; no additional map or provider call.
+struct ScopeTransportExplorer: View {
+    let country: String?
+    var onOverview: ((TransportOverview?) -> Void)? = nil
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var overview: TransportOverview?
+    @State private var failed = false
+    @State private var retry = 0
+    @State private var mode: TransportMode?
+    @State private var days = 30
+    @State private var selectedEntity: TransportEntity?
+    @State private var search = ""
+    @State private var topicOverview: IntelligenceOverview?
+
+    private var scopeKey: String { "\(country ?? "global")|\(mode?.rawValue ?? "all")|\(retry)" }
+    private var entities: [TransportEntity] {
+        let term = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return (overview?.entities ?? []).filter {
+            term.isEmpty || [$0.display_name, $0.callsign, $0.flight_number, $0.entity_id, $0.route_label, $0.current_location_name]
+                .compactMap { $0 }.joined(separator: " ").lowercased().contains(term)
+        }
+    }
+    private var relatedEvents: [IntelligenceEvent] {
+        scopeRelatedEvents(topic: "transport", country: country, overview: topicOverview, fallback: model.intelligenceOverview)
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 14) {
+                Text(country.map { "\(Locale.current.localizedString(forRegionCode: $0) ?? $0) transport" } ?? "Global transport")
+                    .font(.title3.weight(.semibold))
+                Text("Browse observed vessels, flights, routes and monitored-port movements in this scope.").font(.caption).foregroundStyle(.secondary)
+                Picker("Transport mode", selection: $mode) {
+                    Text("All").tag(Optional<TransportMode>.none)
+                    Text("Shipping").tag(Optional(TransportMode.maritime))
+                    Text("Flights").tag(Optional(TransportMode.aviation))
+                }.pickerStyle(.segmented)
+                if let overview {
+                    scopeMetrics(overview)
+                    history(overview)
+                    ports(overview)
+                    routes(overview)
+                    entityBrowser
+                    if !relatedEvents.isEmpty {
+                        Text("Related developments & reporting").font(.headline)
+                        Text("These developments have transport signals in the current country/time scope. Open one for its linked reporting; this is not an explanation of every movement change.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                        ForEach(relatedEvents.prefix(8)) { event in
+                            Button { model.selectIntelligenceEvent(event) } label: {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text(event.title).font(.subheadline.weight(.semibold))
+                                    Text(event.summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 7)
+                            }.buttonStyle(.plain)
+                        }
+                    }
+                    Text("Updated \(overview.generatedDate?.formatted(date: .abbreviated, time: .shortened) ?? overview.generated_at). AIS and ADS-B reception is partial; counts are monitored samples, not complete national traffic or cargo tonnage.")
+                        .font(.caption2).foregroundStyle(.secondary)
+                } else if failed {
+                    Text("Transport context could not be loaded.").font(.caption)
+                    Button("Retry transport") { retry += 1 }.frame(minHeight: 44)
+                } else { ProgressView("Loading saved transport context") }
+            }.padding(14)
+        }
+        .task(id: scopeKey) {
+            overview = nil; onOverview?(nil); failed = false; selectedEntity = nil
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") {
+                overview = model.mapReviewScopedTransport
+                onOverview?(overview)
+                return
+            }
+            #endif
+            do {
+                let value = try await model.api.fetchTransportOverview(detail: "full", mode: mode, country: country, entityLimit: 240, historyDays: 400)
+                guard !Task.isCancelled else { return }; overview = value; onOverview?(value)
+            } catch { guard !Task.isCancelled else { return }; failed = true }
+        }
+        .task(id: "\(country ?? "global")|\(model.overviewHours)") {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+            #endif
+            topicOverview = nil
+            let scope = IntelligenceOverviewScope(hours: model.overviewHours, country: country, topic: "transport", priority: "all")
+            while !Task.isCancelled {
+                guard let value = try? await model.api.fetchIntelligenceOverview(scope: scope), !Task.isCancelled else { return }
+                topicOverview = value
+                guard value.snapshot?.isWarming == true else { return }
+                do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+            }
+        }
+        .sheet(item: $selectedEntity) { entity in
+            NavigationStack {
+                ScopeTransportEntityReader(entity: entity)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { selectedEntity = nil } } }
+            }
+        }
+    }
+
+    private func scopeMetrics(_ value: TransportOverview) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("\(value.summary.modes.maritime.active.formatted()) vessels", systemImage: "ferry")
+                Spacer()
+                Label("\(value.summary.modes.aviation.active.formatted()) flights", systemImage: "airplane")
+            }.font(.subheadline.weight(.semibold))
+            if let trends = value.trends {
+                metric("Monitored-port departures", trends.maritime.ship_departures)
+                metric("Monitored-port arrivals", trends.maritime.ship_arrivals)
+                metric("Tracked aircraft", trends.aviation.tracked_flights)
+                Text("Past 24 hours compared with the preceding 24 hours; reception and source coverage can change.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
+        }.padding(12).brandGlass(cornerRadius: 14)
+    }
+    private func metric(_ title: String, _ value: TransportTrendMetric) -> some View {
+        HStack {
+            Text(title).font(.caption)
+            Spacer()
+            Text("\(value.current.formatted()) · \(value.change_pct.map { String(format: "%+.1f%%", $0) } ?? "no comparison")")
+                .font(.caption.monospacedDigit())
+        }
+    }
+    @ViewBuilder private func history(_ value: TransportOverview) -> some View {
+        if let history = value.history {
+            Text("Movement & activity over time").font(.headline)
+            Picker("Retained history window", selection: $days) {
+                Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90); Text("Year").tag(365)
+            }.pickerStyle(.segmented)
+            let points = Array(history.series.suffix(days))
+            Text("Daily peak sampled vehicles").font(.caption.weight(.semibold))
+            Chart(points) { point in
+                if let date = point.date, point.observed_hours > 0 {
+                    if let vessels = point.maritime_entities {
+                        BarMark(x: .value("Date", date, unit: .day), y: .value("Sampled vehicles", vessels)).foregroundStyle(by: .value("Mode", "Shipping"))
+                    }
+                    if let flights = point.aviation_entities {
+                        BarMark(x: .value("Date", date, unit: .day), y: .value("Sampled vehicles", flights)).foregroundStyle(by: .value("Mode", "Flights"))
+                    }
+                }
+            }.frame(height: 160)
+                .chartForegroundStyleScale(["Shipping": ClaritasPalette.orange, "Flights": ClaritasPalette.dataBlue(for: colorScheme)])
+            Text("\(points.filter { $0.observed_hours > 0 }.count) observed days in this window. Gaps indicate missing observations, not zero traffic.")
+                .font(.caption2).foregroundStyle(.secondary)
+            if points.contains(where: { $0.ship_departures != nil || $0.ship_arrivals != nil }) {
+                Text("Monitored-port arrivals & departures").font(.caption.weight(.semibold))
+                Chart(points) { point in
+                    if let date = point.date {
+                        if let arrivals = point.ship_arrivals {
+                            BarMark(x: .value("Date", date, unit: .day), y: .value("Movements", arrivals)).foregroundStyle(by: .value("Movement", "Arrivals"))
+                        }
+                        if let departures = point.ship_departures {
+                            BarMark(x: .value("Date", date, unit: .day), y: .value("Movements", departures)).foregroundStyle(by: .value("Movement", "Departures"))
+                        }
+                    }
+                }.frame(height: 140)
+            }
+            ForEach(history.comparisons ?? []) { comparison in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack {
+                        Text(comparison.label).font(.caption.weight(.semibold))
+                        Spacer()
+                        Text(comparison.comparable ? comparison.change_percent.map { String(format: "%+.1f%%", $0) } ?? "No percentage baseline" : "Insufficient coverage")
+                            .font(.caption.monospacedDigit())
+                    }
+                    Text(comparison.notice).font(.caption2).foregroundStyle(.secondary)
+                    Text("Observed days: \(comparison.current.observed_days)/30 current · \(comparison.previous.observed_days)/30 comparison. Source-observation hours: \(comparison.current.observation_hours) / \(comparison.previous.observation_hours).")
+                        .font(.caption2).foregroundStyle(.secondary)
+                }.padding(.vertical, 5)
+            }
+            Text("Retained activity: \(history.available_from.map { String($0.prefix(10)) } ?? "not available") – \(history.available_to.map { String($0.prefix(10)) } ?? "not available"). Daily activity retention \(history.activity_retention_days ?? history.requested_days) days; monitored-port movements \(history.movement_retention_days ?? 100) days.")
+                .font(.caption2).foregroundStyle(.secondary)
+            DisclosureGroup("History coverage & methods") { Text(history.methodology).font(.caption2) }
+        } else if country == nil {
+            Text("Select a country on the world map to explore retained daily activity, port volumes and month/year comparisons where coverage exists.").font(.caption).foregroundStyle(.secondary)
+        }
+    }
+    @ViewBuilder private func ports(_ value: TransportOverview) -> some View {
+        if let ports = value.ports, !ports.isEmpty {
+            DisclosureGroup("Monitored ports · \(ports.count)") {
+                ForEach(ports) { port in
+                    HStack {
+                        Text("\(port.location_name) · \(port.country)").font(.caption.weight(.semibold))
+                        Spacer()
+                        Text("\(port.arrivals) in · \(port.departures) out").font(.caption.monospacedDigit())
+                    }.padding(.vertical, 6)
+                }
+                Text("Tracked transitions in the past 24 hours.").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+    }
+    @ViewBuilder private func routes(_ value: TransportOverview) -> some View {
+        if !value.routes.isEmpty {
+            DisclosureGroup("Observed corridors · \(value.routes.count)") {
+                ForEach(value.routes.prefix(30)) { route in
+                    HStack {
+                        Image(systemName: route.mode == .aviation ? "airplane" : "ferry")
+                        Text("\(route.origin_name) → \(route.destination_name)").font(.caption)
+                        Spacer()
+                        Text("\(route.active_count)").font(.caption.monospacedDigit())
+                    }.padding(.vertical, 6)
+                }
+            }
+        }
+    }
+    private var entityBrowser: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Browse vessels & flights").font(.headline)
+            TextField("Name, flight, vessel or route", text: $search).textFieldStyle(.roundedBorder)
+            Text("\(entities.count) matching retained positions · bounded to 240 recent samples").font(.caption2).foregroundStyle(.secondary)
+            ForEach(entities.prefix(80)) { entity in
+                Button { selectedEntity = entity } label: {
+                    HStack {
+                        Image(systemName: entity.mode == .aviation ? "airplane" : "ferry")
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(entity.display_name ?? entity.flight_number ?? entity.callsign ?? entity.entity_id).font(.caption.weight(.semibold))
+                            Text(entity.route_label ?? entity.current_location_name ?? "Route unresolved").font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.caption2)
+                    }.frame(minHeight: 44)
+                }.buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// Topic membership includes news-led developments, which may have no transport-origin evidence.
+func scopeRelatedEvents(topic: String, country: String?, overview: IntelligenceOverview?, fallback: IntelligenceOverview?) -> [IntelligenceEvent] {
+    var seen = Set<String>()
+    var result: [IntelligenceEvent] = []
+    for view in [overview, fallback].compactMap({ $0 }) {
+        let topicIDs = Set(view.timeline.filter { $0.topic == topic }.map(\.event_id))
+            .union(view.topics.first(where: { $0.key == topic })?.event_ids ?? [])
+        for event in view.events + (view.map_events ?? []) {
+            let domain = topic == "markets" ? "market" : topic
+            guard country == nil || view.filters.country == country || event.primary_country_iso2 == country else { continue }
+            guard view.filters.topic == topic || topicIDs.contains(event.id) || event.origin_domain == domain || event.signal_domains?.contains(domain) == true else { continue }
+            if seen.insert(event.id).inserted { result.append(event) }
+        }
+    }
+    return result.sorted { $0.last_activity_time > $1.last_activity_time }
+}
+
+struct ScopeTransportEntityReader: View {
+    let entity: TransportEntity
+    @EnvironmentObject private var model: AppModel
+    @State private var detail: TransportEntityDetail?
+    @State private var failed = false
+    @State private var retry = 0
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(entity.display_name ?? entity.flight_number ?? entity.callsign ?? entity.entity_id).font(.title3.weight(.semibold))
+                Text(entity.route_label ?? entity.current_location_name ?? "Route unresolved")
+                Text("\(entity.vehicle_category ?? entity.vehicle_type ?? entity.mode.rawValue) · \(entity.source_name)").font(.caption).foregroundStyle(.secondary)
+                if let detail {
+                    Text("Retained position trail · \(detail.track.count) samples").font(.headline)
+                    Text("Observed positions, not a planned route.").font(.caption2).foregroundStyle(.secondary)
+                    ForEach(detail.track.reversed()) { point in
+                        HStack {
+                            Text(APIDateParser.parse(point.observed_at)?.formatted(date: .abbreviated, time: .shortened) ?? point.observed_at)
+                            Spacer()
+                            Text(point.current_location_name ?? String(format: "%.2f°, %.2f°", point.latitude, point.longitude))
+                        }.font(.caption)
+                    }
+                } else if failed { Button("Retry position trail") { retry += 1 }.font(.caption) }
+                else { ProgressView("Loading saved trail") }
+            }.padding()
+        }.navigationTitle("Transport detail")
+        .task(id: "\(entity.id)|\(retry)") {
+            failed = false
+            do { let value = try await model.api.fetchTransportEntity(mode: entity.mode, entityID: entity.entity_id); guard !Task.isCancelled else { return }; detail = value }
+            catch { guard !Task.isCancelled else { return }; failed = true }
+        }
+    }
+}

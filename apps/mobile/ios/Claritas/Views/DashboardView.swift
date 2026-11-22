@@ -2561,13 +2561,19 @@ struct WeatherWorkspaceView: View {
 }
 
 struct MarketsWorkspaceView: View {
+    var scopedToSelection = false
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var query = ""
+    @State private var topicOverview: IntelligenceOverview?
+    private var relatedEvents: [IntelligenceEvent] {
+        scopeRelatedEvents(topic: "markets", country: scopedToSelection ? model.selectedCountry : nil, overview: topicOverview, fallback: model.intelligenceOverview)
+    }
 
     private var rows: [CountryMarketOverview] {
         let term = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         return model.countryMarkets
+            .filter { !scopedToSelection || model.selectedCountry == nil || $0.country.uppercased() == model.selectedCountry?.uppercased() }
             .filter { row in
                 term.isEmpty || [row.country, row.country_name, row.currency ?? "", row.index_name ?? ""]
                     .joined(separator: " ").lowercased().contains(term)
@@ -2619,11 +2625,30 @@ struct MarketsWorkspaceView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
 
+                    if !relatedEvents.isEmpty {
+                        BrandCard {
+                            DisclosureGroup("Related market reporting · \(relatedEvents.count)") {
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Developments in this market topic and country/time scope; reporting does not by itself explain a price move.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                ForEach(relatedEvents.prefix(8)) { event in
+                                    Button { model.selectIntelligenceEvent(event) } label: {
+                                        VStack(alignment: .leading, spacing: 4) {
+                                            Text(event.title).font(.subheadline.weight(.semibold))
+                                            Text(event.summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                                        }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 6)
+                                    }.buttonStyle(.plain)
+                                }
+                            }
+                            }
+                        }
+                    }
+
                     BrandCard {
                         VStack(alignment: .leading, spacing: 14) {
                             BrandSectionHeader(
                                 kicker: "Markets",
-                                title: "Global economy and market regimes",
+                                title: model.selectedCountry.flatMap { scopedToSelection ? Locale.current.localizedString(forRegionCode: $0) : nil }.map { "\($0) markets & economy" } ?? "Global economy and market regimes",
                                 detail: "OECD national benchmarks, ECB daily currency rates, World Bank annual macro context and SEC primary events."
                             )
                             PhoneDetailSection("\(rows.count) countries · market coverage details") {
@@ -2649,7 +2674,7 @@ struct MarketsWorkspaceView: View {
                     }
 
                     PhoneDetailSection("Charts & market analysis") {
-                        BrandCard {
+                        if !indexRows.isEmpty { BrandCard {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Largest national benchmark moves")
                                     .font(.headline)
@@ -2662,11 +2687,11 @@ struct MarketsWorkspaceView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                        }
+                        } }
 
                         BrandCard {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Global real-GDP growth panorama")
+                                Text(scopedToSelection && model.selectedCountry != nil ? "Economic growth" : "Global real-GDP growth panorama")
                                     .font(.headline)
                                 Chart(macroRows) { row in
                                     BarMark(x: .value("Country", row.country), y: .value("Annual GDP growth", row.gdp_growth ?? 0))
@@ -2775,6 +2800,9 @@ struct MarketsWorkspaceView: View {
                                 Text("Composite = 75% latest national benchmark direction + 25% ECB daily FX direction when both exist; missing components are not imputed.")
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
+                                DisclosureGroup("History & related instruments") {
+                                    CountryMarketHistoryView(country: selected.country).id(selected.country)
+                                }
                             }
                         }
                     }
@@ -2811,6 +2839,19 @@ struct MarketsWorkspaceView: View {
             }
         }
         .task { await model.loadOptionalContext("markets") }
+        .task(id: "\(scopedToSelection ? model.selectedCountry ?? "global" : "global")|\(model.overviewHours)") {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+            #endif
+            topicOverview = nil
+            let scope = IntelligenceOverviewScope(hours: model.overviewHours, country: scopedToSelection ? model.selectedCountry : nil, topic: "markets", priority: "all")
+            while !Task.isCancelled {
+                guard let value = try? await model.api.fetchIntelligenceOverview(scope: scope), !Task.isCancelled else { return }
+                topicOverview = value
+                guard value.snapshot?.isWarming == true else { return }
+                do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
+            }
+        }
     }
 
     private func mobileSignedPercent(_ value: Double?) -> String {
@@ -5229,6 +5270,12 @@ struct WorldMapWorkspace: View {
     @State private var profileCountry: String?
     var refreshesAutomatically = true
     @State private var showsBriefing = false
+    @State private var exploration = "developments"
+    @State private var outlook: TransportOutlook?
+    @State private var outlookDays = 7
+    @State private var outlookFailed = false
+    @State private var scopedTransport: TransportOverview?
+    @State private var mappedTransportEntity: TransportEntity?
 
     init(refreshesAutomatically: Bool = true, briefingInitiallyOpen: Bool = false) {
         var briefing = briefingInitiallyOpen
@@ -5237,6 +5284,7 @@ struct WorldMapWorkspace: View {
         let arguments = ProcessInfo.processInfo.arguments
         briefing = briefing || arguments.contains("-qa-briefing-snapshot")
         reviewContext = arguments.contains("-qa-country-snapshot") || arguments.contains("-qa-event-snapshot")
+            || arguments.contains("-qa-transport-snapshot") || arguments.contains("-qa-markets-snapshot")
         self.refreshesAutomatically = refreshesAutomatically && !arguments.contains("-qa-map-snapshot")
         #else
         self.refreshesAutomatically = refreshesAutomatically
@@ -5244,10 +5292,22 @@ struct WorldMapWorkspace: View {
         _showsBriefing = State(initialValue: briefing)
         _panelStop = State(initialValue: briefing || reviewContext ? 2 : 1)
         _wideContext = State(initialValue: briefing || reviewContext)
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot") { _exploration = State(initialValue: "transport") }
+        if ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _exploration = State(initialValue: "markets") }
+        #endif
     }
 
     private var points: [CountryBubblePoint] {
-        (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
+        if exploration == "transport" {
+            return (scopedTransport?.countries ?? []).enumerated().compactMap { index, country in
+                guard let coordinate = CountryCentroidLookup.coordinate(for: country.country) else { return nil }
+                return CountryBubblePoint(id: "transport-\(country.country)", iso: country.country,
+                    valueLabel: "\(country.active_count) tracked links", detail: "\(country.maritime.active) vessels · \(country.aviation.active) aircraft",
+                    magnitude: Double(country.active_count), colorValue: Double(country.active_count), rank: index + 1, coordinate: coordinate)
+            }
+        }
+        return (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
             guard let coordinate = CountryCentroidLookup.coordinate(for: country.country_iso2) else { return nil }
             return CountryBubblePoint(id: "overview-\(country.country_iso2)", iso: country.country_iso2,
                 valueLabel: "\(country.attention_score ?? 0)/100 relevance", detail: "\(country.event_count) updates · \(country.high_priority_count) high priority",
@@ -5281,12 +5341,12 @@ struct WorldMapWorkspace: View {
             let panelHeight = min(stops[2], max(stops[0], stops[panelStop] - panelDrag))
             ZStack(alignment: wide ? .topLeading : .bottom) {
                 ClaritasPalette.mapBackground(for: colorScheme).ignoresSafeArea()
-                NativeSignalMap(points: points, events: events, mode: .signals, mapRegion: .global,
+                NativeSignalMap(points: points, events: events, mode: exploration == "transport" ? .transport : .signals, mapRegion: .global,
                     compactPresentation: geometry.size.width < 600, selectedCountry: model.selectedCountry,
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: nil,
-                    transportEntities: [], resetToken: 0, onSelectCountry: selectCountry,
+                    transportEntities: exploration == "transport" ? scopedTransport?.entities ?? [] : [], resetToken: 0, onSelectCountry: selectCountry,
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
-                    immersive: true)
+                    immersive: true, corridors: exploration == "transport" ? outlook?.corridors ?? [] : [], onSelectTransportEntity: { mappedTransportEntity = $0 })
                     // Fit the geography to the unobstructed area. Opening context
                     // leaves this map instance (and its camera) mounted.
                     .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
@@ -5324,15 +5384,36 @@ struct WorldMapWorkspace: View {
             }
         }
         .onChange(of: model.selectedIntelligenceEventID) { id in
-            if id != nil { showsBriefing = false; profileCountry = nil; revealContext() }
+            if id != nil { showsBriefing = false; exploration = "developments"; profileCountry = nil; revealContext() }
         }
         .onChange(of: model.selectedCountry) { country in
+            scopedTransport = nil
             if model.selectedIntelligenceEventID == nil {
                 showsBriefing = false; profileCountry = country
                 if country != nil { revealContext() }
             }
         }
         .onAppear { if model.selectedIntelligenceEventID == nil { profileCountry = model.selectedCountry } }
+        .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
+            if let destination = note.object as? String, ["transport", "markets"].contains(destination) {
+                exploration = destination; showsBriefing = false; revealContext()
+            }
+        }
+        .task(id: "\(exploration)|\(model.selectedCountry ?? "global")|\(outlookDays)") {
+            outlook = nil; outlookFailed = false
+            guard exploration == "transport", let country = model.selectedCountry else { return }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+            #endif
+            do { let value = try await model.api.fetchTransportOutlook(country: country, days: outlookDays); guard !Task.isCancelled else { return }; outlook = value }
+            catch { if !Task.isCancelled { outlookFailed = true } }
+        }
+        .sheet(item: $mappedTransportEntity) { entity in
+            NavigationStack {
+                ScopeTransportEntityReader(entity: entity)
+                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { mappedTransportEntity = nil } } }
+            }
+        }
     }
 
     private var panelHandle: some View {
@@ -5358,13 +5439,13 @@ struct WorldMapWorkspace: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(showsBriefing ? "Daily briefing" : model.selectedIntelligenceEventID != nil ? "Event context" : model.selectedCountry.map(countryName) ?? "World overview")
                         .font(.title3.weight(.semibold)).lineLimit(1)
-                    Text(showsBriefing ? "Global publication" : "\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
+                    Text(showsBriefing ? "Global publication" : model.selectedIntelligenceEventID == nil && exploration == "transport" ? "Vessels, flights, ports & retained history" : model.selectedIntelligenceEventID == nil && exploration == "markets" ? "Benchmarks, currencies & economic context" : "\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
                 if showsBriefing || model.selectedIntelligenceEventID != nil || profileCountry != nil {
                     Button {
-                        model.selectedIntelligenceEventID = nil; profileCountry = nil
+                        model.selectedIntelligenceEventID = nil; profileCountry = nil; exploration = "developments"
                         if showsBriefing { showsBriefing = false; panelStop = 1; wideContext = false }
                     } label: { Image(systemName: "arrow.left").frame(width: 44, height: 44) }
                     .accessibilityLabel("Back to developments")
@@ -5391,16 +5472,48 @@ struct WorldMapWorkspace: View {
             }
             .padding(.horizontal, 18).padding(.top, wide ? 12 : 28).padding(.bottom, 10)
             Divider()
+            if !showsBriefing && model.selectedIntelligenceEventID == nil {
+                Picker("Explore the selected scope", selection: $exploration) {
+                    Text("Developments").tag("developments")
+                    Text("Transport").tag("transport")
+                    Text("Markets").tag("markets")
+                }
+                .pickerStyle(.segmented).padding(.horizontal, 14).padding(.vertical, 10)
+            }
             Group {
             if showsBriefing {
                 DailyBriefingWorkspaceView(embedded: true, automaticallyRefresh: refreshesAutomatically)
             } else if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
                 IntelligenceWorkspaceView(contextualEventID: id)
+            } else if exploration == "transport" {
+                VStack(alignment: .leading, spacing: 8) {
+                    if model.selectedCountry != nil {
+                        Picker("Country corridor outlook", selection: $outlookDays) { ForEach([7,30,90], id: \.self) { days in Text("\(days) days").tag(days) } }.pickerStyle(.segmented).padding(.horizontal,14)
+                        if let outlook {
+                            DisclosureGroup("Frequent destinations & corridors · \(outlook.days) completed days") {
+                                ScrollView { VStack(alignment: .leading, spacing: 8) {
+                                    Text(outlook.notice).font(.caption2).foregroundStyle(.secondary)
+                                    ForEach(outlook.corridors) { route in
+                                        Button { selectCountry(route.destination == outlook.country ? route.origin : route.destination) } label: {
+                                            Text("\(route.origin) → \(route.destination) · \(route.mode) · \(route.observed_days)/\(outlook.days) days\(route.flag_proxies > 0 ? " · flag estimates included" : "")").font(.caption).frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,5)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }}.frame(maxHeight:180)
+                            }.padding(.horizontal,14)
+                        } else { Text(outlookFailed ? "Saved corridor outlook unavailable" : "Loading saved corridor outlook…").font(.caption).padding(.horizontal,14) }
+                    }
+                    ScopeTransportExplorer(country: model.selectedCountry, onOverview: { scopedTransport = $0 })
+                }
+            } else if exploration == "markets" {
+                MarketsWorkspaceView(scopedToSelection: true)
             } else {
                 ScrollViewReader { reader in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             Color.clear.frame(height: 0).id("context-top")
+                            if model.intelligenceOverview != nil {
+                                ScopeMarketGlance(country: model.selectedCountry) { exploration = "markets"; revealContext() }
+                            }
                             if let profileCountry {
                                 CountryProfileView(selectedCountry: profileCountry)
                             }
@@ -5421,7 +5534,7 @@ struct WorldMapWorkspace: View {
     }
 
     private func openBriefing() {
-        model.selectedIntelligenceEventID = nil; profileCountry = nil
+        model.selectedIntelligenceEventID = nil; profileCountry = nil; exploration = "developments"
         withAnimation(.easeInOut(duration: 0.22)) {
             showsBriefing = true; panelStop = 2; wideContext = true
         }
@@ -5455,6 +5568,8 @@ private struct NativeSignalMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
     var immersive = false
+    var corridors: [TransportOutlook.Corridor] = []
+    var onSelectTransportEntity: ((TransportEntity) -> Void)? = nil
 
     var body: some View {
         InteractiveCountryBubbleMap(
@@ -5471,7 +5586,9 @@ private struct NativeSignalMap: View {
             resetToken: resetToken,
             onSelectCountry: onSelectCountry,
             onSelectEvent: onSelectEvent,
-            allowsSingleFingerPan: immersive
+            allowsSingleFingerPan: immersive,
+            corridors: corridors,
+            onSelectTransportEntity: onSelectTransportEntity
         )
         .overlay(alignment: .bottomLeading) {
             Text("Natural Earth · Claritas signals")
@@ -5793,6 +5910,8 @@ private struct InteractiveCountryBubbleMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
     var allowsSingleFingerPan = false
+    var corridors: [TransportOutlook.Corridor] = []
+    var onSelectTransportEntity: ((TransportEntity) -> Void)? = nil
 
     @State private var expandedGroup: SignalMapPinGroup?
     @State private var userAdjustedViewport = false
@@ -5817,6 +5936,13 @@ private struct InteractiveCountryBubbleMap: View {
                     Canvas { context, size in
                         drawGrid(context: context, size: size)
                         drawLand(context: context, size: size)
+                        for route in corridors {
+                            if let from = CountryCentroidLookup.coordinate(for: route.origin), let to = CountryCentroidLookup.coordinate(for: route.destination) {
+                                let a = project(from, size: size), b = project(to, size: size)
+                                var line = Path(); line.move(to: a); line.addQuadCurve(to: b, control: CGPoint(x:(a.x+b.x)/2,y:min(a.y,b.y)-40))
+                                context.stroke(line, with: .color(ClaritasPalette.shellAccent(for: colorScheme)), lineWidth: min(5,1+log2(Double(route.observed_days+1))))
+                            }
+                        }
                     }.allowsHitTesting(false)
                     SignalMapTouchSurface(allowsSingleFingerPan: allowsSingleFingerPan, onTap: { location in
                         if let country = country(at: location, size: proxy.size) { onSelectCountry(country) }
@@ -5852,9 +5978,12 @@ private struct InteractiveCountryBubbleMap: View {
                     ForEach(transportEntities.prefix(40)) { entity in
                         if let latitude = entity.latitude, let longitude = entity.longitude,
                            contains(latitude: latitude, longitude: longitude) {
-                            Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                            Button { onSelectTransportEntity?(entity) } label: {
+                                Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
+                                    .font(.system(size: 11, weight: .semibold))
+                                    .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
+                                    .frame(width: 32, height: 32).contentShape(Rectangle())
+                            }.buttonStyle(.plain)
                                 .position(project(CLLocationCoordinate2D(latitude: latitude, longitude: longitude), size: proxy.size))
                                 .accessibilityLabel(entity.display_name ?? "Tracked transport")
                         }
@@ -6339,6 +6468,7 @@ struct SignalMapSnapshotReview: View {
         let transport: EventTransportDetail?
         let weather: [CountryWeather]
         let market: CountryMarketDetail
+        let scoped_transport: TransportOverview?
     }
     @StateObject private var model: AppModel
     private let fixtureError: String?
@@ -6359,12 +6489,18 @@ struct SignalMapSnapshotReview: View {
             review.installMapReview(try decoder.decode(IntelligenceOverview.self, from: Data(contentsOf: documents.appendingPathComponent("MapOverview.json"))))
             review.authStatus = .authed
             UserDefaults.standard.set(!ProcessInfo.processInfo.arguments.contains("-qa-map-light"), forKey: "THEME_DARK")
-            if ProcessInfo.processInfo.arguments.contains("-qa-country-snapshot") || ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") {
+            if ["-qa-country-snapshot", "-qa-event-snapshot", "-qa-transport-snapshot", "-qa-markets-snapshot"].contains(where: { ProcessInfo.processInfo.arguments.contains($0) }) {
                 let context = try decoder.decode(ContextFixture.self, from: Data(contentsOf: documents.appendingPathComponent("WorldContext.json")))
                 review.weather = context.weather
                 review.countryMarkets = [context.market.summary]
                 review.mapReviewEvent = context.event
                 review.mapReviewTransport = context.transport
+                review.mapReviewScopedTransport = context.scoped_transport
+                review.mapReviewMarket = context.market
+                if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot"), context.scoped_transport == nil {
+                    throw CocoaError(.coderReadCorrupt)
+                }
+                if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot") || ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { review.selectedCountry = context.weather.first?.country }
                 if ProcessInfo.processInfo.arguments.contains("-qa-country-snapshot") { review.selectedCountry = context.weather.first?.country }
                 if ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") { review.selectIntelligenceEvent(context.event.event) }
             }
@@ -6392,3 +6528,41 @@ struct SignalMapSnapshotReview: View {
     }
 }
 #endif
+
+/// Lightweight retained market context remains visible before opening the market explorer.
+private struct ScopeMarketGlance: View {
+    let country: String?
+    let onOpen: () -> Void
+    @EnvironmentObject private var model: AppModel
+    private var rows: [CountryMarketOverview] {
+        let available = model.countryMarkets.filter { country == nil || $0.country.uppercased() == country?.uppercased() }
+        return Array(available.sorted { abs($0.index_change_percent ?? $0.fx_change_percent ?? 0) > abs($1.index_change_percent ?? $1.fx_change_percent ?? 0) }.prefix(3))
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button(action: onOpen) {
+                HStack { Label("Markets & economy", systemImage: "chart.line.uptrend.xyaxis"); Spacer(); Image(systemName: "chevron.right") }
+                    .font(.subheadline.weight(.semibold)).frame(minHeight: 44)
+            }.buttonStyle(.plain)
+            ForEach(rows) { row in
+                HStack(alignment: .top) {
+                    Text(row.country).font(.caption.weight(.semibold))
+                    if let change = row.index_change_percent {
+                        Text("\(row.index_name ?? "Benchmark") \(String(format: "%+.1f%%", change)) · \(row.index_period_end ?? "period unavailable")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if let change = row.fx_change_percent {
+                        Text("\(row.currency ?? "FX") vs EUR \(String(format: "%+.1f%%", change)) · \(row.fx_period_end ?? "period unavailable")")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else { Text("Macro profile available").font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            if rows.isEmpty {
+                Text(model.isLoadingMarketGlance ? "Loading saved market context…" : "Explore market benchmarks, currencies, energy and economic context.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if country == nil {
+                Text("Largest available moves; benchmark and currency periods differ.").font(.caption2).foregroundStyle(.secondary)
+            }
+        }.padding(12).brandGlass(cornerRadius: 14)
+        .task { await model.loadMarketGlance() }
+    }
+}

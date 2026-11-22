@@ -49,6 +49,7 @@ import {
   type RegionalAisObservation,
 } from "./regional-ais-nmea";
 import {
+  transportHistoryComparisons,
   transportHistoryModeValue,
   transportHistoryWindow,
 } from "./transport-history";
@@ -3233,8 +3234,8 @@ async function loadTransportHistory(
   country: string,
   corridorCountry: string | null,
   mode: TransportMode | null,
+  historyDays: 90 | 400 = 90,
 ) {
-  const historyDays = 90;
   const modeClause = mode
     ? "AND mode = $2"
     : "AND mode IN ('maritime', 'aviation')";
@@ -3244,7 +3245,7 @@ async function loadTransportHistory(
        SELECT *
        FROM transport_country_activity_day
        WHERE country_iso2 = $1
-         AND bucket >= date_trunc('day', now()) - interval '89 days'
+         AND bucket >= date_trunc('day', now()) - interval '${historyDays - 1} days'
          ${modeClause}
      ),
      metrics AS (
@@ -3281,7 +3282,7 @@ async function loadTransportHistory(
              SUM(cargo_vessel_departures) AS cargo_vessel_departures
            FROM transport_movement_hour
            WHERE country_iso2 = $1
-             AND bucket >= date_trunc('day', now()) - interval '89 days'
+             AND bucket >= date_trunc('day', now()) - interval '${historyDays - 1} days'
            GROUP BY date_trunc('day', bucket)
            ORDER BY bucket`,
           [country],
@@ -3291,7 +3292,7 @@ async function loadTransportHistory(
           `WITH corridor_rows AS (
              SELECT *
              FROM transport_corridor_activity_day
-             WHERE bucket >= date_trunc('day', now()) - interval '89 days'
+             WHERE bucket >= date_trunc('day', now()) - interval '${historyDays - 1} days'
                AND (
                  (origin_country_iso2 = $1 AND destination_country_iso2 = $2)
                  OR
@@ -3404,6 +3405,9 @@ async function loadTransportHistory(
     corridor_country: corridorCountry,
     requested_days: historyDays,
     retention_days: transportDailyHistoryRetentionDays(),
+    activity_retention_days: corridorScoped ? transportDailyHistoryRetentionDays() : 400,
+    movement_retention_days: transportDailyHistoryRetentionDays(),
+    comparisons: corridorScoped ? [] : transportHistoryComparisons(series),
     available_from: observedSeries[0]?.bucket ?? null,
     available_to: observedSeries.at(-1)?.bucket ?? null,
     observed_days: observedSeries.length,
@@ -3424,6 +3428,7 @@ type TransportOverviewOptions = {
   corridorCountry?: string;
   entityLimit?: number;
   bypassCache?: boolean;
+  historyDays?: 90 | 400;
 };
 
 async function loadTransportOverview(options?: TransportOverviewOptions) {
@@ -3650,7 +3655,7 @@ async function loadTransportOverview(options?: TransportOverviewOptions) {
           trendCountryParams
         );
   const history = country
-    ? await loadTransportHistory(country, corridorCountry, mode)
+    ? await loadTransportHistory(country, corridorCountry, mode, options?.historyDays ?? 90)
     : null;
 
   const countries = new Map<
@@ -4110,6 +4115,7 @@ function transportOverviewCacheKey(options?: TransportOverviewOptions): string {
     country: normalizeIso2(options?.country) ?? null,
     corridorCountry: normalizeIso2(options?.corridorCountry) ?? null,
     entityLimit: options?.entityLimit ?? null,
+    historyDays: options?.historyDays ?? 90,
   });
 }
 
@@ -4415,7 +4421,8 @@ async function pruneTransportHistory(): Promise<void> {
     {
       table: "transport_country_activity_day",
       timestampColumn: "bucket",
-      retentionDays: dailyHistoryDays,
+      // Compact country/day samples support future year comparisons without retaining raw tracks.
+      retentionDays: 400,
     },
     {
       table: "transport_corridor_activity_day",

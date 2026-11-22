@@ -279,6 +279,14 @@ final class WatchAppModel: ObservableObject {
         api.setAuthToken(WatchKeychain.authToken)
         return try await api.fetchCountryMarkets().countries.first { $0.country.uppercased() == country.uppercased() }
     }
+    func readMarketCountries() async throws -> [CountryMarketOverview] {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchCountryMarkets().countries
+    }
+    func readScopedTransport(country: String?) async throws -> TransportOverview {
+        api.setAuthToken(WatchKeychain.authToken)
+        return try await api.fetchTransportOverview(detail: "aggregate", country: country, historyDays: 400)
+    }
 
     func openOnPhone(
         _ destination: String,

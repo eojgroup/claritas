@@ -118,6 +118,8 @@ final class AppModel: ObservableObject {
     @Published var leadership: [CountryLeadership] = []
     @Published var marketQuotes: [MarketQuote] = []
     @Published var countryMarkets: [CountryMarketOverview] = []
+    @Published private(set) var isLoadingMarketGlance = false
+    private var marketGlanceLoadedAt: Date?
     @Published var transportOverview: TransportOverview? = nil
     @Published private(set) var signalTransportOverview: TransportOverview? = nil
     @Published private(set) var transportOverviewCountry: String? = nil
@@ -563,8 +565,30 @@ final class AppModel: ObservableObject {
         updateWidgetSnapshot()
     }
 
+    /// The World glance reads the saved country summary, never the quote universe.
+    func loadMarketGlance() async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+        #endif
+        guard authStatus == .authed, hasPaidAccess, !isLoadingMarketGlance else { return }
+        let lastRead = marketGlanceLoadedAt ?? widgetFreshness.markets
+        if !countryMarkets.isEmpty, let lastRead, Date().timeIntervalSince(lastRead) < 600 { return }
+        let generation = dataGeneration
+        isLoadingMarketGlance = true
+        defer { isLoadingMarketGlance = false }
+        _ = await loadInitialValue(generation: generation, fetch: {
+            try await self.api.fetchCountryMarkets()
+        }, apply: {
+            self.countryMarkets = $0.countries
+            self.marketGlanceLoadedAt = Date()
+        })
+    }
+
     /// Read existing optional data only when its workspace or layer is visible.
     func loadOptionalContext(_ context: String, force: Bool = false) async {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+        #endif
         guard authStatus == .authed, hasPaidAccess else { return }
         let generation = dataGeneration
         switch context {
@@ -599,6 +623,8 @@ final class AppModel: ObservableObject {
     #if DEBUG
     var mapReviewEvent: IntelligenceEventDetail?
     var mapReviewTransport: EventTransportDetail?
+    var mapReviewScopedTransport: TransportOverview?
+    var mapReviewMarket: CountryMarketDetail?
     /// Loaded only by the simulator capture entry point; never bundled data.
     func installMapReview(_ overview: IntelligenceOverview) {
         intelligenceOverview = overview

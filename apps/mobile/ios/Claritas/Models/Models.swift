@@ -2533,6 +2533,7 @@ struct TransportCoverage: Codable {
 }
 
 struct TransportOverview: Codable {
+    var history: TransportHistory? = nil
     let generated_at: String
     let detail: String
     let summary: TransportSummary
@@ -2546,6 +2547,48 @@ struct TransportOverview: Codable {
     let coverage: TransportCoverage
 
     var generatedDate: Date? { APIDateParser.parse(generated_at) }
+}
+
+struct TransportHistory: Codable {
+    struct Point: Codable, Identifiable {
+        let bucket: String
+        let maritime_entities: Int?
+        let aviation_entities: Int?
+        let observed_hours: Int
+        let ship_departures: Int?
+        let ship_arrivals: Int?
+        let source_names: [String]
+        var id: String { bucket }
+        var date: Date? { APIDateParser.parse(bucket) }
+    }
+    struct Window: Codable {
+        let start: String
+        let end: String
+        let days: Int
+        let observed_days: Int
+        let observation_hours: Int
+        let average_daily_entities: Double?
+    }
+    struct Comparison: Codable, Identifiable {
+        let key: String
+        let label: String
+        let metric: String
+        let current: Window
+        let previous: Window
+        let comparable: Bool
+        let change_percent: Double?
+        let notice: String
+        var id: String { key }
+    }
+    let requested_days: Int
+    let available_from: String?
+    let available_to: String?
+    let observed_days: Int
+    let activity_retention_days: Int?
+    let movement_retention_days: Int?
+    let series: [Point]
+    let comparisons: [Comparison]?
+    let methodology: String
 }
 
 struct TransportTakeaway: Codable, Identifiable {
@@ -4205,4 +4248,9 @@ struct IntelligenceOverview: Codable {
         window.hours == scope.hours && filters.country == scope.country && filters.topic == scope.topic
             && (filters.priority == nil || filters.priority == scope.priority) && filters.bucket == scope.bucket
     }
+}
+
+struct TransportOutlook: Decodable {
+ struct Corridor: Decodable, Identifiable { let origin:String; let destination:String; let mode:String; let observed_days:Int; let sample_days:Int; let flag_proxies:Int; var id:String { "\(origin):\(destination):\(mode)" } }
+ let country:String; let days:Int; let start:String; let end:String; let notice:String; let corridors:[Corridor]
 }

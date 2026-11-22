@@ -5863,3 +5863,31 @@ body {
   .situation-event-tags time { margin-left: 0; }
   .situation-map-narrative { max-width: 17rem; font-size: .6rem; }
 }
+
+/* Source exploration stays in the map's current global/country scope. */
+.scope-view-switch { display:flex; gap:6px; padding:12px 0; position:sticky; top:0; background:var(--shell-surface); z-index:2; }
+.scope-view-switch button { flex:1; min-height:44px; padding:8px 12px; border:1px solid var(--shell-border); border-radius:12px; color:var(--shell-ink); background:var(--shell-bg); }
+.scope-view-switch button[aria-pressed="true"] { background:var(--shell-selected); color:var(--shell-on-selected); border-color:var(--shell-accent); }
+.scope-market-context { padding:14px 0; border-bottom:1px solid var(--shell-border); }
+.scope-context-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.scope-context-heading h3 { display:flex; align-items:center; gap:8px; margin:0; font-size:1rem; }
+.scope-context-heading button, .scope-context-controls button { min-height:44px; display:inline-flex; align-items:center; gap:6px; color:var(--shell-accent); }
+.scope-market-glance { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:8px; margin-top:12px; }
+.scope-market-glance>button { display:flex; flex-direction:column; align-items:flex-start; gap:6px; text-align:left; padding:10px; border:1px solid var(--shell-border); border-radius:12px; background:var(--shell-bg); color:var(--shell-ink); }
+.scope-market-glance>button>span:first-child { display:flex; align-items:center; gap:6px; font-weight:600; }
+.scope-market-glance small, .scope-context-table small, .scope-context-reporting small { display:block; color:var(--shell-muted); font-size:.75rem; }
+.scope-context-note { color:var(--shell-muted); font-size:.8rem; margin:10px 0; }
+.scope-context-controls { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:12px 0; }
+.scope-context-controls label { display:flex; flex-direction:column; gap:4px; font-size:.8rem; flex:1; }
+.scope-context-controls input { min-height:44px; border:1px solid var(--shell-border); border-radius:8px; padding:8px; background:var(--shell-bg); color:var(--shell-ink); min-width:0; }
+.scope-context-controls [aria-pressed="true"] { font-weight:700; text-decoration:underline; text-underline-offset:5px; }
+.scope-context-table { overflow-x:auto; max-width:100%; }
+.scope-context-table table { width:100%; border-collapse:collapse; font-size:.8rem; }
+.scope-context-table th,.scope-context-table td { text-align:left; vertical-align:top; padding:10px 8px; border-bottom:1px solid var(--shell-border); }
+.scope-context-table caption { text-align:left; padding:8px 0; font-weight:600; }
+.scope-context-table th button { text-align:left; min-height:44px; color:var(--shell-ink); display:flex; gap:6px; align-items:center; }
+.scope-context-metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin:12px 0; }
+.scope-context-metrics dt { font-size:.75rem; color:var(--shell-muted); }
+.scope-context-metrics dd { margin:4px 0; font-weight:600; }
+.scope-context-reporting>button { width:100%; text-align:left; display:block; padding:10px 0; border-bottom:1px solid var(--shell-border); color:var(--shell-ink); }
+@media(max-width:600px) { .scope-context-heading { align-items:flex-start; flex-wrap:wrap; }.scope-market-glance { grid-template-columns:1fr; }.scope-market-glance>button { display:grid; grid-template-columns:minmax(80px,1fr) 2fr; }.scope-view-switch button { padding:8px 6px; } }

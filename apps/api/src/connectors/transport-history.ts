@@ -122,3 +122,29 @@ export function transportHistoryWindow(
         : null,
   };
 }
+
+/** Compare completed UTC days only. Absent observations must never become zero traffic. */
+export function transportHistoryComparisons(points: TransportHistoryPoint[], now = new Date()) {
+  const end = new Date(now); end.setUTCHours(0, 0, 0, 0);
+  const start = new Date(end); start.setUTCDate(start.getUTCDate() - 30);
+  const summarize = (from: Date, to: Date) => {
+    const observed = points.filter((point) => new Date(point.bucket) >= from && new Date(point.bucket) < to && point.observed_hours > 0);
+    return { start: from.toISOString(), end: to.toISOString(), days: 30, observed_days: observed.length,
+      observation_hours: observed.reduce((sum, point) => sum + point.observed_hours, 0),
+      average_daily_entities: observed.length ? observed.reduce((sum, point) => sum + (point.maritime_entities ?? 0) + (point.aviation_entities ?? 0), 0) / observed.length : null };
+  };
+  const priorStart = new Date(start); priorStart.setUTCDate(priorStart.getUTCDate() - 30);
+  const yearStart = new Date(start); yearStart.setUTCFullYear(yearStart.getUTCFullYear() - 1);
+  const yearEnd = new Date(yearStart); yearEnd.setUTCDate(yearEnd.getUTCDate() + 30);
+  const current = summarize(start, end);
+  return [{ key: "previous_30_days", label: "Previous 30 days", from: priorStart, to: start },
+    { key: "same_window_last_year", label: "Same 30-day window last year", from: yearStart, to: yearEnd }].map(({ key, label, from, to }) => {
+    const previous = summarize(from, to);
+    const comparable = current.observed_days === 30 && previous.observed_days === 30;
+    return { key, label, metric: "daily_peak_sampled_entities", current, previous, comparable,
+      change_percent: comparable && previous.average_daily_entities && current.average_daily_entities != null
+        ? Math.round((current.average_daily_entities / previous.average_daily_entities - 1) * 1000) / 10 : null,
+      notice: comparable ? "Average daily peak sampled vehicles, not total traffic or cargo volume. Compare observation hours and provider coverage before interpreting a change."
+        : "A complete 30-day observed window is required in both periods. Missing days are unknown, not zero traffic." };
+  });
+}

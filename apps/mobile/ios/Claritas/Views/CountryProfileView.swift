@@ -362,7 +362,7 @@ private struct CountryMetric: View {
     }
 }
 
-private struct CountryMarketHistoryView: View {
+struct CountryMarketHistoryView: View {
     let country: String
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
@@ -387,6 +387,9 @@ private struct CountryMarketHistoryView: View {
         }
         .task(id: "\(country)|\(retry)") {
             detail = nil; failed = false
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { detail = model.mapReviewMarket; return }
+            #endif
             do { let value = try await model.api.fetchCountryMarketDetail(country: country); guard !Task.isCancelled else { return }; detail = value }
             catch { guard !Task.isCancelled else { return }; failed = true }
         }

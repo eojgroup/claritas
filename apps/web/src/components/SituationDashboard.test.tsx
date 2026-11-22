@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { useState } from "react";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import SituationDashboard from "./SituationDashboard";
 import { event, overviewFixture } from "../test/situationFixture";
@@ -8,6 +8,8 @@ import { event, overviewFixture } from "../test/situationFixture";
 vi.mock("./WorldMapBubbles", () => ({ default: ({ onSelect, onSelectPoint }: { onSelect: (iso: string) => void; onSelectPoint: (point: { id: string }) => void }) => <div data-testid="map-camera"><button onClick={() => onSelect("SE")}>Select Sweden</button><button onClick={() => onSelectPoint({ id: event.id })}>Select port event</button></div> }));
 vi.mock("./OverviewCountryProfile", () => ({ default: () => <section aria-label="Country profile">Sweden profile</section> }));
 vi.mock("./IntelligenceWorkspace", () => ({ default: () => <h3>Selected event evidence</h3> }));
+vi.mock("./MarketScopeContext", () => ({ default: ({ country, expanded }: { country?: string; expanded: boolean }) => <section aria-label="Market glance">{country || "World"} markets{expanded && <h3>Market explorer</h3>}</section> }));
+vi.mock("./TransportScopeContext", () => ({ default: ({ country }: { country?: string }) => <section aria-label="Transport explorer">{country || "World"} transport history</section> }));
 afterEach(cleanup);
 
 function Workspace({ initialEventID = null }: { initialEventID?: string | null }) {
@@ -85,4 +87,20 @@ it("leaves country focus to the profile instead of scheduling an overview scroll
     onOpenImagery={vi.fn()} onRefresh={vi.fn()} onRefreshBriefing={async () => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
   expect(onSelect).toHaveBeenCalledWith(null, { focus: false });
+});
+
+it("keeps the map and country scope while switching between browsing lenses", async () => {
+  render(<Workspace />);
+  const map = screen.getByTestId("map-camera");
+  expect(screen.getByRole("region", { name: "Market glance" }).textContent).toContain("World markets");
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Explore selected scope" })).getByRole("button", { name: "Transport" }));
+  expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("World transport history");
+  fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
+  expect(screen.getByRole("region", { name: "Transport explorer" }).textContent).toContain("SE transport history");
+  fireEvent.click(screen.getByRole("button", { name: "Markets" }));
+  expect(screen.getByRole("heading", { name: "Market explorer" })).toBeTruthy();
+  expect(screen.getByRole("region", { name: "Market glance" }).textContent).toContain("SE markets");
+  fireEvent.click(screen.getByRole("button", { name: "Developments" }));
+  expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
+  expect(screen.getByTestId("map-camera")).toBe(map);
 });
