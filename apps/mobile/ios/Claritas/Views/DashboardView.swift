@@ -2674,7 +2674,7 @@ struct MarketsWorkspaceView: View {
                     }
 
                     PhoneDetailSection("Charts & market analysis") {
-                        BrandCard {
+                        if !indexRows.isEmpty { BrandCard {
                             VStack(alignment: .leading, spacing: 10) {
                                 Text("Largest national benchmark moves")
                                     .font(.headline)
@@ -2687,11 +2687,11 @@ struct MarketsWorkspaceView: View {
                                     .font(.caption2)
                                     .foregroundStyle(.secondary)
                             }
-                        }
+                        } }
 
                         BrandCard {
                             VStack(alignment: .leading, spacing: 10) {
-                                Text("Global real-GDP growth panorama")
+                                Text(scopedToSelection && model.selectedCountry != nil ? "Economic growth" : "Global real-GDP growth panorama")
                                     .font(.headline)
                                 Chart(macroRows) { row in
                                     BarMark(x: .value("Country", row.country), y: .value("Annual GDP growth", row.gdp_growth ?? 0))
