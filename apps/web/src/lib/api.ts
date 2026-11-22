@@ -2800,3 +2800,9 @@ export async function requestEarthObservationAnalysis(observationId: string): Pr
   if (!response.ok) throw new Error(await readError(response,"Image analysis could not be queued."));
   return response.json() as Promise<{ status: string; enqueued: boolean }>;
 }
+
+export type TransportOutlook = {country:string;days:number;start:string;end:string;notice:string;corridors:Array<{origin:string;destination:string;mode:string;observed_days:number;sample_days:number;observed_origins:number;flag_proxies:number;first_day:string;last_day:string}>};
+export async function fetchTransportOutlook(country:string,days:number,signal?:AbortSignal):Promise<TransportOutlook>{
+ const response=await fetch(`${API_BASE}/api/transport/outlook?country=${encodeURIComponent(country)}&days=${days}`,{credentials:"include",signal});
+ if(!response.ok)throw new Error("Saved outlook unavailable");return response.json();
+}

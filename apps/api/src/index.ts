@@ -1,3 +1,4 @@
+import { getTransportOutlook } from "./connectors/transport-outlook";
 import { startNewsImageWorker } from "./image-analysis/news-image-worker";
 import { listNewsImages, getNewsImagePreview } from "./image-analysis/news-image-store";
 import { startNewsTranslationWorker } from "./news-translation";
@@ -3678,6 +3679,15 @@ app.get("/api/leadership/countries", requireAuthenticated, async (_req, res) => 
   } catch (e: any) {
     res.status(500).json({ error: e.message || String(e) });
   }
+});
+
+app.get("/api/transport/outlook", requireAuthenticated, async (req, res) => {
+  const country = String(req.query.country ?? "").trim().toUpperCase();
+  const days = Number(req.query.days ?? 7);
+  const mode = req.query.mode == null ? undefined : String(req.query.mode);
+  if (!/^[A-Z]{2}$/.test(country) || ![7,30,90].includes(days) || (mode && !["aviation","maritime"].includes(mode))) return res.status(400).json({error:"Valid country, days (7,30,90) and optional maritime/aviation mode required."});
+  try { return res.json(await workspaceReadCache.get(sharedReadKey("transport-outlook",{country,days,mode}),()=>getTransportOutlook(country,days as 7|30|90,mode))); }
+  catch { return res.status(503).json({error:"Saved transport outlook is temporarily unavailable."}); }
 });
 
 app.get("/api/transport/overview", requireAuthenticated, async (req, res) => {

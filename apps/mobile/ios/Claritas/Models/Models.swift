@@ -4249,3 +4249,8 @@ struct IntelligenceOverview: Codable {
             && (filters.priority == nil || filters.priority == scope.priority) && filters.bucket == scope.bucket
     }
 }
+
+struct TransportOutlook: Decodable {
+ struct Corridor: Decodable, Identifiable { let origin:String; let destination:String; let mode:String; let observed_days:Int; let sample_days:Int; let flag_proxies:Int; var id:String { "\(origin):\(destination):\(mode)" } }
+ let country:String; let days:Int; let start:String; let end:String; let notice:String; let corridors:[Corridor]
+}

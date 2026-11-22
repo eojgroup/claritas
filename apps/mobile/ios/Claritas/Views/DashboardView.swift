@@ -5271,6 +5271,9 @@ struct WorldMapWorkspace: View {
     var refreshesAutomatically = true
     @State private var showsBriefing = false
     @State private var exploration = "developments"
+    @State private var outlook: TransportOutlook?
+    @State private var outlookDays = 7
+    @State private var outlookFailed = false
     @State private var scopedTransport: TransportOverview?
     @State private var mappedTransportEntity: TransportEntity?
 
@@ -5343,7 +5346,7 @@ struct WorldMapWorkspace: View {
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: nil,
                     transportEntities: exploration == "transport" ? scopedTransport?.entities ?? [] : [], resetToken: 0, onSelectCountry: selectCountry,
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
-                    immersive: true, onSelectTransportEntity: { mappedTransportEntity = $0 })
+                    immersive: true, corridors: exploration == "transport" ? outlook?.corridors ?? [] : [], onSelectTransportEntity: { mappedTransportEntity = $0 })
                     // Fit the geography to the unobstructed area. Opening context
                     // leaves this map instance (and its camera) mounted.
                     .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
@@ -5395,6 +5398,15 @@ struct WorldMapWorkspace: View {
             if let destination = note.object as? String, ["transport", "markets"].contains(destination) {
                 exploration = destination; showsBriefing = false; revealContext()
             }
+        }
+        .task(id: "\(exploration)|\(model.selectedCountry ?? "global")|\(outlookDays)") {
+            outlook = nil; outlookFailed = false
+            guard exploration == "transport", let country = model.selectedCountry else { return }
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+            #endif
+            do { let value = try await model.api.fetchTransportOutlook(country: country, days: outlookDays); guard !Task.isCancelled else { return }; outlook = value }
+            catch { if !Task.isCancelled { outlookFailed = true } }
         }
         .sheet(item: $mappedTransportEntity) { entity in
             NavigationStack {
@@ -5474,7 +5486,24 @@ struct WorldMapWorkspace: View {
             } else if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
                 IntelligenceWorkspaceView(contextualEventID: id)
             } else if exploration == "transport" {
-                ScopeTransportExplorer(country: model.selectedCountry, onOverview: { scopedTransport = $0 })
+                VStack(alignment: .leading, spacing: 8) {
+                    if model.selectedCountry != nil {
+                        Picker("Country corridor outlook", selection: $outlookDays) { ForEach([7,30,90], id: \.self) { days in Text("\(days) days").tag(days) } }.pickerStyle(.segmented).padding(.horizontal,14)
+                        if let outlook {
+                            DisclosureGroup("Frequent destinations & corridors · \(outlook.days) completed days") {
+                                ScrollView { VStack(alignment: .leading, spacing: 8) {
+                                    Text(outlook.notice).font(.caption2).foregroundStyle(.secondary)
+                                    ForEach(outlook.corridors) { route in
+                                        Button { selectCountry(route.destination == outlook.country ? route.origin : route.destination) } label: {
+                                            Text("\(route.origin) → \(route.destination) · \(route.mode) · \(route.observed_days)/\(outlook.days) days\(route.flag_proxies > 0 ? " · flag estimates included" : "")").font(.caption).frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,5)
+                                        }.buttonStyle(.plain)
+                                    }
+                                }}.frame(maxHeight:180)
+                            }.padding(.horizontal,14)
+                        } else { Text(outlookFailed ? "Saved corridor outlook unavailable" : "Loading saved corridor outlook…").font(.caption).padding(.horizontal,14) }
+                    }
+                    ScopeTransportExplorer(country: model.selectedCountry, onOverview: { scopedTransport = $0 })
+                }
             } else if exploration == "markets" {
                 MarketsWorkspaceView(scopedToSelection: true)
             } else {
@@ -5539,6 +5568,7 @@ private struct NativeSignalMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
     var immersive = false
+    var corridors: [TransportOutlook.Corridor] = []
     var onSelectTransportEntity: ((TransportEntity) -> Void)? = nil
 
     var body: some View {
@@ -5557,6 +5587,7 @@ private struct NativeSignalMap: View {
             onSelectCountry: onSelectCountry,
             onSelectEvent: onSelectEvent,
             allowsSingleFingerPan: immersive,
+            corridors: corridors,
             onSelectTransportEntity: onSelectTransportEntity
         )
         .overlay(alignment: .bottomLeading) {
@@ -5879,6 +5910,7 @@ private struct InteractiveCountryBubbleMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
     var allowsSingleFingerPan = false
+    var corridors: [TransportOutlook.Corridor] = []
     var onSelectTransportEntity: ((TransportEntity) -> Void)? = nil
 
     @State private var expandedGroup: SignalMapPinGroup?
@@ -5904,6 +5936,13 @@ private struct InteractiveCountryBubbleMap: View {
                     Canvas { context, size in
                         drawGrid(context: context, size: size)
                         drawLand(context: context, size: size)
+                        for route in corridors {
+                            if let from = CountryCentroidLookup.coordinate(for: route.origin), let to = CountryCentroidLookup.coordinate(for: route.destination) {
+                                let a = project(from, size: size), b = project(to, size: size)
+                                var line = Path(); line.move(to: a); line.addQuadCurve(to: b, control: CGPoint(x:(a.x+b.x)/2,y:min(a.y,b.y)-40))
+                                context.stroke(line, with: .color(ClaritasPalette.shellAccent(for: colorScheme)), lineWidth: min(5,1+log2(Double(route.observed_days+1))))
+                            }
+                        }
                     }.allowsHitTesting(false)
                     SignalMapTouchSurface(allowsSingleFingerPan: allowsSingleFingerPan, onTap: { location in
                         if let country = country(at: location, size: proxy.size) { onSelectCountry(country) }

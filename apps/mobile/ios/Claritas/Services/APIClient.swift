@@ -391,6 +391,12 @@ final class APIClient {
         return try await request(URLRequest(url: baseURL.appendingPathComponent("/api/market/countries/\(country)")), as: CountryMarketDetail.self)
     }
 
+    func fetchTransportOutlook(country: String, days: Int) async throws -> TransportOutlook {
+        var components = URLComponents(url: baseURL.appendingPathComponent("/api/transport/outlook"), resolvingAgainstBaseURL: false)!
+        components.queryItems = [URLQueryItem(name:"country", value:country), URLQueryItem(name:"days",value:String(days))]
+        return try await request(URLRequest(url:components.url!), as:TransportOutlook.self)
+    }
+
     func fetchTransportOverview(
         detail: String = "aggregate",
         mode: TransportMode? = nil,
