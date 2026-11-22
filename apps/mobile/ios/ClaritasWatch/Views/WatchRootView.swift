@@ -2074,7 +2074,12 @@ private struct WatchSelectedEventView: View {
                        let current = anomaly.metadata?.object?["current"]?.number, let baseline = anomaly.metadata?.object?["baseline"]?.number {
                         Text("Tracked movements").font(.caption.weight(.semibold))
                         Text("Observed \(current.formatted()) · baseline \(baseline.formatted())").font(.caption2)
-                        DisclosureGroup("Movement details", isExpanded: $showsMovements) {
+                        Button {
+                            showsMovements.toggle()
+                        } label: {
+                            Label("Movement details", systemImage: showsMovements ? "chevron.up" : "chevron.down")
+                        }.font(.caption2).accessibilityValue(showsMovements ? "Expanded" : "Collapsed")
+                        if showsMovements {
                             if let movements {
                                 Text(movements.location_name).font(.caption2)
                                 if !movements.hours.isEmpty {
@@ -2089,7 +2094,7 @@ private struct WatchSelectedEventView: View {
                                 Text(movements.notice).font(.system(size: 8)).foregroundStyle(.secondary)
                             } else if movementFailed { Text("Movement detail unavailable").font(.caption2) }
                             else { ProgressView() }
-                        }.font(.caption2)
+                        }
                     }
                     NavigationLink {
                         ScrollView {
