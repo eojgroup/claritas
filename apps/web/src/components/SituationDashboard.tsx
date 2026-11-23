@@ -141,7 +141,7 @@ export default function SituationDashboard(props: Props) {
         <p className="situation-map-key"><span><i />Pin = located event · colour = severity</span><span><i />Ring = image available</span></p>
           <div id="world-event-stream" tabIndex={-1}>
             <SituationOverview variant="summary" compact {...props} selectedId={selectedId}
-              filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "attention" | "activity" | "priority")}><option value="attention">Signal relevance</option><option value="activity">Number of updates</option><option value="priority">High-priority updates</option></select></label>}
+              filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "attention" | "activity" | "priority")}><option value="attention">{isScopedHeat ? "Linked developments" : "Signal relevance"}</option><option value="activity">Number of updates</option><option value="priority">High-priority updates</option></select></label>}
               onHoursChange={changeScope(props.onHoursChange)} onTopicChange={changeScope(props.onTopicChange)}
               onPriorityChange={changeScope(props.onPriorityChange)} onCountryChange={changeScope(props.onCountryChange)} />
           </div>

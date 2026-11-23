@@ -5296,6 +5296,7 @@ struct WorldMapWorkspace: View {
         _wideContext = State(initialValue: briefing || reviewContext)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot") { _exploration = State(initialValue: "transport") }
+        if ProcessInfo.processInfo.arguments.contains("-qa-map-focus") { _panelStop = State(initialValue:0); _wideContext = State(initialValue:false) }
         if ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _exploration = State(initialValue: "developments") }
         if ProcessInfo.processInfo.arguments.contains("-qa-country-snapshot") || ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _countryContextExpanded = State(initialValue: true) }
         #endif
@@ -6039,10 +6040,11 @@ private struct InteractiveCountryBubbleMap: View {
             .onChange(of:selectedPort) { name in
                 if let port = transportPorts.first(where:{$0.name == name}) { focusCoordinate(CLLocationCoordinate2D(latitude:port.latitude,longitude:port.longitude),size:proxy.size) }
             }
+            .onChange(of: mode) { next in if next == .transport { resetViewport() } }
             .onChange(of: mapRegion) { _ in resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
             .onChange(of: resetToken) { _ in resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
             .onChange(of: selectedCountry) { next in
-                resetViewport(); focus(on: next ?? (points.first?.id.hasPrefix("overview-") == true ? nil : featuredCountry), size: proxy.size)
+                resetViewport(); if mode != .transport { focus(on: next ?? (points.first?.id.hasPrefix("overview-") == true ? nil : featuredCountry), size: proxy.size) }
             }
             .onChange(of: featuredCountry) { next in
                 if selectedCountry == nil && points.first?.id.hasPrefix("overview-") != true && !userAdjustedViewport { resetViewport(); focus(on: next, size: proxy.size) }
@@ -6089,7 +6091,7 @@ private struct InteractiveCountryBubbleMap: View {
         }
     }
 
-    private var automaticFocusCountry: String? { selectedCountry ?? (points.first?.id.hasPrefix("overview-") == true ? nil : featuredCountry) }
+    private var automaticFocusCountry: String? { mode == .transport ? nil : selectedCountry ?? (points.first?.id.hasPrefix("overview-") == true ? nil : featuredCountry) }
 
     private func bubbleView(for point: CountryBubblePoint) -> some View {
         Button(action: { onSelectCountry(point.iso) }) {

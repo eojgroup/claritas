@@ -28,7 +28,7 @@ while IFS=' ' read -r kind device_id; do
   cp apps/mobile/ios/Tests/Fixtures/MapOverview.json "$container_path/Documents/MapOverview.json"
   cp apps/mobile/ios/Tests/Fixtures/DailyBriefing.json "$container_path/Documents/DailyBriefing.json"
   cp apps/mobile/ios/Tests/Fixtures/WorldContext.json "$container_path/Documents/WorldContext.json"
-  for destination in map briefing country event transport markets; do
+  for destination in map briefing country event transport transport-map markets; do
     for appearance in dark light; do
       rm -f "$container_path/Documents/map-review-ready" "$container_path/Documents/map-review-error"
       launch_args=(-qa-map-snapshot)
@@ -38,6 +38,7 @@ while IFS=' ' read -r kind device_id; do
       if [[ "$destination" == country ]]; then launch_args+=(-qa-country-snapshot); prefix="$kind-country"; fi
       if [[ "$destination" == event ]]; then launch_args+=(-qa-event-snapshot); prefix="$kind-event"; fi
       if [[ "$destination" == transport ]]; then launch_args+=(-qa-transport-snapshot); prefix="$kind-transport"; fi
+      if [[ "$destination" == transport-map ]]; then launch_args+=(-qa-transport-snapshot -qa-map-focus); prefix="$kind-transport-map"; fi
       if [[ "$destination" == markets ]]; then launch_args+=(-qa-markets-snapshot); prefix="$kind-markets"; fi
       if [[ "$kind" == ipad && ( "$destination" == country || "$destination" == event ) ]]; then launch_args+=(-qa-landscape); fi
       if [[ "$appearance" == light ]]; then launch_args+=(-qa-map-light); suffix="-light"; fi
@@ -72,4 +73,5 @@ PY
 [[ -f "$output_dir/iphone-event.png" && -f "$output_dir/ipad-event.png" && -f "$output_dir/iphone-event-light.png" && -f "$output_dir/ipad-event-light.png" ]]
 [[ -f "$output_dir/iphone-transport.png" && -f "$output_dir/ipad-transport.png" && -f "$output_dir/iphone-transport-light.png" && -f "$output_dir/ipad-transport-light.png" ]]
 [[ -f "$output_dir/iphone-markets.png" && -f "$output_dir/ipad-markets.png" && -f "$output_dir/iphone-markets-light.png" && -f "$output_dir/ipad-markets-light.png" ]]
+[[ -f "$output_dir/iphone-transport-map.png" && -f "$output_dir/ipad-transport-map.png" && -f "$output_dir/iphone-transport-map-light.png" && -f "$output_dir/ipad-transport-map-light.png" ]]
 rm -f "$devices_file"
