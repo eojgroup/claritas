@@ -5268,6 +5268,7 @@ struct WorldMapWorkspace: View {
     @State private var wideContext = false
     @GestureState private var panelDrag: CGFloat = 0
     @State private var profileCountry: String?
+    @State private var countryContextExpanded = false
     var refreshesAutomatically = true
     @State private var showsBriefing = false
     @State private var exploration = "developments"
@@ -5295,6 +5296,7 @@ struct WorldMapWorkspace: View {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot") { _exploration = State(initialValue: "transport") }
         if ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _exploration = State(initialValue: "developments") }
+        if ProcessInfo.processInfo.arguments.contains("-qa-country-snapshot") || ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _countryContextExpanded = State(initialValue: true) }
         #endif
     }
 
@@ -5388,6 +5390,8 @@ struct WorldMapWorkspace: View {
         }
         .onChange(of: model.selectedCountry) { country in
             scopedTransport = nil
+            countryContextExpanded = false
+            exploration = "developments"
             if model.selectedIntelligenceEventID == nil {
                 showsBriefing = false; profileCountry = country
                 if country != nil { revealContext() }
@@ -5396,7 +5400,9 @@ struct WorldMapWorkspace: View {
         .onAppear { if model.selectedIntelligenceEventID == nil { profileCountry = model.selectedCountry } }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             if let destination = note.object as? String, ["transport", "markets"].contains(destination) {
-                exploration = destination == "transport" ? "transport" : "developments"; showsBriefing = false; revealContext()
+                exploration = destination == "transport" ? "transport" : "developments"
+                countryContextExpanded = destination == "markets"
+                showsBriefing = false; revealContext()
             }
         }
         .task(id: "\(exploration)|\(model.selectedCountry ?? "global")|\(outlookDays)") {
@@ -5509,7 +5515,9 @@ struct WorldMapWorkspace: View {
                         VStack(alignment: .leading, spacing: 16) {
                             Color.clear.frame(height: 0).id("context-top")
                             if let profileCountry {
-                                CountryProfileView(selectedCountry: profileCountry)
+                                DisclosureGroup("Weather, markets & country profile", isExpanded: $countryContextExpanded) {
+                                    if countryContextExpanded { CountryProfileView(selectedCountry: profileCountry) }
+                                }
                             }
                             SignalMapInteractionKey()
                             IntelligenceOverviewPanel(automaticallyRefresh: false, embedded: true)
@@ -5537,6 +5545,8 @@ struct WorldMapWorkspace: View {
         if panelStop == 0 { withAnimation(.easeInOut(duration: 0.22)) { panelStop = 1 } }
     }
     private func selectCountry(_ country: String) {
+        exploration = "developments"
+        countryContextExpanded = false
         showsBriefing = false
         model.selectedIntelligenceEventID = nil
         model.selectedCountry = country

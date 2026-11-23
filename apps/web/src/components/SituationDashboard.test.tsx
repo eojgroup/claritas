@@ -29,6 +29,8 @@ it("keeps the expanded map and its camera mounted while country and event contex
   const map = screen.getByTestId("map-camera");
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
   expect(screen.getByRole("dialog", { name: "Expanded development map" })).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Country profile" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: /Weather, markets & country profile/ }));
   expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
   fireEvent.click(screen.getByRole("button", { name: "All countries ×" }));
@@ -66,13 +68,16 @@ it("puts a directly opened event before the general overview controls", async ()
   expect(detail.compareDocumentPosition(overview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-it("puts a selected country before controls and offers more reading space without remounting the map", () => {
+it("leads with country developments and keeps reference context available without remounting the map", () => {
   render(<Workspace />);
   const map = screen.getByTestId("map-camera");
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
-  const profile = screen.getByRole("region", { name: "Country profile" });
-  const controls = screen.getByRole("region", { name: "Situation overview" });
-  expect(profile.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(screen.queryByRole("region", { name: "Country profile" })).toBeNull();
+  const developments = screen.getByRole("region", { name: "Latest developments" });
+  const briefing = screen.getByRole("region", { name: "Daily briefing" });
+  expect(developments.compareDocumentPosition(briefing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: /Weather, markets & country profile/ }));
+  expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Widen context" }));
   expect(screen.getByRole("button", { name: "Narrow context" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.getByTestId("map-camera")).toBe(map);
@@ -89,14 +94,18 @@ it("leaves country focus to the profile instead of scheduling an overview scroll
   expect(onSelect).toHaveBeenCalledWith(null, { focus: false });
 });
 
-it("keeps the map and country scope while switching between browsing lenses", async () => {
+it("returns to developments when a country is selected and keeps transport available for that country", async () => {
   render(<Workspace />);
   const map = screen.getByTestId("map-camera");
   expect(within(screen.getByRole("navigation", { name: "Explore selected scope" })).queryByRole("button", { name: "Markets" })).toBeNull();
   fireEvent.click(within(screen.getByRole("navigation", { name: "Explore selected scope" })).getByRole("button", { name: "Transport" }));
   expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("World transport history");
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
-  expect(screen.getByRole("region", { name: "Transport explorer" }).textContent).toContain("SE transport history");
+  expect(screen.queryByRole("region", { name: "Transport explorer" })).toBeNull();
+  expect(screen.getByRole("region", { name: "Latest developments" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Developments" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Explore selected scope" })).getByRole("button", { name: "Transport" }));
+  expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("SE transport history");
   fireEvent.click(screen.getByRole("button", { name: "Developments" }));
   expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
