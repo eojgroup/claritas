@@ -624,6 +624,7 @@ final class AppModel: ObservableObject {
     var mapReviewEvent: IntelligenceEventDetail?
     var mapReviewTransport: EventTransportDetail?
     var mapReviewScopedTransport: TransportOverview?
+    var mapReviewPortActivity: TransportPortActivity?
     var mapReviewMarket: CountryMarketDetail?
     /// Loaded only by the simulator capture entry point; never bundled data.
     func installMapReview(_ overview: IntelligenceOverview) {

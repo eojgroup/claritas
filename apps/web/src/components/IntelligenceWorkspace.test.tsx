@@ -157,7 +157,7 @@ describe("IntelligenceWorkspace", () => {
     expect(await screen.findByRole("heading", { name: event.title })).toBeTruthy();
     expect(fetchIntelligenceEvents).not.toHaveBeenCalled();
     expect(fetchIntelligenceAlerts).not.toHaveBeenCalled();
-    expect(onEventLoaded).toHaveBeenCalledWith(event);
+    expect(onEventLoaded).toHaveBeenCalledWith(event, expect.objectContaining({ event }));
     expect(screen.queryByRole("region", { name: "Prioritized event investigations" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Read Earth observation connections" }));
     expect(screen.getByRole("status", { name: "Evidence filter results" }).textContent).toContain("1 record");

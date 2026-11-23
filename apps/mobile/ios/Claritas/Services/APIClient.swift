@@ -434,6 +434,28 @@ final class APIClient {
         return try await request(URLRequest(url: comps.url!), as: TransportOverview.self)
     }
 
+    func fetchTransportPositions(country: String?, selection: TransportVisualSelection) async throws -> TransportPositions {
+        var components = URLComponents(url: baseURL.appendingPathComponent("/api/transport/positions"), resolvingAgainstBaseURL: false)!
+        var items: [URLQueryItem] = []
+        if let country { items.append(URLQueryItem(name:"country",value:country)) }
+        if let mode = selection.mode { items.append(URLQueryItem(name:"mode",value:mode.rawValue)) }
+        if !selection.corridor.isEmpty { items.append(URLQueryItem(name:"corridor",value:selection.corridor)) }
+        if !selection.port.isEmpty { items.append(URLQueryItem(name:"port",value:selection.port)) }
+        if let from = selection.from, let to = selection.to {
+            let format = ISO8601DateFormatter()
+            items.append(URLQueryItem(name:"from",value:format.string(from:from)))
+            items.append(URLQueryItem(name:"to",value:format.string(from:to)))
+            if let movement = selection.movement { items.append(URLQueryItem(name:"movement",value:movement)) }
+        }
+        components.queryItems = items
+        return try await request(URLRequest(url:components.url!),as:TransportPositions.self)
+    }
+    func fetchTransportPortActivity(country: String?) async throws -> TransportPortActivity {
+        var components = URLComponents(url:baseURL.appendingPathComponent("/api/transport/ports"),resolvingAgainstBaseURL:false)!
+        if let country { components.queryItems = [URLQueryItem(name:"country",value:country)] }
+        return try await request(URLRequest(url:components.url!),as:TransportPortActivity.self)
+    }
+
     func fetchTransportEntity(
         mode: TransportMode,
         entityID: String

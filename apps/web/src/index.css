@@ -5891,3 +5891,6 @@ body {
 .scope-context-metrics dd { margin:4px 0; font-weight:600; }
 .scope-context-reporting>button { width:100%; text-align:left; display:block; padding:10px 0; border-bottom:1px solid var(--shell-border); color:var(--shell-ink); }
 @media(max-width:600px) { .scope-context-heading { align-items:flex-start; flex-wrap:wrap; }.scope-market-glance { grid-template-columns:1fr; }.scope-market-glance>button { display:grid; grid-template-columns:minmax(80px,1fr) 2fr; }.scope-view-switch button { padding:8px 6px; } }
+/* Keep the scope switch opaque while visual cards scroll beneath it. */
+.situation-context-scroll .scope-view-switch{background:var(--shell-bg);padding:10px 0;isolation:isolate;box-shadow:0 8px 0 var(--shell-bg)}
+.situation-context-scroll .transport-visual-explorer{padding-inline:14px}

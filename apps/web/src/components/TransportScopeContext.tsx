@@ -1,134 +1,134 @@
-import { useEffect, useMemo, useState, useRef } from "react";
-import { Anchor, ArrowRight, Plane, RefreshCw, Ship } from "lucide-react";
-import { fetchTransportEntity, fetchTransportOverview, type IntelligenceEvent, type TransportEntity, type TransportHistory, type TransportHistoryPoint, type TransportMode, type TransportOverview, type TransportTrackPoint } from "../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Plane, RefreshCw, Ship, X } from "lucide-react";
+import { fetchTransportPortActivity, type TransportPortActivity, fetchTransportEntity, fetchTransportOverview, fetchTransportPositions, fetchTransportOutlook, type IntelligenceEvent, type TransportEntity, type TransportOverview, type TransportTrackPoint, type TransportPositionSelection, type TransportPositions, type TransportOutlook } from "../lib/api";
 import { readWithDeadline } from "../lib/readDeadline";
 import "./TransportScopeContext.css";
 
+const EMPTY_TRANSPORT_SELECTION: TransportPositionSelection = { mode: "all", corridor: "", port: "", window: null };
+export type TransportMapState = { country?: string; selection: TransportPositionSelection; positions: TransportPositions | null; countries: Array<{country:string;count:number}>; connections: Array<{origin:string;destination:string;label:string;weight:number;mode?:string;proxy?:boolean}>; loading: boolean; failed: boolean; ports: TransportPortActivity["ports"] };
 type Props = {
-  onOverview?: (value: TransportOverview | null) => void;
-  selectedVehicle?: TransportEntity | null;
-  country?: string | null;
-  events?: IntelligenceEvent[];
-  relatedEventIds?: string[];
-  onSelectCountry?: (country: string) => void;
-  onOpenEvent?: (eventId: string) => void;
+  country?: string | null; events?: IntelligenceEvent[]; relatedEventIds?: string[];
+  onSelectCountry?: (country: string) => void; onOpenEvent?: (id:string) => void;
+  onOverview?: (value:TransportOverview|null) => void; selectedVehicle?: TransportEntity|null;
+  selection?: TransportPositionSelection; onSelectionChange?: (value:TransportPositionSelection) => void;
+  onMapChange?: (value:TransportMapState) => void; onSelectVehicle?: (value:TransportEntity|null) => void;
 };
-type HistoryMetric = "movements" | "vessels" | "flights";
 const count = (value: number | null | undefined) => value == null || !Number.isFinite(value) ? "—" : value.toLocaleString();
-const date = (value: string | null | undefined) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" }) : "Not yet available";
-const countryName = (value: string) => new Intl.DisplayNames(undefined, { type: "region" }).of(value) || value;
-const change = (value: number | null | undefined) => value == null ? "No comparable prior sample" : `${value > 0 ? "+" : ""}${value.toFixed(1)}% vs prior 24 hours`;
-const historyValue = (point: TransportHistoryPoint, metric: HistoryMetric): number | null => metric === "vessels" ? point.maritime_entities : metric === "flights" ? point.aviation_entities : point.ship_arrivals == null && point.ship_departures == null ? null : (point.ship_arrivals ?? 0) + (point.ship_departures ?? 0);
-const metricLabel: Record<HistoryMetric, string> = { movements: "Port arrivals + departures", vessels: "Peak sampled vessels", flights: "Peak sampled aircraft" };
-const identifier = (entity: TransportEntity) => entity.flight_number || entity.callsign || entity.display_name || entity.entity_id;
+const countryName = (iso:string) => new Intl.DisplayNames(undefined,{type:"region"}).of(iso) || iso;
+const identifier = (entity:TransportEntity) => entity.flight_number || entity.callsign || entity.display_name || entity.entity_id;
+const date = (value:string) => new Date(value).toLocaleDateString([], {month:"short",day:"numeric",timeZone:"UTC"});
+const range = (bucket:string,hours:number) => ({from:new Date(bucket).toISOString(),to:new Date(Date.parse(bucket)+hours*3600000).toISOString()});
 
-/** Mount only while the World transport layer is selected; every read uses retained data. */
-export default function TransportScopeContext({ country, events = [], relatedEventIds = [], onSelectCountry, onOpenEvent, onOverview, selectedVehicle }: Props) {
-  const iso = country?.trim().toUpperCase() || undefined;
-  const lastScope = useRef("");
-  const [overview, setOverview] = useState<TransportOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [failed, setFailed] = useState(false);
-  const [retry, setRetry] = useState(0);
-  const [mode, setMode] = useState<TransportMode | "all">("all");
-  const [corridor, setCorridor] = useState("");
-  const [days, setDays] = useState<7 | 30 | 90 | 365>(30);
-  const [metric, setMetric] = useState<HistoryMetric>("movements");
-  const [selected, setSelected] = useState<TransportEntity | null>(null);
-  const [entityQuery, setEntityQuery] = useState("");
-  const [shownEntities, setShownEntities] = useState(40);
-  useEffect(() => { setCorridor(""); setSelected(null); setEntityQuery(""); setShownEntities(40); }, [iso]);
-  useEffect(() => {
-    const controller = new AbortController();
-    const scope = `${iso ?? 'global'}|${mode}|${corridor}`;
-    if (lastScope.current !== scope) { onOverview?.(null); setOverview(null); setSelected(null); lastScope.current = scope; }
-    setLoading(true); setFailed(false);
-    void readWithDeadline((signal) => fetchTransportOverview({ signal, historyDays: iso ? 400 : undefined, country: iso, detail: iso ? "full" : "aggregate", mode: mode === "all" ? undefined : mode, corridorCountry: corridor || undefined, entityLimit: 160 }), controller.signal, 10_000)
-      .then((value) => { if (!controller.signal.aborted) { setOverview(value); onOverview?.(value); setLoading(false); } })
-      .catch(() => { if (!controller.signal.aborted) { setFailed(true); setLoading(false); } });
-    return () => controller.abort();
-  }, [iso, mode, corridor, retry, onOverview]);
-  useEffect(() => { if (selectedVehicle) setSelected(selectedVehicle); }, [selectedVehicle]);
-  useEffect(() => {
-    const timer = setInterval(() => { if (!document.hidden) setRetry(value => value + 1); }, 120_000);
-    return () => clearInterval(timer);
-  }, []);
-  const scopeName = iso ? countryName(iso) : "Worldwide";
-  const history = overview?.history;
-  const series = useMemo(() => (history?.series ?? []).slice(-days), [history, days]);
-  const scopeTrend = iso ? overview?.countries.find((row) => row.country === iso)?.trend : undefined;
-  const departures = scopeTrend?.ship_departures ?? overview?.trends.maritime.ship_departures;
-  const arrivals = scopeTrend?.ship_arrivals ?? overview?.trends.maritime.ship_arrivals;
-  const flights = scopeTrend?.tracked_flights ?? overview?.trends.aviation.tracked_flights;
-  const relatedIds = new Set(relatedEventIds);
-  const related = events.filter((event) => relatedIds.has(event.id) || ((!iso || event.primary_country_iso2 === iso) && (event.signal_domains?.includes("transport") || event.origin_domain === "transport" || event.event_type === "transport_activity_change")));
-  const filteredEntities = (overview?.entities ?? []).filter((entity) => `${identifier(entity)} ${entity.entity_id} ${entity.registration || ""} ${entity.route_label || ""} ${entity.current_location_name || ""}`.toLocaleLowerCase().includes(entityQuery.trim().toLocaleLowerCase()));
-  const counterparties = [...new Set((overview?.routes ?? []).flatMap((route) => [route.origin_country, route.destination_country]).filter((value) => value !== iso))].sort();
-  return <section className="transport-scope-context" aria-label="Transport exploration" aria-busy={loading}>
-    <header className="scope-context-heading"><div><small>Transport · {scopeName}</small><h3>Live tracking & activity</h3></div><button type="button" onClick={() => setRetry((value) => value + 1)} disabled={loading} aria-label="Refresh saved transport"><RefreshCw size={16} /></button></header>
-    <div className="scope-context-controls"><label>Mode<select value={mode} onChange={(event) => { setMode(event.target.value as TransportMode | "all"); setMetric(event.target.value === "aviation" ? "flights" : corridor ? "vessels" : "movements"); }}><option value="all">Air & sea</option><option value="maritime">Maritime</option><option value="aviation">Aviation</option></select></label>
-      {iso && <label>Connection<select value={corridor} onChange={(event) => { setCorridor(event.target.value); setMetric(mode === "aviation" ? "flights" : "vessels"); }}><option value="">All {scopeName} connections</option>{[...new Set([...counterparties, ...(corridor ? [corridor] : [])])].map((value) => <option key={value} value={value}>{scopeName} ↔ {countryName(value)}</option>)}</select></label>}
+/** A single visual explorer drives the existing World map; provider ingestion stays in the background. */
+export default function TransportScopeContext({country,events=[],relatedEventIds=[],onSelectCountry,onOpenEvent,onOverview,selectedVehicle,selection:controlled,onSelectionChange,onMapChange,onSelectVehicle}:Props) {
+  const iso=country?.toUpperCase() || undefined;
+  const [local,setLocal]=useState(EMPTY_TRANSPORT_SELECTION), selection=controlled ?? local;
+  const [overview,setOverview]=useState<TransportOverview|null>(null), [rawPositions,setPositions]=useState<TransportPositions|null>(null);
+  const [positionKey,setPositionKey]=useState("");
+  const requestKey=`${iso??"global"}|${JSON.stringify(selection)}`;
+  const positions=positionKey===requestKey?rawPositions:null;
+  const [loading,setLoading]=useState(true), [failed,setFailed]=useState(false), [retry,setRetry]=useState(0);
+  const [overviewFailed,setOverviewFailed]=useState(false);
+  const [portActivity,setPortActivity]=useState<TransportPortActivity|null>(null);
+  const [days,setDays]=useState(30), [connectionDays,setConnectionDays]=useState(0);
+  const [outlook,setOutlook]=useState<TransportOutlook|null>(null), [outlookFailed,setOutlookFailed]=useState(false);
+  const [selected,setSelected]=useState<TransportEntity|null>(null),[query,setQuery]=useState(""),[browse,setBrowse]=useState(false);
+  const update=(patch:Partial<TransportPositionSelection>)=>{(onSelectionChange ?? setLocal)({...selection,...patch,...(patch.window===null?{movement:undefined}:{})});setSelected(null);onSelectVehicle?.(null);};
+  useEffect(()=>{setLocal(EMPTY_TRANSPORT_SELECTION);setSelected(null);setQuery("");setOverview(null);setOutlook(null);setConnectionDays(0);},[iso]);
+  // Charts are a saved, stable overview; interactive filtering never reruns all historical aggregates.
+  useEffect(()=>{
+    const controller=new AbortController();setOverviewFailed(false);
+    void readWithDeadline(signal=>fetchTransportOverview({signal,country:iso,detail:iso?"full":"aggregate",historyDays:iso?400:undefined,entityLimit:25}),controller.signal,20_000)
+      .then(value=>{if(!controller.signal.aborted){setOverview(value);onOverview?.(value);}})
+      .catch(()=>{if(!controller.signal.aborted)setOverviewFailed(true);});
+    return()=>controller.abort();
+  },[iso,retry,onOverview]);
+  useEffect(()=>{
+    const controller=new AbortController();setLoading(true);setFailed(false);
+    void readWithDeadline(signal=>fetchTransportPositions(iso,selection,signal),controller.signal,12_000)
+      .then(value=>{if(!controller.signal.aborted){setPositions(value);setPositionKey(requestKey);setLoading(false);}})
+      .catch(()=>{if(!controller.signal.aborted){setFailed(true);setLoading(false);}});
+    return()=>controller.abort();
+  },[iso,selection,retry,requestKey]);
+  useEffect(()=>{const timer=setInterval(()=>{if(!document.hidden)setRetry(value=>value+1);},120_000);return()=>clearInterval(timer);},[]);
+  useEffect(()=>{if(selectedVehicle)setSelected(selectedVehicle);},[selectedVehicle]);
+  useEffect(()=>{const controller=new AbortController();setPortActivity(null);void fetchTransportPortActivity(iso,controller.signal).then(value=>{if(!controller.signal.aborted)setPortActivity(value);}).catch(()=>{});return()=>controller.abort();},[iso,retry]);
+  useEffect(()=>{
+    setOutlook(null);setOutlookFailed(false);if(!iso || !connectionDays)return;
+    const controller=new AbortController();void fetchTransportOutlook(iso,connectionDays,controller.signal).then(value=>{if(!controller.signal.aborted)setOutlook(value);}).catch(()=>{if(!controller.signal.aborted)setOutlookFailed(true);});return()=>controller.abort();
+  },[iso,connectionDays,retry]);
+  const connections=useMemo(()=>{
+    if(connectionDays)return (outlook?.corridors??[]).filter(row=>selection.mode==="all"||row.mode===selection.mode).map(row=>({origin:row.origin,destination:row.destination,mode:row.mode,weight:row.sample_days,proxy:row.flag_proxies>0,label:`${row.origin} → ${row.destination} · ${row.observed_days}/${connectionDays} observed days${row.flag_proxies?' · includes flag links':''}`}));
+    return (overview?.routes??[]).filter(row=>selection.mode==="all"||row.mode===selection.mode).map(row=>({origin:row.origin_country,destination:row.destination_country,mode:row.mode,weight:row.active_count,proxy:row.origin_basis!=="observed",label:`${row.origin_name} → ${row.destination_name} · ${row.active_count} current links${row.origin_basis!=="observed"?' · includes flag links':''}`}));
+  },[overview,outlook,selection.mode,connectionDays]);
+  const heat=useMemo(()=>{
+    const totals=new Map<string,number>();
+    if(selection.window||selection.port){for(const vehicle of positions?.entities??[])for(const key of new Set(vehicle.country_links.map(link=>link.country)))totals.set(key,(totals.get(key)??0)+1);return [...totals].map(([country,count])=>({country,count}));}
+    for(const row of connections){if(selection.corridor && ![row.origin,row.destination].includes(selection.corridor))continue;for(const key of new Set([row.origin,row.destination]))totals.set(key,(totals.get(key)??0)+row.weight);}
+    if(!totals.size && !iso)for(const row of overview?.countries??[])totals.set(row.country,selection.mode==="all"?row.active_count:row[selection.mode].active);
+    return [...totals].map(([country,count])=>({country,count}));
+  },[connections,selection.corridor,selection.mode,selection.window,selection.port,positions,overview,iso]);
+  const mapState=useMemo<TransportMapState>(()=>({country:iso,selection,positions,countries:heat,ports:portActivity?.ports??[],connections:selection.corridor?connections.filter(row=>[row.origin,row.destination].includes(selection.corridor)).slice(0,2):[],loading,failed}),[iso,selection,positions,heat,connections,loading,failed,portActivity]);
+  useEffect(()=>{onMapChange?.(mapState);},[mapState,onMapChange]);
+  const tiles=useMemo(()=>{
+    const rows=new Map<string,{country:string;maritime:number;aviation:number;proxy:boolean}>();
+    for(const row of connections){const other=row.origin===iso?row.destination:row.origin;if(other===iso)continue;const key=iso?other:`${row.origin} → ${row.destination}`;const item=rows.get(key)??{country:key,maritime:0,aviation:0,proxy:false};if(row.mode==="aviation")item.aviation+=row.weight;else item.maritime+=row.weight;item.proxy ||=row.proxy;rows.set(key,item);}
+    return [...rows.values()].sort((a,b)=>(b.maritime+b.aviation)-(a.maritime+a.aviation)).slice(0,12);
+  },[connections,iso]);
+  const related=events.filter(event=>relatedEventIds.includes(event.id)||((!iso||event.primary_country_iso2===iso)&&(event.signal_domains?.includes("transport")||event.origin_domain==="transport")));
+  const entities=(positions?.entities??[]).filter(entity=>`${identifier(entity)} ${entity.route_label??""}`.toLowerCase().includes(query.toLowerCase()));
+  const chooseWindow=(bucket:string,hours:number)=>{const next=range(bucket,hours);update({window:selection.window?.from===next.from?null:next,movement:undefined});};
+  const scope=iso?countryName(iso):"Worldwide";
+  return <section className="transport-scope-context transport-visual-explorer" aria-label="Transport exploration" aria-busy={loading}>
+    <header className="scope-context-heading"><div><small>{scope} · transport</small><h3>Air & sea, at a glance</h3></div><button aria-label="Refresh saved transport" onClick={()=>setRetry(value=>value+1)} disabled={loading}><RefreshCw size={16}/></button></header>
+    <div className="transport-mode-cards" aria-label="Filter live transport">
+      {([['all','All traffic'],['maritime','Vessels'],['aviation','Aircraft']] as const).map(([key,label])=><button key={key} type="button" aria-pressed={selection.mode===key} onClick={()=>update({mode:key,port:""})}>{key==='maritime'?<Ship size={21}/>:key==='aviation'?<Plane size={21}/>:<span className="transport-paired-icons"><Ship size={16}/><Plane size={16}/></span>}<strong>{key==='all'?count(overview?.summary.active):count(overview?.summary.modes?.[key].active)}</strong><span>{label}</span></button>)}
     </div>
-    {loading && <p role="status">Loading saved transport observations…</p>}
-    {failed && <p role="alert">Transport context could not be loaded. <button type="button" onClick={() => setRetry((value) => value + 1)}>Retry transport</button></p>}
-    {overview && <>
-      <div className="scope-context-metrics">
-        {mode !== "aviation" && <><Metric title="Port departures · 24h" value={departures?.current} detail={change(departures?.change_pct)} /><Metric title="Port arrivals · 24h" value={arrivals?.current} detail={change(arrivals?.change_pct)} /></>}
-        {mode !== "maritime" && <Metric title="Sampled aircraft · 24h" value={flights?.current} detail={change(flights?.change_pct)} />}
-        <Metric title="Fresh linked vehicles" value={overview.summary.active} detail={`${count(overview.summary.routed)} with resolved routes`} />
-      </div>
-      <p className="scope-context-boundary">Partial AIS / ADS-B tracking · select a vehicle on the map for details.</p><h4>Tracked vehicles · past 24 hours</h4><RecentActivity points={overview.activity} />
-      {history ? <section className="scope-context-history" aria-label="Retained transport history">
-        <header><h4>{corridor ? `${scopeName} ↔ ${countryName(corridor)}` : scopeName} over time</h4><div className="scope-context-controls"><label>History<select value={days} onChange={(event) => setDays(Number(event.target.value) as 7 | 30 | 90 | 365)}><option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days</option><option value="365">Past year</option></select></label><label>Measure<select value={metric} onChange={(event) => setMetric(event.target.value as HistoryMetric)}>{mode !== "aviation" && !corridor && <option value="movements">Port movements</option>}{mode !== "aviation" && <option value="vessels">Vessel samples</option>}{mode !== "maritime" && <option value="flights">Aircraft samples</option>}</select></label></div></header>
-        <details><summary>History coverage</summary><p>Retained observations: {date(history.available_from)}–{date(history.available_to)} UTC · {history.observed_days} observed days. Activity retention: {history.activity_retention_days ?? history.retention_days} days; port movements: {history.movement_retention_days ?? history.retention_days} days. The latest UTC day may be incomplete.</p></details>
-        <HistoryChart points={series} metric={metric} corridor={Boolean(corridor)} />
-        <details><summary>Compare periods</summary><PeriodComparisons history={history} /></details>
-        <details><summary>Coverage & interpretation</summary><p>{history.methodology}</p><p>Year-on-year comparison needs observations from both years. Unrecorded days remain gaps and are never treated as zero traffic.</p></details>
-      </section> : <section aria-label="Recent global transport sampling"><p>Select a country to inspect its retained daily history, monitored ports, corridors and individual vehicles.</p></section>}
-      {!iso && overview.activity_ranking.countries.length > 0 && <section><h4>Browse country transport</h4><div className="scope-context-country-list">{overview.activity_ranking.countries.slice(0, 12).map((row) => <button key={row.country} type="button" onClick={() => onSelectCountry?.(row.country)}><strong>{row.country_name}</strong><span>{count(row.current.observed_movements)} observed · {change(row.momentum.change_pct)}</span><ArrowRight size={14} /></button>)}</div></section>}
-      {overview.routes.length > 0 && <details><summary>Observed connections · {overview.routes.length}</summary><div className="scope-context-routes">{overview.routes.slice(0, 12).map((route) => <button key={`${route.mode}:${route.origin_country}:${route.destination_country}`} type="button" onClick={() => { if (iso) { setCorridor(route.origin_country === iso ? route.destination_country : route.origin_country); setMetric(route.mode === "aviation" ? "flights" : "vessels"); } else onSelectCountry?.(route.destination_country); }}><span>{route.mode === "aviation" ? <Plane size={15} /> : <Ship size={15} />}{route.origin_name} → {route.destination_name}</span><strong>{count(route.active_count)}</strong>{route.origin_basis !== "observed" && <small>{route.origin_basis === "flag_fallback" ? "Flag-state proxy origin" : "Includes flag-state proxy origins"}</small>}</button>)}</div></details>}
-      {!corridor && overview.ports.length > 0 && <details><summary>Monitored ports · 24 hours</summary><div className="scope-context-table-scroll"><table><thead><tr><th>Port</th><th>Arrivals</th><th>Departures</th><th>Cargo vessel departures</th></tr></thead><tbody>{overview.ports.slice(0, 20).map((port) => <tr key={`${port.country}:${port.location_name}`}><th><button type="button" onClick={() => onSelectCountry?.(port.country)}>{port.location_name}</button><small>{port.country_name}</small></th><td>{count(port.arrivals)}</td><td>{count(port.departures)}</td><td>{count(port.cargo_vessel_departures)}</td></tr>)}</tbody></table></div></details>}
-      {iso && <details><summary>Browse flights & vessels · {overview.entities.length} retained snapshots</summary><label className="scope-context-vehicle-search">Find a vessel, flight or route<input type="search" value={entityQuery} onChange={(event) => { setEntityQuery(event.target.value); setShownEntities(40); }} /></label><div className="scope-context-entities">{filteredEntities.slice(0, shownEntities).map((entity) => <button key={entity.id} type="button" aria-pressed={selected?.id === entity.id} onClick={() => setSelected(entity)}><span>{entity.mode === "aviation" ? <Plane size={15} /> : <Anchor size={15} />}<strong>{identifier(entity)}</strong></span><small>{entity.route_label || entity.current_location_name || "Route unresolved"} · {date(entity.observed_at)}</small><small>{entity.country_links.map((link) => `${link.country}: ${link.role === "current" ? "observed location" : link.role === "flag" ? "vessel flag" : link.role}`).join(" · ")}</small></button>)}</div>{!overview.entities.length && <p>No fresh vehicle snapshots match this scope. This does not establish absence of traffic.</p>}{filteredEntities.length > shownEntities && <button type="button" onClick={() => setShownEntities((value) => value + 40)}>Show more vehicles ({filteredEntities.length - shownEntities} remaining)</button>}{entityQuery && !filteredEntities.length && <p>No retained snapshots match this search.</p>}<p>{overview.entities.length} freshest snapshots loaded for this scope; current samples do not represent every vehicle.</p></details>}
-      {selected && <EntityDetail key={`${selected.mode}:${selected.entity_id}`} entity={selected} onClose={() => setSelected(null)} />}
-      {related.length > 0 && <details aria-label="Related transport developments"><summary>Related reporting</summary><h4>Reporting & developments in this scope</h4><p>Open an event to inspect its linked reporting and explanations. Sharing a location and time does not establish cause.</p>{related.slice(0, 6).map((event) => <button className="scope-context-related-event" type="button" key={event.id} onClick={() => onOpenEvent?.(event.id)}><strong>{event.title}</strong><small>{event.location_name || event.primary_country_iso2 || "Global"} · {date(event.last_activity_time)}</small><span>{event.summary}</span></button>)}</details>}
-      <details><summary>Sources & freshness</summary><p>Saved overview generated {new Date(overview.generated_at).toLocaleString()}. Maritime: {overview.coverage.maritime.coverage_note}</p><p>Flights: {overview.coverage.aviation.source} · {overview.coverage.aviation.license}. Routes may use inferred airport pairs; vessel flags are separately labelled as contextual origins.</p></details>
+    <div className="transport-live-caption" role="status">{loading?'Updating map positions…':failed?'Positions unavailable · retry above':positions?.cohort?.available===false?'Vehicle identities for this period are no longer retained':`${positions?.entities.length??0}${positions?.truncated?' sampled':''} current positions on the map`}<span>Orange · vessels / blue · aircraft</span></div>
+    {(selection.corridor||selection.port||selection.window||selected) && <div className="transport-selection-chips">
+      {selection.corridor&&<button onClick={()=>update({corridor:""})}>{countryName(selection.corridor)} <X size={12}/></button>}{selection.port&&<button onClick={()=>update({port:""})}>{selection.port} <X size={12}/></button>}{selection.window&&<button onClick={()=>update({window:null})}>{date(selection.window.from)} · activity cohort <X size={12}/></button>}{selected&&<button onClick={()=>{setSelected(null);onSelectVehicle?.(null);}}>Following {identifier(selected)} <X size={12}/></button>}
+    </div>}
+    <section aria-label="Transport corridor heatmap"><header className="transport-visual-heading"><h4>Connections</h4>{iso&&<div className="transport-period-pills" aria-label="Connection period">{[0,7,30,90].map(value=><button key={value} aria-pressed={connectionDays===value} onClick={()=>setConnectionDays(value)}>{value?`${value}d`:'Now'}</button>)}</div>}</header>
+      <div className="transport-connection-grid">{tiles.map(tile=>{const max=Math.max(1,...tiles.map(row=>row.maritime+row.aviation)),total=tile.maritime+tile.aviation;return <button key={tile.country} aria-pressed={selection.corridor===tile.country} aria-label={`Filter connection ${iso?countryName(tile.country):tile.country}: ${count(total)} ${connectionDays?'daily peak samples':'current links'}`} onClick={()=>iso?update({corridor:selection.corridor===tile.country?'':tile.country,port:""}):onSelectCountry?.(tile.country.split(' → ')[1])} style={{'--heat':`${.12+.5*Math.sqrt(total/max)}`} as React.CSSProperties}><span>{iso?countryName(tile.country):tile.country}{tile.proxy&&<small title="Includes vessel flag origins; a flag is not a sailed route"> †</small>}</span><strong>{count(total)}</strong><i><b style={{width:`${total?tile.maritime/total*100:0}%`}}/><b style={{width:`${total?tile.aviation/total*100:0}%`}}/></i></button>;})}</div>
+      <p className="transport-visual-note">{connectionDays?'Daily peak samples · select a connection to filter current positions.':'Country links · select to filter current positions.'}{tiles.some(row=>row.proxy)&&' † Includes flag links.'}</p>
+      {!tiles.length&&<p className="transport-visual-note">{connectionDays&&!outlook?(outlookFailed?'Saved connections unavailable.':'Loading saved connections…'):overview?'No resolved connections in this sample.':'Preparing connection view…'}</p>}
+    </section>
+    {overview&&<>
+      <section><header className="transport-visual-heading"><h4>Activity · past 24 hours</h4><span>Tap an hour</span></header><ActivityPlot rows={overview.activity.filter(row=>selection.mode==='all'||row.mode===selection.mode).map(row=>({bucket:row.bucket,mode:row.mode,value:row.active_count}))} stepHours={1} selected={selection.window?.from} onSelect={bucket=>chooseWindow(bucket,1)}/></section>
+      {overview.history&&<section aria-label="Retained transport history"><header className="transport-visual-heading"><h4>Activity over time</h4><div className="transport-period-pills" aria-label="History window">{[7,30,90,365].map(value=><button key={value} aria-pressed={days===value} onClick={()=>setDays(value)}>{value===365?'Year':`${value}d`}</button>)}</div></header><ActivityPlot rows={overview.history.series.slice(-days).flatMap(point=>(['maritime','aviation'] as const).flatMap(mode=>{const value=mode==='maritime'?point.maritime_entities:point.aviation_entities;return value==null||(selection.mode!=='all'&&selection.mode!==mode)?[]:[{bucket:point.bucket,mode,value}];}))} selected={selection.window?.from} onSelect={bucket=>chooseWindow(bucket,24)}/><p className="transport-visual-note">Daily peak samples · gaps are missing observations. Tap a day to locate its vehicles now.</p>
+      <header className="transport-visual-heading"><h4>Departures</h4><span>Recorded port exits · tap a day</span></header><ActivityPlot rows={overview.history.series.slice(-days).flatMap(point=>point.ship_departures==null?[]:[{bucket:point.bucket,mode:'maritime',value:point.ship_departures}])} selected={selection.movement==='departure'?selection.window?.from:undefined} onSelect={bucket=>update({mode:'maritime',movement:'departure',window:range(bucket,24),port:''})}/></section>}
     </>}
+    {!!portActivity?.ports.length&&<section aria-label="Port departures and frequency"><header className="transport-visual-heading"><h4>Ports & departures</h4><span>Recorded · past 24h</span></header><div className="transport-port-frequency">{portActivity.ports.slice(0,8).map(port=><button key={`${port.country}:${port.name}`} aria-pressed={selection.port===port.name} onClick={()=>update({port:selection.port===port.name?'':port.name,mode:'maritime',corridor:'',window:null})}><span><strong>{port.name}</strong><small>{port.country} · {count(port.arrivals)} arrivals</small></span><PortSpark hours={port.hours}/><span><strong>{count(port.departures)}</strong><small>departures / 24h</small></span></button>)}</div><p className="transport-visual-note">Hourly departure frequency · tap a port to locate its current vessels. Geofence observations, not complete port-authority totals.</p></section>}
+    {overviewFailed&&<p className="transport-visual-note">Historical charts unavailable. Current map positions remain independently available.</p>}
+    <section><header className="transport-visual-heading"><h4>On the map</h4><button onClick={()=>setBrowse(!browse)}>{browse?'Show less':'Find a vehicle'}</button></header>{browse&&<input type="search" aria-label="Find a vessel or aircraft" placeholder="Vessel, flight or route" value={query} onChange={event=>setQuery(event.target.value)}/>}
+      <div className="transport-vehicle-strip">{entities.slice(0,browse?40:4).map(entity=><button key={entity.id} aria-pressed={selected?.id===entity.id} onClick={()=>{setSelected(entity);onSelectVehicle?.(entity);}}>{entity.mode==='aviation'?<Plane size={18}/>:<Ship size={18}/>}<span><strong>{identifier(entity)}</strong><small>{entity.route_label||entity.current_location_name||entity.entity_id}</small></span><ArrowRight size={14}/></button>)}</div>
+    </section>
+    {selected&&<EntityDetail key={selected.id} entity={selected} onClose={()=>{setSelected(null);onSelectVehicle?.(null);}}/>}
+    {!!related.length&&<section aria-label="Related transport developments"><h4>In the news</h4>{related.slice(0,3).map(event=><button className="scope-context-related-event" key={event.id} onClick={()=>onOpenEvent?.(event.id)}><strong>{event.title}</strong><small>{event.location_name||event.primary_country_iso2}</small></button>)}</section>}
+    <p className="transport-visual-note">Partial AIS / ADS-B coverage · positions stay current when historical activity is selected. Country links and reference-point connections are not sailed or flown tracks.</p>
+    {overview?.history&&<details className="transport-methods"><summary>Data coverage & comparisons</summary><p>{overview.history.methodology}</p>{overview.history.comparisons?.map(row=><p key={row.key}>{row.label}: {row.comparable?`${row.change_percent??'—'}%`:`${row.current.observed_days}/${row.current.days} current days · ${row.previous.observed_days}/${row.previous.days} prior days · not comparable`}</p>)}</details>}
   </section>;
 }
 
-function Metric({ title, value, detail }: { title: string; value?: number; detail: string }) { return <div><small>{title}</small><strong>{count(value)}</strong><span>{detail}</span></div>; }
-const selectedValue = (point: TransportHistoryPoint, metric: HistoryMetric, corridor: boolean) => corridor ? metric === "flights" ? point.corridor_aviation_entities : point.corridor_maritime_entities : historyValue(point, metric);
-function HistoryChart({ points, metric, corridor }: { points: TransportHistoryPoint[]; metric: HistoryMetric; corridor: boolean }) {
-  const rows = points.map((point) => ({ bucket: point.bucket, value: selectedValue(point, metric, corridor) }));
-  const values = rows.flatMap((point) => point.value == null ? [] : [point.value]);
-  if (!values.length) return <p>No retained samples for this measure in the selected period.</p>;
-  const max = Math.max(1, ...values), start = Date.parse(rows[0].bucket), end = Date.parse(rows[rows.length - 1].bucket);
-  const width = Math.max(1, Math.min(12, 650 / Math.max(1, rows.length) - 1));
-  return <figure className="scope-context-chart"><figcaption>{metricLabel[metric]} · daily retained samples</figcaption><svg viewBox="0 0 720 180" role="img" aria-label={`${metricLabel[metric]}, ${date(rows[0].bucket)} to ${date(rows[rows.length - 1].bucket)} UTC; missing observations shown as gaps`}>
-    <line x1="32" x2="710" y1="152" y2="152" stroke="var(--shell-border)" /><text x="0" y="18">{count(max)}</text><text x="13" y="154">0</text>{rows.filter((point) => point.value != null).map((point) => <rect key={point.bucket} x={32 + (Date.parse(point.bucket) - start) / Math.max(1, end - start) * 670 - width / 2} y={152 - point.value! / max * 130} width={width} height={point.value! / max * 130} rx="1"><title>{date(point.bucket)} · {count(point.value)}</title></rect>)}
-    <text x="32" y="176">{date(rows[0].bucket)}</text><text x="710" y="176" textAnchor="end">{date(rows[rows.length - 1].bucket)}</text>
-  </svg><details><summary>Daily counts & gaps</summary><div className="scope-context-table-scroll"><table><thead><tr><th>Day · UTC</th><th>{metricLabel[metric]}</th></tr></thead><tbody>{rows.map((point) => <tr key={point.bucket}><th>{date(point.bucket)}</th><td>{point.value == null ? "No retained observation" : count(point.value)}</td></tr>)}</tbody></table></div></details></figure>;
+function PortSpark({hours}:{hours:TransportPortActivity["ports"][number]["hours"]}) {
+  const end=new Date();end.setUTCMinutes(0,0,0);const start=end.getTime()-23*3600000,max=Math.max(1,...hours.map(row=>row.departures));
+  return <svg viewBox="0 0 120 30" aria-hidden="true">{hours.map(row=><rect key={row.bucket} x={(Date.parse(row.bucket)-start)/3600000*5} y={28-row.departures/max*26} width="3.5" height={Math.max(1,row.departures/max*26)} rx="1" fill="var(--shell-accent)"/>)}</svg>;
 }
-function PeriodComparisons({ history }: { history: TransportHistory }) {
-  if (!history.comparisons?.length) return <p className="scope-context-boundary">Long-period comparisons need retained observations in both periods. Unrecorded days are not zero traffic.</p>;
-  return <section className="scope-context-periods" aria-label="Sampled vehicle period comparisons"><h4>Sampled vehicle activity · period comparisons</h4>{history.comparisons.map((comparison) => <article key={comparison.key}>
-    <strong>{comparison.label}</strong>
-    {comparison.comparable ? <p>{comparison.change_percent == null ? "No percentage baseline" : `${comparison.change_percent > 0 ? "+" : ""}${comparison.change_percent.toFixed(1)}%`} · average daily sampled vehicles {count(comparison.current.average_daily_entities)} vs {count(comparison.previous.average_daily_entities)}</p> : <p>Comparison unavailable · {comparison.current.observed_days}/{comparison.current.days} current days and {comparison.previous.observed_days}/{comparison.previous.days} prior days observed.</p>}
-    <small>{date(comparison.current.start)}–{date(new Date(Date.parse(comparison.current.end) - 1).toISOString())} vs {date(comparison.previous.start)}–{date(new Date(Date.parse(comparison.previous.end) - 1).toISOString())} UTC</small><p className="scope-context-boundary">{comparison.notice}</p>
-  </article>)}</section>;
+type PlotRow={bucket:string;mode:string;value:number};
+function ActivityPlot({rows,selected,onSelect,stepHours=24}:{rows:PlotRow[];selected?:string;onSelect:(bucket:string)=>void;stepHours?:number}) {
+  const buckets=[...new Set(rows.map(row=>row.bucket))].sort(),max=Math.max(1,...rows.map(row=>row.value));
+  if(!buckets.length)return <p className="transport-visual-note">No retained activity samples.</p>;
+  const start=Date.parse(buckets[0]),end=Date.parse(buckets[buckets.length-1]),x=(bucket:string)=>28+(Date.parse(bucket)-start)/Math.max(1,end-start)*650;
+  const spacing=stepHours*3600000;
+  const series=(mode:string)=>{let previous=-Infinity;return rows.filter(row=>row.mode===mode).sort((a,b)=>a.bucket.localeCompare(b.bucket)).map(row=>{const gap=Date.parse(row.bucket)-previous>spacing*1.5;previous=Date.parse(row.bucket);return `${gap?'M':'L'}${x(row.bucket)},${132-row.value/max*112}`;}).join(' ');};
+  return <figure className="transport-activity-plot"><svg viewBox="0 0 720 162" role="group" aria-label="Transport activity · select a period to filter current positions">
+    {[0,.5,1].map(value=><g key={value}><line x1="28" x2="688" y1={132-value*112} y2={132-value*112} stroke="var(--shell-border)" strokeDasharray={value?'3 5':undefined}/><text x="710" y={136-value*112} textAnchor="end">{count(Math.round(max*value))}</text></g>)}
+    {['maritime','aviation'].map(mode=><path key={mode} d={series(mode)} fill="none" stroke={mode==='maritime'?'var(--shell-accent)':'var(--signal-sky,#77a8ba)'} strokeWidth="2.5" strokeLinejoin="round"/>)}
+    {buckets.map(bucket=><g key={bucket}>{selected===bucket&&<line x1={x(bucket)} x2={x(bucket)} y1="12" y2="136" stroke="var(--shell-ink)" strokeWidth="1.5"/>}<rect x={x(bucket)-Math.max(3,650/buckets.length/2)} y="10" width={Math.max(6,650/buckets.length)} height="128" fill="transparent" role="button" tabIndex={0} aria-pressed={selected===bucket} aria-label={`Locate vehicles active ${new Date(bucket).toLocaleString([], {timeZone:'UTC'})} UTC`} onClick={()=>onSelect(bucket)} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();onSelect(bucket);}}}><title>{date(bucket)} · {rows.filter(row=>row.bucket===bucket).map(row=>`${row.mode}: ${row.value}`).join(' / ')}</title></rect></g>)}
+    <text x="28" y="157">{date(buckets[0])}{spacing<86400000?` ${new Date(buckets[0]).getUTCHours()}:00`:''}</text><text x="688" y="157" textAnchor="end">{date(buckets[buckets.length-1])}{spacing<86400000?` ${new Date(buckets[buckets.length-1]).getUTCHours()}:00`:''} UTC</text>
+  </svg></figure>;
 }
-function RecentActivity({ points }: { points: TransportOverview["activity"] }) {
-  const buckets = [...new Set(points.map((point) => point.bucket))].sort();
-  const max = Math.max(1, ...points.map((point) => point.active_count));
-  if (!buckets.length) return <p>No retained recent samples are available.</p>;
-  const start = Date.parse(buckets[0]), end = Date.parse(buckets[buckets.length - 1]);
-  const time = (value: string) => new Date(value).toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
-  return <figure className="scope-context-chart"><svg viewBox="0 0 720 180" role="img" aria-label={`Sampled aircraft and vessels from ${time(buckets[0])} to ${time(buckets[buckets.length - 1])} UTC; missing hours are gaps`}>
-    <line x1="32" x2="710" y1="152" y2="152" stroke="var(--shell-border)" /><text x="0" y="18">{count(max)}</text>
-    {points.map((point) => <rect key={`${point.bucket}:${point.mode}`} x={32 + (Date.parse(point.bucket) - start) / Math.max(1, end - start) * 670 + (point.mode === "aviation" ? 0 : -5)} y={152 - point.active_count / max * 130} width="4" height={point.active_count / max * 130} style={{ fill: point.mode === "aviation" ? "var(--signal-sky,#77a8ba)" : "var(--shell-accent,#eda36a)" }}><title>{time(point.bucket)} UTC · {point.mode} · {point.active_count}</title></rect>)}
-    <text x="32" y="176">{time(buckets[0])}</text><text x="710" y="176" textAnchor="end">{time(buckets[buckets.length - 1])}</text>
-  </svg><figcaption>Vessels · orange / aircraft · blue · UTC · sampled activity</figcaption></figure>;
-}
+
 function EntityDetail({ entity, onClose }: { entity: TransportEntity; onClose: () => void }) {
   const [track, setTrack] = useState<TransportTrackPoint[] | null>(null), [failed, setFailed] = useState(false);
   useEffect(() => { const controller = new AbortController(); void readWithDeadline((signal) => fetchTransportEntity(entity.mode, entity.entity_id, signal), controller.signal, 10_000).then((value) => { if (!controller.signal.aborted) setTrack(value.track); }).catch(() => { if (!controller.signal.aborted) setFailed(true); }); return () => controller.abort(); }, [entity.mode, entity.entity_id]);

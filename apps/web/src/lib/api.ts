@@ -2138,6 +2138,26 @@ export async function fetchTransportOverview(params: {
   return (await resp.json()) as TransportOverview;
 }
 
+export type TransportPortActivity = {generated_at:string;window_hours:number;ports:Array<{country:string;name:string;latitude:number;longitude:number;departures:number;arrivals:number;hours:Array<{bucket:string;departures:number;arrivals:number}>}>};
+export async function fetchTransportPortActivity(country?:string,signal?:AbortSignal):Promise<TransportPortActivity> {
+  const response=await fetch(`${API_BASE}/api/transport/ports${country?`?country=${country}`:''}`,{credentials:"include",signal});
+  if(!response.ok)throw new Error("Port activity unavailable");return response.json();
+}
+export type TransportPositionSelection = { mode: TransportMode | "all"; corridor: string; port: string; window: { from: string; to: string } | null; movement?: "departure" | "arrival" };
+export type TransportPositions = { generated_at: string; entities: TransportEntity[]; limit: number; truncated: boolean; cohort: {from:string;to:string;available:boolean}|null };
+export async function fetchTransportPositions(country: string | undefined, selection: TransportPositionSelection, signal?: AbortSignal): Promise<TransportPositions> {
+  const params = new URLSearchParams();
+  if (country) params.set("country",country);
+  if (selection.mode !== "all") params.set("mode",selection.mode);
+  if (selection.corridor) params.set("corridor",selection.corridor);
+  if (selection.port) params.set("port",selection.port);
+  if (selection.movement) params.set("movement",selection.movement);
+  if (selection.window) { params.set("from",selection.window.from); params.set("to",selection.window.to); }
+  const response = await fetch(`${API_BASE}/api/transport/positions?${params}`, { credentials: "include", signal });
+  if (!response.ok) throw new Error(`Transport positions unavailable (${response.status})`);
+  return response.json();
+}
+
 export async function fetchTransportEntity(
   mode: TransportMode,
   entityId: string,

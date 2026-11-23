@@ -1,4 +1,4 @@
-import { Plane, Ship } from "lucide-react";
+import { Anchor, Plane, Ship } from "lucide-react";
 import CountryFlag from "./CountryFlag";
 import { MAP_EVENT_KINDS, type MapEventKind } from "./mapEventPresentation";
 import { useCountryContexts } from "./countryContext";
@@ -60,11 +60,14 @@ export type WorldMapPoint = {
   selected?: boolean;
   kind?: MapEventKind;
   vehicleMode?: "aviation" | "maritime";
+  vehicleHeading?: number | null;
+  portName?: string;
 };
 
 export type WorldMapBubblesProps = {
   data: BubbleDatum[];
-  corridors?: Array<{origin:string;destination:string;label:string;weight:number}>;
+  corridors?: Array<{origin:string;destination:string;label:string;weight:number;mode?:string;proxy?:boolean}>;
+  transportLayer?: boolean;
   onSelect?: (countryIso2: string) => void;
   dark?: boolean;
   legend?: boolean;
@@ -367,6 +370,7 @@ export default memo(function WorldMapBubbles({
   points = NO_EVENT_POINTS,
   onSelectPoint,
   corridors = [],
+  transportLayer = false,
 }: WorldMapBubblesProps) {
   const countryContexts = useCountryContexts();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -489,8 +493,8 @@ export default memo(function WorldMapBubbles({
         point.longitude >= -180 &&
         point.longitude <= 180,
       )
-      .slice(0, 200),
-    [points],
+      .slice(0, transportLayer ? 600 : 200),
+    [points, transportLayer],
   );
   const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(() => new Set());
 
@@ -868,7 +872,7 @@ export default memo(function WorldMapBubbles({
   const hoveredMarker = hoveredCountry
     ? markerByCountry.get(hoveredCountry)
     : undefined;
-  const featuredMarker = featuredIso
+  const featuredMarker = !transportLayer && featuredIso
     ? markerByCountry.get(featuredIso)
     : undefined;
   const labelColor = isDark ? "#f2ebdd" : "#19382a";
@@ -1026,7 +1030,7 @@ export default memo(function WorldMapBubbles({
           {corridors.map((route) => {
             const from = WORLD_GEOMETRY.centroidByIso.get(route.origin), to = WORLD_GEOMETRY.centroidByIso.get(route.destination);
             const a = from && projection(from), b = to && projection(to); if (!a || !b) return null;
-            return <path key={`${route.origin}:${route.destination}:${route.label}`} d={`M${a[0]},${a[1]} Q${(a[0]+b[0])/2},${Math.min(a[1],b[1])-Math.min(80,Math.abs(a[0]-b[0])/4)} ${b[0]},${b[1]}`} fill="none" stroke="var(--shell-accent)" strokeWidth={Math.min(5,1+Math.log2(1+route.weight)) / view.scale} opacity="0.8" role="button" tabIndex={0} aria-label={route.label} onClick={(e)=>{e.stopPropagation();onSelect?.(route.destination);}} onKeyDown={(e)=>{if(e.key==='Enter')onSelect?.(route.destination);}}><title>{route.label}</title></path>;
+            return <path key={`${route.origin}:${route.destination}:${route.label}`} d={`M${a[0]},${a[1]} Q${(a[0]+b[0])/2},${Math.min(a[1],b[1])-Math.min(80,Math.abs(a[0]-b[0])/4)} ${b[0]},${b[1]}`} fill="none" stroke={route.mode === "aviation" ? "var(--signal-sky,#77a8ba)" : "var(--shell-accent)"} strokeWidth={1.5 / view.scale} strokeDasharray={route.proxy ? `${4/view.scale} ${4/view.scale}` : undefined} opacity="0.55" role="button" tabIndex={0} aria-label={route.label} onClick={(e)=>{e.stopPropagation();onSelect?.(route.destination);}} onKeyDown={(e)=>{if(e.key==='Enter')onSelect?.(route.destination);}}><title>{route.label}</title></path>;
           })}
           {!showBubbles && featuredMarker && (() => {
             const point = projection(featuredMarker.coordinate);
@@ -1187,9 +1191,9 @@ export default memo(function WorldMapBubbles({
           {eventPoints.map((eventPoint) => {
             const point = projection([eventPoint.longitude, eventPoint.latitude]);
             if (!point) return null;
-            const color = eventPointColor(eventPoint.severity, isDark);
+            const color = eventPoint.vehicleMode ? eventPoint.vehicleMode === "aviation" ? "#77a8ba" : "#eda36a" : eventPointColor(eventPoint.severity, isDark);
             const radius = 8 / view.scale;
-            const EventIcon = eventPoint.vehicleMode === "aviation" ? Plane : eventPoint.vehicleMode === "maritime" ? Ship : MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
+            const EventIcon = eventPoint.portName ? Anchor : eventPoint.vehicleMode === "aviation" ? Plane : eventPoint.vehicleMode === "maritime" ? Ship : MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
             const hasImage = eventPoint.imageUrl && !failedImageUrls.has(eventPoint.imageUrl);
             const showPointLabel = pointLabelIds.has(eventPoint.id);
             return (
@@ -1239,8 +1243,10 @@ export default memo(function WorldMapBubbles({
                     strokeWidth={2.2 / view.scale}
                   />
                 )}
-                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={isDark ? "#0b1b28" : "#ffffff"} strokeWidth={4} pointerEvents="none" />
-                <EventIcon aria-hidden="true" x={-8 / view.scale} y={-8 / view.scale} width={16 / view.scale} height={16 / view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none" />
+                {eventPoint.vehicleMode ? (view.scale < 2 && !eventPoint.selected ? <circle r={2.8/view.scale} fill={color} stroke={isDark?"#0b1b28":"#fffaf0"} strokeWidth={.7/view.scale}/> : <g transform={`rotate(${eventPoint.vehicleHeading??0}) scale(${1/view.scale})`}><path d={eventPoint.vehicleMode === "aviation" ? "M0 -8 L2 -2 L7 2 L7 4 L1 2 L1 7 L-1 7 L-1 2 L-7 4 L-7 2 L-2 -2 Z" : "M0 -7 L4 -1 L4 5 L0 7 L-4 5 L-4 -1 Z"} fill={color} stroke={isDark?"#0b1b28":"#fffaf0"} strokeWidth="1"/></g>) : <>
+                  <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={isDark?"#0b1b28":"#ffffff"} strokeWidth={4} pointerEvents="none"/>
+                  <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none"/>
+                </>}
                 {hasImage && eventPoints.filter((point) => point.imageUrl && !failedImageUrls.has(point.imageUrl)).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
                   <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
                   <rect x={-23 / view.scale} y={-51 / view.scale} width={46 / view.scale} height={34 / view.scale} rx={4 / view.scale} fill={color} />
@@ -1420,7 +1426,8 @@ export default memo(function WorldMapBubbles({
             {markers.length} mapped · select country for profile
           </div>
           {legendDescription && <p className="map-key-note">{legendDescription}</p>}
-          {eventPoints.length > 0 && <div className="map-visible-event-key" aria-label="Map event types">
+          {transportLayer && <div className="map-visible-event-key"><strong>Live transport</strong><p className="map-key-note">Orange · vessels / blue · aircraft<br/>Zoom for directional silhouettes. Country colour = linked activity, not disruption.</p></div>}
+          {!transportLayer && eventPoints.length > 0 && <div className="map-visible-event-key" aria-label="Map event types">
             <strong>Events · tap for the story</strong>
             <div className="map-event-types">{[...new Set(eventPoints.map((point) => point.kind ?? "news"))].map((kind) => {
               const { icon: Icon, label } = MAP_EVENT_KINDS[kind];

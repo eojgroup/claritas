@@ -1,3 +1,4 @@
+import type { TransportPositionFilters } from "./transport-position-filters";
 import { feature } from "topojson-client";
 import worldCountries from "world-countries";
 import type { FeatureCollection, Geometry, MultiPolygon, Polygon, Position } from "geojson";
@@ -3167,6 +3168,61 @@ function serializeEntity(row: TransportSnapshotRow) {
     linkage_basis: row.linkage_basis ?? [],
     country_links: links,
   };
+}
+
+/** Recorded port transitions by hour, independent of current snapshot aggregation. */
+export async function getTransportPortActivity(country?: string) {
+  const result = await query<{country:string;location_name:string;bucket:Date;departures:number;arrivals:number}>(
+    `SELECT country_iso2 AS country,location_name,bucket,departures,arrivals FROM transport_movement_hour
+     WHERE bucket >= date_trunc('hour',now())-interval '23 hours' ${country ? 'AND country_iso2=$1' : ''}
+     ORDER BY bucket`,country?[country]:[]);
+  const ports = MARITIME_PORTS.filter(port=>!country||port.iso2===country).map(port=>{
+    const hours = result.rows.filter(row=>row.country.trim()===port.iso2&&row.location_name===port.name).map(row=>({bucket:isoDate(row.bucket),departures:Number(row.departures),arrivals:Number(row.arrivals)}));
+    return {country:port.iso2,name:port.name,latitude:port.latitude,longitude:port.longitude,
+      departures:hours.reduce((sum,row)=>sum+row.departures,0),arrivals:hours.reduce((sum,row)=>sum+row.arrivals,0),hours};
+  }).sort((a,b)=>b.departures-a.departures||b.arrivals-a.arrivals);
+  return {generated_at:new Date().toISOString(),window_hours:24,ports:ports.slice(0,country?100:24)};
+}
+
+/** One bounded current-position read; chart cohorts never substitute historical coordinates. */
+export async function getTransportPositions(filters: TransportPositionFilters) {
+  const retentionDays = boundedIntegerFromEnv("TRANSPORT_AGGREGATE_RETENTION_DAYS", 60, 30, 730);
+  const cohort = filters.from && filters.to ? { from: filters.from, to: filters.to,
+    available: Date.parse(filters.from) >= Date.now() - retentionDays * 86400000 } : null;
+  if (cohort && !cohort.available) return { generated_at: new Date().toISOString(), entities: [], limit: filters.limit, truncated: false, cohort };
+  const values: unknown[] = [];
+  const bind = (value: unknown) => { values.push(value); return `$${values.length}`; };
+  const conditions = [activeTransportWhere("s"), "s.latitude BETWEEN -90 AND 90", "s.longitude BETWEEN -180 AND 180"];
+  if (filters.country && !cohort) {
+    const p = bind(filters.country);
+    conditions.push(`(s.current_country_iso2=${p} OR s.origin_country_iso2=${p} OR s.destination_country_iso2=${p} OR s.registration_country_iso2=${p})`);
+  }
+  if (filters.corridor && filters.country) {
+    const a = bind(filters.country), b = bind(filters.corridor);
+    const origin = "COALESCE(s.origin_country_iso2,CASE WHEN s.mode='maritime' THEN s.registration_country_iso2 END)";
+    conditions.push(`((${origin}=${a} AND s.destination_country_iso2=${b}) OR (${origin}=${b} AND s.destination_country_iso2=${a}))`);
+  }
+  if (filters.port && !filters.movement) conditions.push(`s.current_location_name=${bind(filters.port)}`);
+  if (cohort) {
+    const from = bind(cohort.from), to = bind(cohort.to), scope = filters.movement && !filters.country ? "NULL" : bind(filters.country ?? TRANSPORT_SCOPE_GLOBAL);
+    if (filters.movement) {
+      const event = bind(filters.movement);
+      conditions.push(`EXISTS (SELECT 1 FROM transport_movement_event a WHERE a.mode=s.mode AND a.entity_id=s.entity_id ${filters.country ? `AND a.country_iso2=${scope}` : ''} AND a.event_type=${event} AND a.observed_at>=${from}::timestamptz AND a.observed_at<${to}::timestamptz ${filters.port ? `AND a.location_name=${bind(filters.port)}` : ''})`);
+    } else conditions.push(`EXISTS (SELECT 1 FROM transport_entity_activity_hour a WHERE a.mode=s.mode AND a.entity_id=s.entity_id AND a.country_iso2=${scope} AND a.bucket>=${from}::timestamptz AND a.bucket<${to}::timestamptz)`);
+  }
+  const modes = filters.mode ? [filters.mode] : ["maritime", "aviation"];
+  const perMode = Math.ceil(filters.limit / modes.length);
+  const columns = `s.id, s.mode, s.entity_id, s.display_name, s.callsign, s.flight_number,
+    s.registration, s.vehicle_type, s.vehicle_category, s.latitude, s.longitude, s.heading,
+    s.speed, s.altitude, s.vertical_rate, s.current_country_iso2, s.origin_country_iso2,
+    s.destination_country_iso2, s.registration_country_iso2, s.origin_name, s.destination_name,
+    s.origin_latitude, s.origin_longitude, s.destination_latitude, s.destination_longitude,
+    s.current_location_name, s.route_label, s.linkage_basis, s.linkage_confidence,
+    s.status, s.is_alert, s.source_name, s.observed_at, '{}'::jsonb AS payload`;
+  const sql = modes.map(mode => `(SELECT ${columns} FROM transport_snapshot s WHERE ${conditions.join(" AND ")} AND s.mode=${bind(mode)} ORDER BY s.observed_at DESC, s.entity_id LIMIT ${perMode + 1})`).join(" UNION ALL ");
+  const rows = (await query<TransportSnapshotRow>(sql, values)).rows;
+  const entities = modes.flatMap(mode => rows.filter(row => row.mode === mode).slice(0, perMode)).slice(0, filters.limit).map(serializeEntity);
+  return { generated_at: new Date().toISOString(), entities, limit: filters.limit, truncated: modes.some(mode => rows.filter(row => row.mode === mode).length > perMode), cohort };
 }
 
 function percentageChange(currentValue: number, previousValue: number): number | null {
