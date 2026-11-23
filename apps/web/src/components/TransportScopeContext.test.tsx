@@ -54,6 +54,8 @@ it("selects a historical activity cohort and an actual departure cohort, with ga
  await waitFor(()=>expect(api.positions).toHaveBeenLastCalledWith("NL",expect.objectContaining({window:{from:"2026-11-19T00:00:00.000Z",to:"2026-11-20T00:00:00.000Z"}}),expect.any(AbortSignal)));
  const plots=within(history).getAllByRole("group").filter(chart=>chart.tagName.toLowerCase()==="svg");fireEvent.click(within(plots[1]).getAllByRole("button")[0]);
  await waitFor(()=>expect(api.positions).toHaveBeenLastCalledWith("NL",expect.objectContaining({movement:"departure",mode:"maritime"}),expect.any(AbortSignal)));
+ fireEvent.click(screen.getByRole("button",{name:/Aircraft/}));
+ await waitFor(()=>expect(api.positions).toHaveBeenLastCalledWith("NL",expect.objectContaining({mode:"aviation",movement:undefined}),expect.any(AbortSignal)));
  fireEvent.click(within(screen.getByLabelText("History window")).getByRole("button",{name:"Year"}));expect(screen.getByText(/Missing days mean/)).toBeTruthy();
 });
 it("opens a selected vehicle trail on demand and cancels its read on unmount",async()=>{

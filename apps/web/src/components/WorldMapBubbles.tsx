@@ -57,6 +57,9 @@ export type WorldMapPoint = {
   severity?: "low" | "medium" | "high" | "critical";
   hasImagery?: boolean;
   imageUrl?: string;
+  imageCapturedAt?: string | null;
+  imageAttribution?: string;
+  locationLabel?: string;
   selected?: boolean;
   kind?: MapEventKind;
   vehicleMode?: "aviation" | "maritime";
@@ -496,6 +499,9 @@ export default memo(function WorldMapBubbles({
       .slice(0, transportLayer ? 600 : 200),
     [points, transportLayer],
   );
+  const [imagePreviewId,setImagePreviewId] = useState<string|null>(null);
+  const imagePreview = eventPoints.find(point=>point.id===imagePreviewId) ?? null;
+  useEffect(()=>{if(imagePreviewId&&!eventPoints.some(point=>point.id===imagePreviewId))setImagePreviewId(null);},[eventPoints,imagePreviewId]);
   const [failedImageUrls, setFailedImageUrls] = useState<Set<string>>(() => new Set());
 
   const markerByCountry = useMemo(
@@ -876,6 +882,20 @@ export default memo(function WorldMapBubbles({
     ? markerByCountry.get(featuredIso)
     : undefined;
   const labelColor = isDark ? "#f2ebdd" : "#19382a";
+  const photoWidth = Math.min(isCompact ? 112 : 140,46+Math.max(0,view.scale-1)*18);
+  const photoHeight = Math.round(photoWidth*.68);
+  const mapPhotoIds = useMemo(()=>{
+    const accepted=new Set<string>(),boxes:Array<{x:number;y:number}>=[];
+    for(const point of [...eventPoints.filter(point=>point.selected),...eventPoints.filter(point=>!point.selected)]) {
+      if(!point.imageUrl||failedImageUrls.has(point.imageUrl))continue;
+      const coordinate=projection([point.longitude,point.latitude]);if(!coordinate)continue;
+      const x=coordinate[0]*view.scale+view.x,y=coordinate[1]*view.scale+view.y-18-photoHeight/2;
+      if(x<-photoWidth/2||x>size.width+photoWidth/2||y<-photoHeight/2||y>size.height+photoHeight/2)continue;
+      if(!point.selected&&boxes.some(box=>Math.abs(box.x-x)<photoWidth+10&&Math.abs(box.y-y)<photoHeight+24))continue;
+      accepted.add(point.id);boxes.push({x,y});if(accepted.size>=(isCompact?6:view.scale>=2?10:6))break;
+    }
+    return accepted;
+  },[eventPoints,failedImageUrls,projection,view,size,photoWidth,photoHeight,isCompact]);
   const pointLabelIds = useMemo(() => {
     const accepted = new Set<string>();
     const boxes: Array<{ x: number; y: number; width: number }> = [];
@@ -885,8 +905,8 @@ export default memo(function WorldMapBubbles({
       if (!eventPoint.label) continue;
       const point = projection([eventPoint.longitude, eventPoint.latitude]);
       if (!point) continue;
-      const hasImage = eventPoint.imageUrl && !failedImageUrls.has(eventPoint.imageUrl);
-      const x = point[0] * view.scale + view.x, y = point[1] * view.scale + view.y - (hasImage ? 55 : 17);
+      const hasImage = mapPhotoIds.has(eventPoint.id);
+      const x = point[0] * view.scale + view.x, y = point[1] * view.scale + view.y - (hasImage ? photoHeight+24 : 17);
       const width = Math.min(220, eventPoint.label.length * 6.2);
       if (!eventPoint.selected && (x < width / 2 + 8 || x > size.width - width / 2 - 8 || y < 12 || y > size.height - 12 || (legend && x < 260 && y > size.height - 230)
         || boxes.some((box) => Math.abs(box.y - y) < 23 && Math.abs(box.x - x) < (width + box.width) / 2 + 8))) continue;
@@ -894,7 +914,7 @@ export default memo(function WorldMapBubbles({
       if (accepted.size >= (isCompact ? 4 : 8)) break;
     }
     return accepted;
-  }, [eventPoints, projection, view, size, isCompact, legend, failedImageUrls]);
+  }, [eventPoints, projection, view, size, isCompact, legend, mapPhotoIds, photoHeight]);
   const legendPalette = markerPalette(
     markers[markers.length - 1]?.tone,
     isDark,
@@ -1194,7 +1214,7 @@ export default memo(function WorldMapBubbles({
             const color = eventPoint.vehicleMode ? eventPoint.vehicleMode === "aviation" ? "#77a8ba" : "#eda36a" : eventPointColor(eventPoint.severity, isDark);
             const radius = 8 / view.scale;
             const EventIcon = eventPoint.portName ? Anchor : eventPoint.vehicleMode === "aviation" ? Plane : eventPoint.vehicleMode === "maritime" ? Ship : MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
-            const hasImage = eventPoint.imageUrl && !failedImageUrls.has(eventPoint.imageUrl);
+            const hasImage = mapPhotoIds.has(eventPoint.id);
             const showPointLabel = pointLabelIds.has(eventPoint.id);
             return (
               <g
@@ -1210,7 +1230,7 @@ export default memo(function WorldMapBubbles({
                   setHoveredPoint({
                     point: eventPoint,
                     x: clamp(event.clientX - rect.left + 12, 8, rect.width - 280),
-                    y: clamp(event.clientY - rect.top + 12, 8, rect.height - 128),
+                    y: clamp(event.clientY - rect.top + 12, 8, rect.height - (eventPoint.imageUrl ? 300 : 128)),
                   });
                 }}
                 onPointerLeave={() => setHoveredPoint(null)}
@@ -1247,15 +1267,14 @@ export default memo(function WorldMapBubbles({
                   <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={isDark?"#0b1b28":"#ffffff"} strokeWidth={4} pointerEvents="none"/>
                   <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none"/>
                 </>}
-                {hasImage && eventPoints.filter((point) => point.imageUrl && !failedImageUrls.has(point.imageUrl)).findIndex((point) => point.id === eventPoint.id) < 6 && <g pointerEvents="none">
-                  <line x1={0} y1={-radius} x2={0} y2={-18 / view.scale} stroke={color} strokeWidth={1.5 / view.scale} />
-                  <rect x={-23 / view.scale} y={-51 / view.scale} width={46 / view.scale} height={34 / view.scale} rx={4 / view.scale} fill={color} />
-                  <image href={eventPoint.imageUrl} x={-21 / view.scale} y={-49 / view.scale} width={42 / view.scale} height={30 / view.scale} preserveAspectRatio="xMidYMid slice"
-                    onError={() => setFailedImageUrls((urls) => new Set(urls).add(eventPoint.imageUrl!))} />
+                {hasImage && <g role="button" tabIndex={0} aria-label={`Preview image: ${eventPoint.title}`} onClick={event=>{event.stopPropagation();if(!gestureClickIsSuppressed())setImagePreviewId(eventPoint.id);}} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();setImagePreviewId(eventPoint.id);}}}>
+                  <line x1={0} y1={-radius} x2={0} y2={-18/view.scale} stroke={color} strokeWidth={1.5/view.scale}/>
+                  <rect x={-(photoWidth/2+2)/view.scale} y={-(20+photoHeight)/view.scale} width={(photoWidth+4)/view.scale} height={(photoHeight+4)/view.scale} rx={4/view.scale} fill={color}/>
+                  <image href={eventPoint.imageUrl} x={-photoWidth/2/view.scale} y={-(18+photoHeight)/view.scale} width={photoWidth/view.scale} height={photoHeight/view.scale} preserveAspectRatio="xMidYMid slice" onError={()=>setFailedImageUrls(urls=>new Set(urls).add(eventPoint.imageUrl!))}/>
                 </g>}
                 {showPointLabel && (
                   <text
-                    y={hasImage ? -55 / view.scale : -(radius + 6 / view.scale)}
+                    y={hasImage ? -(photoHeight+26)/view.scale : -(radius+6/view.scale)}
                     textAnchor="middle"
                     fill={labelColor}
                     stroke={isDark ? "#0b1b28" : "#f2ebdd"}
@@ -1323,7 +1342,14 @@ export default memo(function WorldMapBubbles({
         </div>
       )}
 
-      {hoveredPoint && (
+      {imagePreview?.imageUrl && <section className="map-image-preview" role="dialog" aria-label="Map image preview" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setImagePreviewId(null);}}}>
+        <header><strong>{imagePreview.locationLabel||"Event imagery"}</strong><button type="button" aria-label="Close image preview" autoFocus onClick={()=>setImagePreviewId(null)}>×</button></header>
+        <img src={imagePreview.imageUrl} alt={imagePreview.title} onError={()=>{setFailedImageUrls(urls=>new Set(urls).add(imagePreview.imageUrl!));setImagePreviewId(null);}}/>
+        <div><strong>{imagePreview.title}</strong><p>{imagePreview.imageCapturedAt?`Image time · ${new Date(imagePreview.imageCapturedAt).toLocaleString()}`:imagePreview.subtitle}</p>{imagePreview.imageAttribution&&<small>{imagePreview.imageAttribution}</small>}
+          <button type="button" onClick={()=>{setImagePreviewId(null);onSelectPoint?.(imagePreview);}}>Open event & imagery ↗</button>
+        </div>
+      </section>}
+      {hoveredPoint && !imagePreview && (
         <div
           className="map-event-tooltip pointer-events-none z-10 w-64 rounded-lg p-3 text-left shadow-xl"
           style={{
@@ -1334,9 +1360,9 @@ export default memo(function WorldMapBubbles({
           aria-hidden="true"
         >
           <span className="block text-[10px] font-semibold uppercase tracking-[0.22em] text-[color:var(--shell-muted)]">
-            {MAP_EVENT_KINDS[hoveredPoint.point.kind ?? "news"].label} · {hoveredPoint.point.severity ?? "low"} reported severity
-            {hoveredPoint.point.hasImagery ? " · image available" : " · reported location"}
+            {hoveredPoint.point.vehicleMode ? hoveredPoint.point.vehicleMode === "aviation" ? "Tracked aircraft" : "Tracked vessel" : hoveredPoint.point.portName ? "Monitored port" : `${MAP_EVENT_KINDS[hoveredPoint.point.kind??"news"].label} · ${hoveredPoint.point.severity??"low"} reported severity`}
           </span>
+          {hoveredPoint.point.imageUrl&&!failedImageUrls.has(hoveredPoint.point.imageUrl)&&<img className="map-hover-photo" src={hoveredPoint.point.imageUrl} alt=""/>}
           <strong className="mt-1 line-clamp-2 block text-xs leading-5 text-[color:var(--shell-ink)]">
             {hoveredPoint.point.title}
           </strong>

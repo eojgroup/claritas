@@ -85,7 +85,7 @@ export default function SituationDashboard(props: Props) {
   const points = useMemo(() => (selectedEvent?.id === selectedId && !events.some((event) => event.id === selectedId) ? [...events, selectedEvent] : events).filter((event) => eventCoordinateContext(event)).map((event) => ({
     id: event.id, latitude: Number(event.latitude), longitude: Number(event.longitude),
     title: presentEvent(event).headline, subtitle: [event.location_name || event.primary_country_iso2, new Date(event.last_activity_time).toLocaleString()].filter(Boolean).join(" · "),
-    imageUrl: event.imagery?.preview_url,
+    imageUrl: event.imagery?.preview_url, imageCapturedAt:event.imagery?.captured_at, imageAttribution:event.imagery?.attribution, locationLabel:event.location_name||event.primary_country_iso2||undefined,
     kind: mapEventKind(event.event_type),
     label: `${MAP_EVENT_KINDS[mapEventKind(event.event_type)].label}${event.location_name ? ` · ${event.location_name}` : ""}`,
     severity: event.severity, selected: event.id === selectedId, hasImagery: event.earth_observation_available || Boolean(event.imagery),
@@ -109,7 +109,7 @@ export default function SituationDashboard(props: Props) {
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
   const mappedHighlight = [...events].sort((a, b) => (b.priority_score ?? b.relevance_score) - (a.priority_score ?? a.relevance_score))[0];
   const isTransport = scopeView === "transport";
-  const currentTransport = transportMap?.country === (country || undefined) ? transportMap : null;
+  const currentTransport = transportMap?.country === (country || undefined) && JSON.stringify(transportMap?.selection)===JSON.stringify(transportSelection) ? transportMap : null;
   const positionEntities = currentTransport?.positions?.entities ?? [];
   const displayedVehicles = mappedVehicle ? positionEntities.filter(row=>row.id===mappedVehicle.id) : positionEntities;
   const linkedCountries = selectedId && eventLinks?.id===selectedId ? eventLinks.countries : [];
@@ -120,7 +120,10 @@ export default function SituationDashboard(props: Props) {
     else {selectCountry(iso);setScopeView("transport");}
     revealContext();
   };
-  const focus = useMemo<[number,number]|undefined>(()=>mappedVehicle?.latitude!=null&&mappedVehicle.longitude!=null?[mappedVehicle.longitude,mappedVehicle.latitude]:undefined,[mappedVehicle]);
+  const focus = useMemo<[number,number]|undefined>(()=>{
+    if(mappedVehicle?.latitude!=null&&mappedVehicle.longitude!=null)return [mappedVehicle.longitude,mappedVehicle.latitude];
+    const port=currentTransport?.ports.find(port=>port.name===transportSelection.port);return port?[port.longitude,port.latitude]:undefined;
+  },[mappedVehicle,currentTransport?.ports,transportSelection.port]);
   const map = <WorldMapBubbles variant="default" data={mapCountries} transportLayer={isTransport}
     points={isTransport ? [...displayedVehicles.map(vehicle=>({vehicleMode:vehicle.mode,vehicleHeading:vehicle.heading,id:`vehicle:${vehicle.id}`,latitude:vehicle.latitude!,longitude:vehicle.longitude!,title:vehicle.display_name||vehicle.flight_number||vehicle.entity_id,subtitle:`${vehicle.mode==='aviation'?'Aircraft':'Vessel'} · ${new Date(vehicle.observed_at).toLocaleString()}`,selected:vehicle.id===mappedVehicle?.id})),...(currentTransport?.ports??[]).map(port=>({id:`port:${port.country}:${port.name}`,latitude:port.latitude,longitude:port.longitude,title:port.name,label:port.name,portName:port.name,subtitle:`${port.departures} recorded departures · past 24h`,selected:port.name===transportSelection.port}))] : points}
     primaryCountry={country} allowsSingleFingerPan focusCoordinate={focus}
@@ -129,8 +132,8 @@ export default function SituationDashboard(props: Props) {
     focusOnActivity={!isTransport&&Boolean(country)}
     featuredLabel={mapMetric === "attention" ? "Highest signal relevance" : "Most reported activity"}
     onSelectPoint={point=>{if(point.portName){setMappedVehicle(null);setTransportSelection({mode:"maritime",port:point.portName,corridor:"",window:null});}else if(point.id.startsWith("vehicle:")){const vehicle=positionEntities.find(row=>`vehicle:${row.id}`===point.id);onSelect(null);setMappedVehicle(vehicle?{...vehicle}:null);revealContext();}else selectEvent(point.id);}} showBubbles={false} showLabels legend={linkedCountries.length<2 || isTransport}
-    legendLabel={isTransport?"Transport country links":linkedCountries.length>1?"Countries linked to this event":!intervalMatches?"Previous selection · updating":mapMetric==="attention"?"Signal relevance":"Number of updates"}
-    legendDescription={isTransport?"Warmer = more linked activity. Orange = vessel; blue = aircraft. Select a country or visual to filter positions.":linkedCountries.length>1?"Source-linked event locations. A connection does not establish cause or an observed route.":"Importance, high-priority share and unusual increases. Not a danger rating."}/>;
+    legendLabel={isTransport?currentTransport?.heatLabel??"Transport country links":linkedCountries.length>1?"Countries linked to this event":!intervalMatches?"Previous selection · updating":mapMetric==="attention"?"Signal relevance":"Number of updates"}
+    legendDescription={isTransport?currentTransport?.heatNotice??"Select a transport visual to filter current positions.":linkedCountries.length>1?"Source-linked event locations. A connection does not establish cause or an observed route.":"Importance, high-priority share and unusual increases. Not a danger rating."}/>;
   const stops = ["peek", "half", "full"] as const;
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
   const overviewControls = <>
@@ -145,7 +148,7 @@ export default function SituationDashboard(props: Props) {
   const workspace = <div className={`situation-workspace situation-map-workspace panel-${panelStop}${wideContext ? " context-wide" : ""}`}>
     <section className={`situation-map-canvas${!intervalMatches ? " is-updating" : ""}`} aria-busy={!intervalMatches} aria-label="Development map">
       {map}
-      <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>{scopeView === "transport" ? "Live transport tracking" : "Where it’s happening"}</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : isTransport ? `${displayedVehicles.length} current positions · ${mapCountries.length} linked countries` : `${countries.length} countries · ${points.length} located events`}</span>
+      <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>{scopeView === "transport" ? "Live transport tracking" : "Where it’s happening"}</h2><span>{isTransport ? `${displayedVehicles.length} current positions · ${mapCountries.length} linked countries` : props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span>
         {!isTransport && linkedCountries.length>1 && <p className="situation-map-narrative">Linked countries: {linkedCountries.map(iso=>new Intl.DisplayNames(undefined,{type:"region"}).of(iso)).join(" · ")}</p>}
         {scopeView === "transport" && <p className="situation-map-narrative">Current positions · country shading follows the selected transport activity</p>}
         {!intervalMatches && <p className="situation-map-narrative">{props.error ? "Interval unavailable. Showing the previous map." : "Loading the selected interval. Showing the previous map."}</p>}

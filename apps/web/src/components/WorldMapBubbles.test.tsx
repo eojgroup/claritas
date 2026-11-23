@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WorldMapBubbles from "./WorldMapBubbles";
 
@@ -132,6 +132,19 @@ describe("WorldMapBubbles interaction", () => {
     expect(ocean()).not.toBe(light);
     view.rerender(<WorldMapBubbles data={[]} dark={false} />);
     expect(ocean()).toBe(light);
+  });
+  it("opens a larger location-linked photo preview without navigating away until the story is requested",()=>{
+    const select=vi.fn(),point={id:"image-story",latitude:26.56,longitude:56.25,title:"Port activity reported",locationLabel:"Strait of Hormuz",imageUrl:"/api/news-images/photo/preview",imageCapturedAt:"2026-11-23T08:00:00Z",imageAttribution:"Source newsroom",hasImagery:true};
+    const {container}=render(<WorldMapBubbles data={[]} points={[point]} onSelectPoint={select}/>);
+    const map=container.querySelector('svg');
+    fireEvent.click(screen.getByRole("button",{name:"Preview image: Port activity reported"}));
+    const preview=screen.getByRole("dialog",{name:"Map image preview"});
+    expect(within(preview).getByRole("img",{name:point.title})).toBeTruthy();
+    expect(within(preview).getByText("Strait of Hormuz")).toBeTruthy();
+    expect(within(preview).getByText("Source newsroom")).toBeTruthy();expect(select).not.toHaveBeenCalled();
+    fireEvent.keyDown(preview,{key:"Escape"});expect(screen.queryByRole("dialog")).toBeNull();expect(container.querySelector('svg')).toBe(map);
+    fireEvent.keyDown(screen.getByRole("button",{name:"Preview image: Port activity reported"}),{key:"Enter"});
+    fireEvent.click(screen.getByRole("button",{name:"Open event & imagery ↗"}));expect(select).toHaveBeenCalledWith(expect.objectContaining({id:point.id}));
   });
   it("hides an unavailable image while keeping its event selectable", () => {
     const select = vi.fn();

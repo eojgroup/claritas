@@ -1696,9 +1696,10 @@ struct ScopeTransportExplorer: View {
         }
         return rows.filter { selection.mode == nil || $0.mode == selection.mode?.rawValue }
     }
+    private var mapPositions: TransportPositions? { positionsKey == selection.key ? positions : nil }
     private var entities: [TransportEntity] {
         let term = search.lowercased()
-        return (positions?.entities ?? []).filter { term.isEmpty || [$0.display_name,$0.flight_number,$0.callsign,$0.entity_id,$0.route_label].compactMap{$0}.joined(separator:" ").lowercased().contains(term) }
+        return (mapPositions?.entities ?? []).filter { term.isEmpty || [$0.display_name,$0.flight_number,$0.callsign,$0.entity_id,$0.route_label].compactMap{$0}.joined(separator:" ").lowercased().contains(term) }
     }
     var body: some View {
         ScrollView {
@@ -1762,7 +1763,7 @@ struct ScopeTransportExplorer: View {
         }
     }
     private func modeCard(_ mode:TransportMode?,title:String,icon:String,value:Int?) -> some View {
-        Button { selection.mode = mode; selection.port = "" } label: {
+        Button { selection.mode = mode; selection.port = ""; selection.movement = nil } label: {
             VStack(alignment:.leading,spacing:7) {
                 HStack { Image(systemName:icon).foregroundStyle(mode == .aviation ? ClaritasPalette.dataBlue(for:colorScheme) : ClaritasPalette.orange); Spacer(); Text(value?.formatted() ?? "—").font(.headline.monospacedDigit()) }
                 Text(title).font(.caption2).foregroundStyle(.secondary)
@@ -1773,8 +1774,8 @@ struct ScopeTransportExplorer: View {
     private var status: some View {
         VStack(alignment:.leading,spacing:4) {
             if failed { Text("Current positions unavailable · refresh to retry") }
-            else if positions?.cohort?.available == false { Text("Vehicle identities for this historical period are no longer retained") }
-            else { Text(positions.map{"\($0.entities.count)\($0.truncated ? " sampled" : "") current map positions"} ?? "Updating current positions…") }
+            else if mapPositions?.cohort?.available == false { Text("Vehicle identities for this historical period are no longer retained") }
+            else { Text(mapPositions.map{"\($0.entities.count)\($0.truncated ? " sampled" : "") current map positions"} ?? "Updating current positions…") }
             HStack { Label("Vessels",systemImage:"circle.fill").foregroundStyle(ClaritasPalette.orange); Label("Aircraft",systemImage:"circle.fill").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }
         }.font(.caption2).foregroundStyle(.secondary)
     }
@@ -1830,14 +1831,16 @@ struct ScopeTransportExplorer: View {
                 if selection.mode != .maritime, let air = point.aviation_entities { result.append(TransportPlotSample(date:date,value:air,mode:"aviation")) }
                 return result
             },stepHours:24,selected:selection.from) { selectWindow($0,hours:24) }
-            Text("Daily peak samples · gaps mean missing observations. Tap a day to locate its vehicles now.").font(.caption2).foregroundStyle(.secondary)
+            Text("Daily peak samples · gaps mean missing observations; the latest day may be partial. Tap a day to locate its vehicles now.").font(.caption2).foregroundStyle(.secondary)
+            if selection.mode != .aviation {
             Text("Departures").font(.subheadline.weight(.semibold))
-            TransportVisualPlot(rows:points.compactMap { point in guard let date = point.date, let value = point.ship_departures else { return nil }; return TransportPlotSample(date:date,value:value,mode:"maritime") },stepHours:24,selected:selection.movement == "departure" ? selection.from : nil) { date in selectWindow(date,hours:24); selection.mode = .maritime; selection.port = ""; selection.movement = "departure" }
+            TransportVisualPlot(rows:points.compactMap { point in guard let date = point.date, let value = point.ship_departures else { return nil }; return TransportPlotSample(date:date,value:value,mode:"maritime") },stepHours:24,selected:selection.movement == "departure" ? selection.from : nil) { date in selection.mode = .maritime; selection.port = ""; selectWindow(date,hours:24,movement:"departure") }
             Text("Recorded port exits · tap a day for those vessels’ current locations.").font(.caption2).foregroundStyle(.secondary)
+            }
         }
     }
     @ViewBuilder private var portFrequency: some View {
-        if let ports = portActivity?.ports, !ports.isEmpty {
+        if selection.mode != .aviation, let ports = portActivity?.ports, !ports.isEmpty {
             HStack { Text("Ports & departures").font(.subheadline.weight(.semibold)); Spacer(); Text("Recorded · 24h").font(.caption2).foregroundStyle(.secondary) }
             ForEach(ports.prefix(8)) { port in
                 Button { selection.mode = .maritime; selection.port = selection.port == port.name ? "" : port.name; selection.corridor = ""; selection.from = nil; selection.to = nil; selection.movement = nil } label: {
@@ -1869,16 +1872,16 @@ struct ScopeTransportExplorer: View {
             ForEach(related.prefix(3)) { event in Button { model.selectIntelligenceEvent(event) } label: { Text(event.title).font(.caption.weight(.semibold)).frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,6) }.buttonStyle(.plain) }
         }
     }
-    private func selectWindow(_ date:Date,hours:Int) {
+    private func selectWindow(_ date:Date,hours:Int,movement:String? = nil) {
         let from = Date(timeIntervalSince1970:floor(date.timeIntervalSince1970/Double(hours*3600))*Double(hours*3600))
-        if selection.from == from { selection.from = nil; selection.to = nil } else { selection.from = from; selection.to = from.addingTimeInterval(Double(hours*3600)) }
-        selection.movement = nil
+        if selection.from == from && selection.movement == movement { selection.from = nil; selection.to = nil; selection.movement = nil }
+        else { selection.from = from; selection.to = from.addingTimeInterval(Double(hours*3600)); selection.movement = movement }
     }
     private func publishMap() {
         var countries:[String:Int] = [:]
         let chosen = connections.filter{selection.corridor.isEmpty || $0.origin == selection.corridor || $0.destination == selection.corridor}
         if selection.from != nil || !selection.port.isEmpty {
-            for entity in positions?.entities ?? [] { for iso in Set(entity.country_links.map(\.country)) { countries[iso,default:0] += 1 } }
+            for entity in mapPositions?.entities ?? [] { for iso in Set(entity.country_links.map(\.country)) { countries[iso,default:0] += 1 } }
         } else {
             for row in chosen { for iso in Set([row.origin,row.destination]) { countries[iso,default:0] += row.weight } }
             if countries.isEmpty { for row in overview?.countries ?? [] { countries[row.country] = selection.mode == .maritime ? row.maritime.active : selection.mode == .aviation ? row.aviation.active : row.active_count } }

@@ -5599,7 +5599,14 @@ private struct NativeSignalMap: View {
             transportPorts:transportPorts,onSelectPort:onSelectPort,focusedTransportID:focusedTransportID,selectedPort:selectedPort
         )
         .overlay(alignment: .bottomLeading) {
-            Text("Natural Earth · Claritas signals")
+            VStack(alignment:.leading,spacing:4) {
+                if mode == .transport {
+                    Text("TRANSPORT COUNTRY LINKS").font(.system(size:9,weight:.semibold))
+                    Text("Warmer = more linked activity").font(.system(size:10))
+                    HStack(spacing:8) { Text("● Vessels").foregroundStyle(ClaritasPalette.orange); Text("● Aircraft").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)); Text("□ Ports") }.font(.system(size:10))
+                } else if points.first?.id.hasPrefix("event-link-") == true { Text("Source-linked event countries").font(.system(size:10,weight:.medium)) }
+                Text("Natural Earth · Claritas")
+            }
                 .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .padding(.horizontal, 7)
@@ -5926,6 +5933,7 @@ private struct InteractiveCountryBubbleMap: View {
     var selectedPort: String = ""
 
     @State private var expandedGroup: SignalMapPinGroup?
+    @State private var imagePreview: IntelligenceEvent?
     @State private var userAdjustedViewport = false
     @State private var committedScale: CGFloat = 1
     @State private var committedOffset: CGSize = .zero
@@ -6052,6 +6060,23 @@ private struct InteractiveCountryBubbleMap: View {
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { expandedGroup = nil } } }
                 }.presentationDetents([.medium, .large])
             }
+            .sheet(item:$imagePreview) { event in
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment:.leading,spacing:14) {
+                            if let image = event.imagery {
+                                AuthenticatedEarthImage(path:image.preview_url,compact:false,contentMode:.fit).frame(height:300).clipped()
+                                Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                Text(event.title).font(.headline)
+                                if let captured = image.captured_at { Text("Image time · \(captured.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+                                Text(image.attribution).font(.caption2).foregroundStyle(.secondary)
+                                Button { imagePreview = nil; onSelectEvent(event) } label: { Label("Open event & imagery",systemImage:"arrow.up.right").frame(maxWidth:.infinity,minHeight:44) }.buttonStyle(.bordered)
+                            }
+                        }.padding(18)
+                    }.navigationTitle("Map image").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Done") { imagePreview = nil } } }
+                }.presentationDetents([.medium,.large])
+            }
         }
     }
 
@@ -6175,12 +6200,13 @@ private struct InteractiveCountryBubbleMap: View {
             }.frame(width: 44, height: 44).contentShape(Circle())
         }.buttonStyle(.plain)
                 .overlay(alignment: .bottom) {
-                    if group.eventIDs.count == 1, let event = events.first(where: { $0.id == group.id }), let image = event.imagery {
-                        Button { onSelectEvent(event) } label: {
-                            VStack(spacing: 2) {
-                                AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width: 64, height: 42).clipped().cornerRadius(5)
+                    if let event = events.first(where: { group.eventIDs.contains($0.id) && $0.imagery != nil }), let image = event.imagery {
+                        let width = min(compactPresentation ? 116.0 : 148.0,52.0+Double(max(0,committedScale-1))*18.0)
+                        Button { imagePreview = event } label: {
+                            VStack(spacing: 3) {
+                                AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width:width,height:width*0.68).clipped().cornerRadius(5)
                                 Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.system(size: 8, weight: .semibold)).lineLimit(1)
-                            }.frame(width: 80).padding(3).background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
+                            }.frame(width:width+8).padding(3).background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
                         }.buttonStyle(.plain).offset(y: -36)
                         .accessibilityLabel("Image at \(event.location_name ?? "event location"), updated \(event.last_activity_time.formatted()): \(event.title)")
                     }
