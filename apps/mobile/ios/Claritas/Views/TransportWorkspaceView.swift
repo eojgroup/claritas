@@ -1696,7 +1696,7 @@ struct ScopeTransportExplorer: View {
             LazyVStack(alignment: .leading, spacing: 14) {
                 Text(country.map { "\(Locale.current.localizedString(forRegionCode: $0) ?? $0) transport" } ?? "Global transport")
                     .font(.title3.weight(.semibold))
-                Text("Browse observed vessels, flights, routes and monitored-port movements in this scope.").font(.caption).foregroundStyle(.secondary)
+                Text("Live country tracking · select a vehicle on the map").font(.caption).foregroundStyle(.secondary)
                 Picker("Transport mode", selection: $mode) {
                     Text("All").tag(Optional<TransportMode>.none)
                     Text("Shipping").tag(Optional(TransportMode.maritime))
@@ -1704,11 +1704,22 @@ struct ScopeTransportExplorer: View {
                 }.pickerStyle(.segmented)
                 if let overview {
                     scopeMetrics(overview)
+                    if !overview.activity.isEmpty {
+                        Text("Tracked vehicles · past 24 hours").font(.headline)
+                        Chart(overview.activity) { point in
+                            if let date = point.bucketDate {
+                                BarMark(x: .value("Time", date), y: .value("Tracked vehicles", point.active_count))
+                                    .foregroundStyle(by: .value("Mode", point.mode == .aviation ? "Flights" : "Shipping"))
+                            }
+                        }.frame(height: 130)
+                            .chartForegroundStyleScale(["Shipping": ClaritasPalette.orange, "Flights": ClaritasPalette.dataBlue(for: colorScheme)])
+                    }
                     history(overview)
                     ports(overview)
                     routes(overview)
-                    entityBrowser
+                    DisclosureGroup("Browse individual vehicles") { entityBrowser }
                     if !relatedEvents.isEmpty {
+                        DisclosureGroup("Related reporting") {
                         Text("Related developments & reporting").font(.headline)
                         Text("These developments have transport signals in the current country/time scope. Open one for its linked reporting; this is not an explanation of every movement change.")
                             .font(.caption2).foregroundStyle(.secondary)
@@ -1719,6 +1730,7 @@ struct ScopeTransportExplorer: View {
                                     Text(event.summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
                                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 7)
                             }.buttonStyle(.plain)
+                        }
                         }
                     }
                     Text("Updated \(overview.generatedDate?.formatted(date: .abbreviated, time: .shortened) ?? overview.generated_at). AIS and ADS-B reception is partial; counts are monitored samples, not complete national traffic or cargo tonnage.")
@@ -1738,10 +1750,13 @@ struct ScopeTransportExplorer: View {
                 return
             }
             #endif
-            do {
-                let value = try await model.api.fetchTransportOverview(detail: "full", mode: mode, country: country, entityLimit: 240, historyDays: 400)
-                guard !Task.isCancelled else { return }; overview = value; onOverview?(value)
-            } catch { guard !Task.isCancelled else { return }; failed = true }
+            while !Task.isCancelled {
+                do {
+                    let value = try await model.api.fetchTransportOverview(detail: "full", mode: mode, country: country, entityLimit: 240, historyDays: 400)
+                    guard !Task.isCancelled else { return }; overview = value; onOverview?(value)
+                } catch { guard !Task.isCancelled else { return }; failed = true; return }
+                do { try await Task.sleep(nanoseconds: 120_000_000_000) } catch { return }
+            }
         }
         .task(id: "\(country ?? "global")|\(model.overviewHours)") {
             #if DEBUG
@@ -1775,7 +1790,7 @@ struct ScopeTransportExplorer: View {
                 metric("Monitored-port departures", trends.maritime.ship_departures)
                 metric("Monitored-port arrivals", trends.maritime.ship_arrivals)
                 metric("Tracked aircraft", trends.aviation.tracked_flights)
-                Text("Past 24 hours compared with the preceding 24 hours; reception and source coverage can change.")
+                Text("24h vs previous 24h · partial AIS / ADS-B coverage")
                     .font(.caption2).foregroundStyle(.secondary)
             }
         }.padding(12).brandGlass(cornerRadius: 14)
@@ -1822,6 +1837,7 @@ struct ScopeTransportExplorer: View {
                     }
                 }.frame(height: 140)
             }
+            DisclosureGroup("Period comparisons & coverage") {
             ForEach(history.comparisons ?? []) { comparison in
                 VStack(alignment: .leading, spacing: 5) {
                     HStack {
@@ -1838,6 +1854,7 @@ struct ScopeTransportExplorer: View {
             Text("Retained activity: \(history.available_from.map { String($0.prefix(10)) } ?? "not available") – \(history.available_to.map { String($0.prefix(10)) } ?? "not available"). Daily activity retention \(history.activity_retention_days ?? history.requested_days) days; monitored-port movements \(history.movement_retention_days ?? 100) days.")
                 .font(.caption2).foregroundStyle(.secondary)
             DisclosureGroup("History coverage & methods") { Text(history.methodology).font(.caption2) }
+            }
         } else if country == nil {
             Text("Select a country on the world map to explore retained daily activity, port volumes and month/year comparisons where coverage exists.").font(.caption).foregroundStyle(.secondary)
         }

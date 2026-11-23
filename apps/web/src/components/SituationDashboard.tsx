@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, FileText, Maximize2, PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
-import type { DailySignalBriefing, IntelligenceEvent, IntelligenceOverview, OverviewTopic } from "../lib/api";
+import type { DailySignalBriefing, IntelligenceEvent, IntelligenceOverview, TransportOverview, TransportEntity, OverviewTopic } from "../lib/api";
 import { fetchIntelligenceOverview, fetchTransportOutlook, type TransportOutlook } from "../lib/api";
 import { readWithDeadline } from "../lib/readDeadline";
 import SituationOverview from "./SituationOverview";
@@ -10,7 +10,7 @@ import OverviewCountryProfile from "./OverviewCountryProfile";
 import CountryFlag from "./CountryFlag";
 import ModalSurface from "./ModalSurface";
 import { mapEventKind, MAP_EVENT_KINDS } from "./mapEventPresentation";
-import MarketScopeContext from "./MarketScopeContext";
+
 
 const IntelligenceWorkspace = lazy(() => import("./IntelligenceWorkspace"));
 const TransportScopeContext = lazy(() => import("./TransportScopeContext"));
@@ -30,7 +30,9 @@ export default function SituationDashboard(props: Props) {
   const { overview, country, selectedId, onSelect } = props;
   const [selectedEvent, setSelectedEvent] = useState<IntelligenceEvent | null>(null);
   const [profileCountry, setProfileCountry] = useState<string | null>(null);
-  const [scopeView, setScopeView] = useState<"developments" | "transport" | "markets">("developments");
+  const [scopeView, setScopeView] = useState<"developments" | "transport">("developments");
+  const [liveTransport, setLiveTransport] = useState<TransportOverview|null>(null);
+  const [mappedVehicle, setMappedVehicle] = useState<TransportEntity|null>(null);
   const [outlookDays, setOutlookDays] = useState(7);
   const [outlook, setOutlook] = useState<TransportOutlook|null>(null);
   const [outlookStatus,setOutlookStatus] = useState("loading");
@@ -106,12 +108,12 @@ export default function SituationDashboard(props: Props) {
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
   const mappedHighlight = [...events].sort((a, b) => (b.priority_score ?? b.relevance_score) - (a.priority_score ?? a.relevance_score))[0];
-  const map = <WorldMapBubbles variant="default" data={countries} points={points} primaryCountry={country} allowsSingleFingerPan
+  const map = <WorldMapBubbles variant="default" data={countries} points={scopeView === "transport" && liveTransport && (country ? liveTransport.history?.country === country : !liveTransport.history) ? [...points, ...liveTransport.entities.filter(vehicle=>vehicle.latitude!=null && vehicle.longitude!=null).slice(0,40).map(vehicle=>({vehicleMode:vehicle.mode, id:`vehicle:${vehicle.id}`, latitude:vehicle.latitude!,longitude:vehicle.longitude!,title:vehicle.display_name || vehicle.flight_number || vehicle.entity_id, subtitle:`${vehicle.mode === 'aviation' ? 'Tracked flight' : 'Tracked vessel'} · ${new Date(vehicle.observed_at).toLocaleString()}`,kind:'transport' as const, label:vehicle.mode === 'aviation' ? 'Flight' : 'Vessel'}))] : points} primaryCountry={country} allowsSingleFingerPan
     corridors={scopeView === "transport" ? (outlook?.corridors ?? []).map(route=>({origin:route.origin,destination:route.destination,weight:route.observed_days,label:`${route.origin} → ${route.destination} · ${route.mode} · observed ${route.observed_days}/${outlookDays} days${route.flag_proxies ? ' · includes flag origin estimates' : ''}`})) : []}
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale={mapMetric === "attention" ? "linear" : "log"} valueDomain={mapMetric === "attention" ? [0, 100] : undefined}
     focusOnActivity={Boolean(country)}
     featuredLabel={mapMetric === "attention" ? "Highest signal relevance" : mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
-    onSelectPoint={(point) => selectEvent(point.id)} showBubbles={false} showLabels legend
+    onSelectPoint={(point) => { if(point.id.startsWith("vehicle:")) { setMappedVehicle(liveTransport?.entities.find(vehicle=>`vehicle:${vehicle.id}`===point.id) ?? null); revealContext(); } else selectEvent(point.id); }} showBubbles={false} showLabels legend
     legendLabel={!intervalMatches ? "Previous selection · updating" : mapMetric === "attention" ? "Signal relevance" : mapMetric === "priority" ? "High-priority updates" : "Number of updates"}
     legendDescription={mapMetric === "attention" ? "Importance, high-priority share and unusual increases. Not a danger rating." : "Warmer = more updates, not more danger."} />;
   const stops = ["peek", "half", "full"] as const;
@@ -128,7 +130,8 @@ export default function SituationDashboard(props: Props) {
   const workspace = <div className={`situation-workspace situation-map-workspace panel-${panelStop}${wideContext ? " context-wide" : ""}`}>
     <section className={`situation-map-canvas${!intervalMatches ? " is-updating" : ""}`} aria-busy={!intervalMatches} aria-label="Development map">
       {map}
-      <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>Where it’s happening</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span>
+      <div className="situation-map-heading"><span className="situation-eyebrow">Global signal map</span><h2>{scopeView === "transport" ? "Live transport tracking" : "Where it’s happening"}</h2><span>{props.loading ? "Updating…" : overview?.snapshot?.status === "warming" ? "Preparing…" : `${countries.length} countries · ${points.length} located events`}</span>
+        {scopeView === "transport" && <p className="situation-map-narrative">Plane / ship = tracked position · up to 40 latest · refreshed every 2 minutes</p>}
         {!intervalMatches && <p className="situation-map-narrative">{props.error ? "Interval unavailable. Showing the previous map." : "Loading the selected interval. Showing the previous map."}</p>}
         {intervalMatches && leadingCountries[0] && <p className="situation-map-narrative">{mapMetric === "attention" ? "Highest signal relevance" : mapMetric === "priority" ? "Most high-priority updates" : "Most updates"}: {new Intl.DisplayNames(undefined, { type: "region" }).of(leadingCountries[0].country)} · {mapMetric === "attention" ? leadingCountries[0].meta?.subtitle : leadingCountries[0].count.toLocaleString()}{overview?.selection ? " in this interval" : " in this period"}</p>}
         {intervalMatches && mappedHighlight && <button type="button" className="situation-map-story" onClick={() => selectEvent(mappedHighlight.id)} aria-label={`Open mapped development: ${presentEvent(mappedHighlight).headline}`}>On the map: {presentEvent(mappedHighlight).headline}</button>}
@@ -169,14 +172,13 @@ export default function SituationDashboard(props: Props) {
       <div ref={contextScroll} id="world-map-context" className="situation-context-scroll" inert={panelStop === "peek"}>
         {!selectedId && <>
           <nav className="scope-view-switch" aria-label="Explore selected scope">
-            {([['developments', 'Developments'], ['transport', 'Transport'], ['markets', 'Markets']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={scopeView === key} onClick={() => { setScopeView(key); revealContext(); }}>{label}</button>)}
+            {([['developments', 'Developments'], ['transport', 'Transport']] as const).map(([key, label]) => <button type="button" key={key} aria-pressed={scopeView === key} onClick={() => { setScopeView(key); revealContext(); }}>{label}</button>)}
           </nav>
-          {overview && scopeView !== "transport" && <MarketScopeContext country={country} expanded={scopeView === "markets"} onToggle={() => setScopeView(scopeView === "markets" ? "developments" : "markets")} onSelectCountry={selectCountry} events={relatedEvents} relatedEventIds={relatedEventIds} onOpenEvent={selectEvent} />}
         </>}
-        {!selectedId && scopeView === "transport" && country && <section aria-label="Country transport outlook"><h3>{country} transport outlook</h3><label>Destinations & corridors over <select value={outlookDays} onChange={e=>setOutlookDays(Number(e.target.value))}>{[7,30,90].map(days=><option key={days} value={days}>{days} completed days</option>)}</select></label>
-          {outlook ? <><p>{new Date(outlook.start).toLocaleDateString()}–{new Date(Date.parse(outlook.end)-1).toLocaleDateString()} UTC · {outlook.corridors.length} retained directional corridors</p><p className="scope-context-note">{outlook.notice}</p><details open><summary>Frequent corridors · click a destination to explore</summary>{outlook.corridors.map(route=><button className="scope-context-related-event" type="button" key={`${route.origin}:${route.destination}:${route.mode}`} onClick={()=>selectCountry(route.destination === country ? route.origin : route.destination)}>{route.origin} → {route.destination} · {route.mode}<small>{route.observed_days}/{outlookDays} observed days · {route.sample_days.toLocaleString()} daily peak samples{route.flag_proxies>0 ? ` · ${route.flag_proxies} flag-origin proxy samples` : ''}</small></button>)}</details></> : <p role="status">{outlookStatus === "error" ? "Saved outlook unavailable. Switch the period to retry." : "Loading saved corridor outlook…"}</p>}
-        </section>}
-        {!selectedId && scopeView === "transport" && <Suspense fallback={<p role="status">Loading transport explorer…</p>}><TransportScopeContext country={country} events={relatedEvents} relatedEventIds={relatedEventIds} onSelectCountry={selectCountry} onOpenEvent={selectEvent} /></Suspense>}
+        {!selectedId && scopeView === "transport" && country && <details className="transport-outlook-drilldown"><summary>Historical destinations & corridors · {country}</summary><label>Destinations & corridors over <select value={outlookDays} onChange={e=>setOutlookDays(Number(e.target.value))}>{[7,30,90].map(days=><option key={days} value={days}>{days} completed days</option>)}</select></label>
+          {outlook ? <><p>{new Date(outlook.start).toLocaleDateString()}–{new Date(Date.parse(outlook.end)-1).toLocaleDateString()} UTC · {outlook.corridors.length} retained directional corridors</p><p className="scope-context-note">{outlook.notice}</p><details><summary>Frequent corridors · click a destination to explore</summary>{outlook.corridors.map(route=><button className="scope-context-related-event" type="button" key={`${route.origin}:${route.destination}:${route.mode}`} onClick={()=>selectCountry(route.destination === country ? route.origin : route.destination)}>{route.origin} → {route.destination} · {route.mode}<small>{route.observed_days}/{outlookDays} observed days · {route.sample_days.toLocaleString()} daily peak samples{route.flag_proxies>0 ? ` · ${route.flag_proxies} flag-origin proxy samples` : ''}</small></button>)}</details></> : <p role="status">{outlookStatus === "error" ? "Saved outlook unavailable. Switch the period to retry." : "Loading saved corridor outlook…"}</p>}
+        </details>}
+        {!selectedId && scopeView === "transport" && <Suspense fallback={<p role="status">Loading transport explorer…</p>}><TransportScopeContext onOverview={setLiveTransport} selectedVehicle={mappedVehicle} country={country} events={relatedEvents} relatedEventIds={relatedEventIds} onSelectCountry={selectCountry} onOpenEvent={selectEvent} /></Suspense>}
         {(selectedId || scopeView === "developments") && <>
         {!selectedId && !profileCountry && overviewControls}
         {selectedId ? <><section id="overview-event-context" tabIndex={-1} className="situation-detail" aria-label="Selected development">

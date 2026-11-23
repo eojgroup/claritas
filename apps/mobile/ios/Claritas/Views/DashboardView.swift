@@ -5294,7 +5294,7 @@ struct WorldMapWorkspace: View {
         _wideContext = State(initialValue: briefing || reviewContext)
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot") { _exploration = State(initialValue: "transport") }
-        if ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _exploration = State(initialValue: "markets") }
+        if ProcessInfo.processInfo.arguments.contains("-qa-markets-snapshot") { _exploration = State(initialValue: "developments") }
         #endif
     }
 
@@ -5396,7 +5396,7 @@ struct WorldMapWorkspace: View {
         .onAppear { if model.selectedIntelligenceEventID == nil { profileCountry = model.selectedCountry } }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             if let destination = note.object as? String, ["transport", "markets"].contains(destination) {
-                exploration = destination; showsBriefing = false; revealContext()
+                exploration = destination == "transport" ? "transport" : "developments"; showsBriefing = false; revealContext()
             }
         }
         .task(id: "\(exploration)|\(model.selectedCountry ?? "global")|\(outlookDays)") {
@@ -5439,7 +5439,7 @@ struct WorldMapWorkspace: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(showsBriefing ? "Daily briefing" : model.selectedIntelligenceEventID != nil ? "Event context" : model.selectedCountry.map(countryName) ?? "World overview")
                         .font(.title3.weight(.semibold)).lineLimit(1)
-                    Text(showsBriefing ? "Global publication" : model.selectedIntelligenceEventID == nil && exploration == "transport" ? "Vessels, flights, ports & retained history" : model.selectedIntelligenceEventID == nil && exploration == "markets" ? "Benchmarks, currencies & economic context" : "\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
+                    Text(showsBriefing ? "Global publication" : model.selectedIntelligenceEventID == nil && exploration == "transport" ? "Vessels, flights, ports & retained history" : "\(model.intelligenceOverview?.summary.event_count.formatted() ?? "…") developments · \(model.overviewScope.windowLabel)")
                         .font(.caption).foregroundStyle(.secondary).lineLimit(1)
                 }
                 Spacer(minLength: 4)
@@ -5476,7 +5476,6 @@ struct WorldMapWorkspace: View {
                 Picker("Explore the selected scope", selection: $exploration) {
                     Text("Developments").tag("developments")
                     Text("Transport").tag("transport")
-                    Text("Markets").tag("markets")
                 }
                 .pickerStyle(.segmented).padding(.horizontal, 14).padding(.vertical, 10)
             }
@@ -5504,16 +5503,11 @@ struct WorldMapWorkspace: View {
                     }
                     ScopeTransportExplorer(country: model.selectedCountry, onOverview: { scopedTransport = $0 })
                 }
-            } else if exploration == "markets" {
-                MarketsWorkspaceView(scopedToSelection: true)
             } else {
                 ScrollViewReader { reader in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             Color.clear.frame(height: 0).id("context-top")
-                            if model.intelligenceOverview != nil {
-                                ScopeMarketGlance(country: model.selectedCountry) { exploration = "markets"; revealContext() }
-                            }
                             if let profileCountry {
                                 CountryProfileView(selectedCountry: profileCountry)
                             }
