@@ -5540,14 +5540,13 @@ struct WorldMapWorkspace: View {
         if panelStop == 0 { withAnimation(.easeInOut(duration: 0.22)) { panelStop = 1 } }
     }
     private func selectTransportCountry(_ country:String) {
-        if let origin = model.selectedCountry {
-            transportSelection.corridor = origin == country || transportSelection.corridor == country ? "" : country
-            transportSelection.port = ""
-        } else {
-            keepsTransportScope = true
-            model.selectedCountry = country
-            profileCountry = country
-        }
+        guard country != model.selectedCountry else { revealContext(); return }
+        keepsTransportScope = true
+        mappedTransportEntity = nil
+        transportMap = nil
+        transportSelection = TransportVisualSelection()
+        model.selectedCountry = country
+        profileCountry = country
         revealContext()
     }
     private func selectCountry(_ country: String) {

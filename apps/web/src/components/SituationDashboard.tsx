@@ -117,10 +117,8 @@ export default function SituationDashboard(props: Props) {
   const isScopedHeat = !isTransport && linkedCountries.length < 2 && scopedLinks.length > 0;
   const mapCountries = isTransport ? currentTransport?.countries ?? [] : linkedCountries.length>1 ? linkedCountries.map(country=>({country,count:100})) : isScopedHeat ? scopedLinks.map(row=>({country:row.country_iso2,count:mapMetric === "priority" ? row.high_priority_count : row.event_count})) : countries;
   const selectTransportCountry = (iso:string) => {
-    setMappedVehicle(null);
-    if(country) setTransportSelection(value=>({...value,corridor:iso===country||value.corridor===iso?"":iso,port:""}));
-    else {selectCountry(iso);setScopeView("transport");}
-    revealContext();
+    selectCountry(iso);
+    setScopeView("transport");
   };
   const focus = useMemo<[number,number]|undefined>(()=>{
     if(mappedVehicle?.latitude!=null&&mappedVehicle.longitude!=null)return [mappedVehicle.longitude,mappedVehicle.latitude];

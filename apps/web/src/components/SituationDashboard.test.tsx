@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import SituationDashboard from "./SituationDashboard";
 import { event, overviewFixture } from "../test/situationFixture";
 
-vi.mock("./WorldMapBubbles", () => ({ default: ({ onSelect, onSelectPoint, data, corridors=[] }: { data:unknown; corridors?:unknown[]; onSelect: (iso: string) => void; onSelectPoint: (point: { id: string }) => void }) => <div data-testid="map-camera" data-countries={JSON.stringify(data)} data-corridors={JSON.stringify(corridors)}><button onClick={() => onSelect("SE")}>Select Sweden</button><button onClick={() => onSelectPoint({ id: event.id })}>Select port event</button></div> }));
+vi.mock("./WorldMapBubbles", () => ({ default: ({ onSelect, onSelectPoint, data, corridors=[] }: { data:unknown; corridors?:unknown[]; onSelect: (iso: string) => void; onSelectPoint: (point: { id: string }) => void }) => <div data-testid="map-camera" data-countries={JSON.stringify(data)} data-corridors={JSON.stringify(corridors)}><button onClick={() => onSelect("SE")}>Select Sweden</button><button onClick={() => onSelect("NO")}>Select Norway</button><button onClick={() => onSelectPoint({ id: event.id })}>Select port event</button></div> }));
 vi.mock("./OverviewCountryProfile", () => ({ default: () => <section aria-label="Country profile">Sweden profile</section> }));
 vi.mock("./IntelligenceWorkspace", () => ({ default: () => <h3>Selected event evidence</h3> }));
 vi.mock("./MarketScopeContext", () => ({ default: ({ country, expanded }: { country?: string; expanded: boolean }) => <section aria-label="Market glance">{country || "World"} markets{expanded && <h3>Market explorer</h3>}</section> }));
@@ -103,6 +103,11 @@ it("keeps explicit transport map browsing scoped while developments remains the 
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
   expect(screen.getByRole("button", { name: "Transport" }).getAttribute("aria-pressed")).toBe("true");
   expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("SE transport history");
+  fireEvent.click(screen.getByRole("button", { name: "Select Norway" }));
+  expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("NO transport history");
+  expect(screen.getByRole("button", { name: "Transport" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("button",{name:"Clear SE ×"})).toBeNull();
+  expect(screen.getByRole("button",{name:"Clear NO ×"})).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Developments" }));
   expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
@@ -115,4 +120,13 @@ it("shades secondary countries from the selected developments without drawing co
   const map=screen.getByTestId("map-camera");
   expect(JSON.parse(map.getAttribute("data-countries")!)).toEqual([{country:"SE",count:8},{country:"NO",count:2}]);
   expect(map.getAttribute("data-corridors")).toBe("[]");
+});
+
+it("switches directly between map countries in developments without clearing the filter", () => {
+  render(<Workspace />);
+  fireEvent.click(screen.getByRole("button",{name:"Select Sweden"}));
+  expect(screen.getByRole("button",{name:"Clear SE ×"})).toBeTruthy();
+  fireEvent.click(screen.getByRole("button",{name:"Select Norway"}));
+  expect(screen.queryByRole("button",{name:"Clear SE ×"})).toBeNull();
+  expect(screen.getByRole("button",{name:"Clear NO ×"})).toBeTruthy();
 });
