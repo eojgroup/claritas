@@ -5717,8 +5717,8 @@ private struct SignalDensityLegend: View {
             }
             if mode == .transport {
                 Text("Warmer = more linked activity").font(.system(size:8))
-                HStack(spacing:5) { Text("● Vessels").foregroundStyle(ClaritasPalette.orange); Text("● Aircraft").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }.font(.system(size:8))
-                Text("□ Monitored port · partial tracking").font(.system(size:8))
+                HStack(spacing:5) { Label("Vessels",systemImage:"ferry").foregroundStyle(ClaritasPalette.orange); Label("Aircraft",systemImage:"airplane").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }.font(.system(size:8))
+                Label("Ports · partial tracking",systemImage:"anchor").font(.system(size:8))
             }
             if isScopedLinks { Text("Warmer = more location-linked reports\nNot an impact rating").font(.system(size:8)) }
             if !events.isEmpty {
@@ -6320,22 +6320,21 @@ private struct InteractiveCountryBubbleMap: View {
         withAnimation { committedScale = 5;committedOffset = CGSize(width:-5*(point.x-center.x),height:-5*(point.y-center.y)) }
     }
     private func drawTransport(context:GraphicsContext,size:CGSize) {
+        var aircraft = context.resolve(Image(systemName:"airplane")); aircraft.shading = .color(ClaritasPalette.dataBlue(for:colorScheme))
+        var vessel = context.resolve(Image(systemName:"ferry")); vessel.shading = .color(ClaritasPalette.orange)
+        var portIcon = context.resolve(Image(systemName:"anchor")); portIcon.shading = .color(ClaritasPalette.shellInk(for:colorScheme))
         for entity in transportEntities.prefix(600) {
             guard let latitude = entity.latitude, let longitude = entity.longitude, contains(latitude:latitude,longitude:longitude) else { continue }
             let point = project(CLLocationCoordinate2D(latitude:latitude,longitude:longitude),size:size)
-            let color = entity.mode == .aviation ? ClaritasPalette.dataBlue(for:colorScheme) : ClaritasPalette.orange
-            if committedScale < 2 && focusedTransportID != entity.id { context.fill(Path(ellipseIn:CGRect(x:point.x-2.5,y:point.y-2.5,width:5,height:5)),with:.color(color)) }
-            else {
-                var local = context;local.translateBy(x:point.x,y:point.y);local.rotate(by:.degrees(entity.heading ?? 0))
-                let coordinates:[CGPoint] = entity.mode == .aviation ? [CGPoint(x:0,y:-8),CGPoint(x:2,y:-2),CGPoint(x:7,y:2),CGPoint(x:7,y:4),CGPoint(x:1,y:2),CGPoint(x:1,y:7),CGPoint(x:-1,y:7),CGPoint(x:-1,y:2),CGPoint(x:-7,y:4),CGPoint(x:-7,y:2),CGPoint(x:-2,y:-2)] : [CGPoint(x:0,y:-7),CGPoint(x:4,y:-1),CGPoint(x:4,y:5),CGPoint(x:0,y:7),CGPoint(x:-4,y:5),CGPoint(x:-4,y:-1)]
-                var glyph = Path();glyph.addLines(coordinates);glyph.closeSubpath();local.fill(glyph,with:.color(color));local.stroke(glyph,with:.color(ClaritasPalette.mapBackground(for:colorScheme)),lineWidth:0.7)
-            }
+            var local = context
+            local.translateBy(x:point.x,y:point.y)
+            let glyph = entity.mode == .aviation ? aircraft : vessel
+            if entity.mode == .aviation { local.rotate(by:.degrees((entity.heading ?? 90)-90)) }
+            local.draw(glyph,in:CGRect(x:-7,y:-7,width:14,height:14))
         }
         for port in transportPorts {
             let point = project(CLLocationCoordinate2D(latitude:port.latitude,longitude:port.longitude),size:size)
-            let marker = Path(roundedRect:CGRect(x:point.x-4,y:point.y-4,width:8,height:8),cornerRadius:1)
-            context.fill(marker,with:.color(ClaritasPalette.mapBackground(for:colorScheme)));context.stroke(marker,with:.color(ClaritasPalette.shellInk(for:colorScheme)),lineWidth:1)
-            if selectedPort == port.name || (committedScale > 3 && transportPorts.count <= 6) { context.draw(Text(port.name).font(.system(size:10,weight:.medium)).foregroundColor(ClaritasPalette.shellInk(for:colorScheme)),at:CGPoint(x:point.x,y:point.y-12)) }
+            context.draw(portIcon,in:CGRect(x:point.x-7,y:point.y-7,width:14,height:14))
         }
     }
 

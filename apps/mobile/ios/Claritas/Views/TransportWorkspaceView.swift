@@ -1778,7 +1778,7 @@ struct ScopeTransportExplorer: View {
             if failed { Text("Current positions unavailable · refresh to retry") }
             else if mapPositions?.cohort?.available == false { Text("Vehicle identities for this historical period are no longer retained") }
             else { Text(mapPositions.map{"\($0.entities.count)\($0.truncated ? " sampled" : "") current map positions"} ?? "Updating current positions…") }
-            HStack { Label("Vessels",systemImage:"circle.fill").foregroundStyle(ClaritasPalette.orange); Label("Aircraft",systemImage:"circle.fill").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }
+            HStack { Label("Vessels",systemImage:"ferry").foregroundStyle(ClaritasPalette.orange); Label("Aircraft",systemImage:"airplane").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }
         }.font(.caption2).foregroundStyle(.secondary)
     }
     private var selectionChips: some View {

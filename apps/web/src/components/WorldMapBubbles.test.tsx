@@ -461,3 +461,13 @@ it("keeps equally weighted and weak linked countries visibly shaded in transport
   view.rerender(<WorldMapBubbles data={[{country:"DE",count:10000},{country:"BR",count:1}]} fillMode="relevance" scale="log" dark />);
   expect(screen.getAllByRole("button",{name:"Brazil: 1"}).find(node=>node.tagName.toLowerCase()==="path")!.getAttribute("fill")).not.toBe(unlinked);
 });
+
+it("shows vessel and aircraft icons at world zoom and matches them in the map key", () => {
+  const view=render(<WorldMapBubbles data={[]} transportLayer points={[{id:"ship",latitude:52,longitude:4,title:"Current vessel",vehicleMode:"maritime"},{id:"flight",latitude:50,longitude:12,title:"Current flight",vehicleMode:"aviation"}]} />);
+  expect(view.container.querySelector('[data-vehicle-mode="maritime"] svg.lucide-ship')).toBeTruthy();
+  expect(view.container.querySelector('[data-vehicle-mode="aviation"] svg.lucide-plane')).toBeTruthy();
+  const key=screen.getByLabelText("Transport symbols");
+  expect(within(key).getByText("Vessels")).toBeTruthy();
+  expect(within(key).getByText("Aircraft")).toBeTruthy();
+  expect(within(key).getByText("Ports")).toBeTruthy();
+});

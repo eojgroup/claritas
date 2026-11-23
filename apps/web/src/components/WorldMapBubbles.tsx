@@ -1266,7 +1266,7 @@ export default memo(function WorldMapBubbles({
                     strokeWidth={2.2 / view.scale}
                   />
                 )}
-                {eventPoint.vehicleMode ? (view.scale < 2 && !eventPoint.selected ? <circle r={2.8/view.scale} fill={color} stroke={isDark?"#0b1b28":"#fffaf0"} strokeWidth={.7/view.scale}/> : <g transform={`rotate(${eventPoint.vehicleHeading??0}) scale(${1/view.scale})`}><path d={eventPoint.vehicleMode === "aviation" ? "M0 -8 L2 -2 L7 2 L7 4 L1 2 L1 7 L-1 7 L-1 2 L-7 4 L-7 2 L-2 -2 Z" : "M0 -7 L4 -1 L4 5 L0 7 L-4 5 L-4 -1 Z"} fill={color} stroke={isDark?"#0b1b28":"#fffaf0"} strokeWidth="1"/></g>) : <>
+                {eventPoint.vehicleMode ? <g data-vehicle-mode={eventPoint.vehicleMode} transform={`rotate(${eventPoint.vehicleMode === "aviation" ? (eventPoint.vehicleHeading??0)-45 : 0}) scale(${1/view.scale})`}>{eventPoint.vehicleMode === "aviation" ? <Plane x={-7} y={-7} width={14} height={14} stroke={color} strokeWidth={2} aria-hidden="true"/> : <Ship x={-7} y={-7} width={14} height={14} stroke={color} strokeWidth={2} aria-hidden="true"/>}</g> : <>
                   <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={isDark?"#0b1b28":"#ffffff"} strokeWidth={4} pointerEvents="none"/>
                   <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none"/>
                 </>}
@@ -1455,7 +1455,7 @@ export default memo(function WorldMapBubbles({
             {markers.length} mapped · select country for profile
           </div>
           {legendDescription && <p className="map-key-note">{legendDescription}</p>}
-          {transportLayer && <div className="map-visible-event-key"><strong>Live transport</strong><p className="map-key-note">Orange · vessels / blue · aircraft<br/>Zoom for directional silhouettes. Country colour = linked activity, not disruption.</p></div>}
+          {transportLayer && <div className="map-visible-event-key"><strong>Live transport</strong><div className="map-event-types" aria-label="Transport symbols"><span><Ship size={14} color="#eda36a" aria-hidden="true"/>Vessels</span><span><Plane size={14} color="#77a8ba" aria-hidden="true"/>Aircraft</span><span><Anchor size={14} aria-hidden="true"/>Ports</span></div><p className="map-key-note">Country colour = linked activity, not disruption.</p></div>}
           {!transportLayer && eventPoints.length > 0 && <div className="map-visible-event-key" aria-label="Map event types">
             <strong>Events · tap for the story</strong>
             <div className="map-event-types">{[...new Set(eventPoints.map((point) => point.kind ?? "news"))].map((kind) => {
