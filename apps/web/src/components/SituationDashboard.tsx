@@ -30,6 +30,7 @@ export default function SituationDashboard(props: Props) {
   const { overview, country, selectedId, onSelect } = props;
   const [selectedEvent, setSelectedEvent] = useState<IntelligenceEvent | null>(null);
   const [profileCountry, setProfileCountry] = useState<string | null>(null);
+  const [countryContextOpen, setCountryContextOpen] = useState(false);
   const [scopeView, setScopeView] = useState<"developments" | "transport">("developments");
   const [liveTransport, setLiveTransport] = useState<TransportOverview|null>(null);
   const [mappedVehicle, setMappedVehicle] = useState<TransportEntity|null>(null);
@@ -104,7 +105,7 @@ export default function SituationDashboard(props: Props) {
   }, [events, overview, scopeMatches, mapMetric]);
   const revealContext = () => setPanelStop((stop) => stop === "peek" ? "half" : stop);
   const selectEvent = (id: string | null) => { onSelect(id); if (id) { setProfileCountry(null); revealContext(); } };
-  const selectCountry = (iso: string) => { setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
+  const selectCountry = (iso: string) => { setScopeView("developments"); setCountryContextOpen(false); setMappedVehicle(null); setProfileCountry(iso); onSelect(null, { focus: false }); props.onCountryChange(iso); revealContext(); contextScroll.current?.scrollTo?.({ top: 0 }); };
   const changeScope = <T,>(setter: (value: T) => void) => (value: T) => { onSelect(null); setProfileCountry(null); setter(value); };
   const leadingCountries = [...countries].sort((a, b) => b.count - a.count).filter((item) => item.count > 0).slice(0, 4);
   const mappedHighlight = [...events].sort((a, b) => (b.priority_score ?? b.relevance_score) - (a.priority_score ?? a.relevance_score))[0];
@@ -189,8 +190,13 @@ export default function SituationDashboard(props: Props) {
               onEventLoaded={setSelectedEvent} onSelectEvent={selectEvent} onOpenImagery={props.onOpenImagery} />
           </Suspense>
         </section>{overviewControls}</> : <>
-          {profileCountry && <><OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setProfileCountry(null)} />{overviewControls}</>}
+          {profileCountry && <>
+            {overviewControls}
+            <button type="button" className="scope-context-related-event" aria-expanded={countryContextOpen} aria-controls="selected-country-reference" onClick={() => setCountryContextOpen(!countryContextOpen)}>Weather, markets & country profile {countryContextOpen ? "−" : "+"}</button>
+            {countryContextOpen && <div id="selected-country-reference"><OverviewCountryProfile country={profileCountry} overview={overview} onClose={() => setCountryContextOpen(false)} /></div>}
+          </>}
           <SituationOverview variant="history" {...props} onBucketChange={props.onBucketChange ? changeScope(props.onBucketChange) : undefined} selectedId={selectedId} />
+          {profileCountry && <SituationOverview variant="developments" {...props} onSelect={selectEvent} selectedId={selectedId} />}
           <section className="situation-briefing" aria-label="Daily briefing">
             <div className="situation-briefing-label"><FileText size={16} /><strong>Daily briefing</strong>{props.briefing?.published_at && <time dateTime={props.briefing.published_at}>{new Date(props.briefing.published_at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</time>}</div>
             {props.briefing ? <>
@@ -200,7 +206,7 @@ export default function SituationDashboard(props: Props) {
             </> : <p>{props.briefingError ? "Briefing could not be loaded." : "No briefing published yet."}</p>}
             {props.briefingError && <button type="button" onClick={() => void props.onRefreshBriefing()}>Retry briefing</button>}
           </section>
-          <SituationOverview variant="developments" {...props} onSelect={selectEvent} selectedId={selectedId} />
+          {!profileCountry && <SituationOverview variant="developments" {...props} onSelect={selectEvent} selectedId={selectedId} />}
           {leadingCountries.length > 0 && <div className="situation-country-pulse" aria-label="Leading country activity">{leadingCountries.map((item) => <button type="button" key={item.country} onClick={() => selectCountry(item.country)}><CountryFlag country={item.country} /><span>{new Intl.DisplayNames(undefined, { type: "region" }).of(item.country) || item.country}</span><strong>{item.count.toLocaleString()}</strong></button>)}</div>}
           <p className="situation-map-coverage">Country shading and pins follow your topic, priority, country and time selection. Reports without precise coordinates contribute to country shading. A dark country means no located reporting in this selection, not that nothing happened.</p>
         </>}
