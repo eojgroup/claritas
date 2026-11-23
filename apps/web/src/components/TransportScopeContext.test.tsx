@@ -65,3 +65,11 @@ it("keeps reporting from the transport topic cohort visible even before its loca
   expect(open).toHaveBeenCalledWith("linked-report");
   expect(screen.queryByRole("button", { name: /Unrelated report/ })).toBeNull();
 });
+it("publishes country tracking to the map and opens a vehicle selected there", async () => {
+  const publish = vi.fn();
+  const view = render(<TransportScopeContext country="NL" onOverview={publish} />);
+  await waitFor(() => expect(publish).toHaveBeenCalledWith(expect.objectContaining({ entities: [vessel] })));
+  api.entity.mockResolvedValue({ entity: vessel, track: [] });
+  view.rerender(<TransportScopeContext country="NL" onOverview={publish} selectedVehicle={vessel} />);
+  await waitFor(() => expect(api.entity).toHaveBeenCalledWith(vessel.mode, vessel.entity_id, expect.any(AbortSignal)));
+});

@@ -1,3 +1,4 @@
+import { Plane, Ship } from "lucide-react";
 import CountryFlag from "./CountryFlag";
 import { MAP_EVENT_KINDS, type MapEventKind } from "./mapEventPresentation";
 import { useCountryContexts } from "./countryContext";
@@ -58,6 +59,7 @@ export type WorldMapPoint = {
   imageUrl?: string;
   selected?: boolean;
   kind?: MapEventKind;
+  vehicleMode?: "aviation" | "maritime";
 };
 
 export type WorldMapBubblesProps = {
@@ -1187,7 +1189,7 @@ export default memo(function WorldMapBubbles({
             if (!point) return null;
             const color = eventPointColor(eventPoint.severity, isDark);
             const radius = 8 / view.scale;
-            const EventIcon = MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
+            const EventIcon = eventPoint.vehicleMode === "aviation" ? Plane : eventPoint.vehicleMode === "maritime" ? Ship : MAP_EVENT_KINDS[eventPoint.kind ?? "news"].icon;
             const hasImage = eventPoint.imageUrl && !failedImageUrls.has(eventPoint.imageUrl);
             const showPointLabel = pointLabelIds.has(eventPoint.id);
             return (

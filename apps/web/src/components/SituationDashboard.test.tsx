@@ -92,14 +92,11 @@ it("leaves country focus to the profile instead of scheduling an overview scroll
 it("keeps the map and country scope while switching between browsing lenses", async () => {
   render(<Workspace />);
   const map = screen.getByTestId("map-camera");
-  expect(screen.getByRole("region", { name: "Market glance" }).textContent).toContain("World markets");
+  expect(within(screen.getByRole("navigation", { name: "Explore selected scope" })).queryByRole("button", { name: "Markets" })).toBeNull();
   fireEvent.click(within(screen.getByRole("navigation", { name: "Explore selected scope" })).getByRole("button", { name: "Transport" }));
   expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("World transport history");
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
   expect(screen.getByRole("region", { name: "Transport explorer" }).textContent).toContain("SE transport history");
-  fireEvent.click(screen.getByRole("button", { name: "Markets" }));
-  expect(screen.getByRole("heading", { name: "Market explorer" })).toBeTruthy();
-  expect(screen.getByRole("region", { name: "Market glance" }).textContent).toContain("SE markets");
   fireEvent.click(screen.getByRole("button", { name: "Developments" }));
   expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
