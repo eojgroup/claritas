@@ -1679,6 +1679,7 @@ struct ScopeTransportExplorer: View {
     @State private var portActivity: TransportPortActivity?
     @State private var outlook: TransportOutlook?
     @State private var connectionDays = 0
+    @State private var showsAllConnections = false
     @State private var days = 30
     @State private var retry = 0
     @State private var failed = false
@@ -1754,6 +1755,7 @@ struct ScopeTransportExplorer: View {
             if let value = try? await model.api.fetchIntelligenceOverview(scope:scope), !Task.isCancelled { topicOverview = value }
         }
         .onChange(of:selection) { _ in publishMap() }
+        .onChange(of:country) { _ in showsAllConnections = false }
     }
     private var modeCards: some View {
         HStack(spacing:8) {
@@ -1792,13 +1794,13 @@ struct ScopeTransportExplorer: View {
             if country != nil { Picker("Connection period",selection:$connectionDays) { Text("Now").tag(0); Text("7d").tag(7); Text("30d").tag(30); Text("90d").tag(90) }.pickerStyle(.segmented) }
             let tiles = corridorTiles
             LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible()),GridItem(.flexible())],spacing:7) {
-                ForEach(tiles,id:\.country) { tile in
+                ForEach(Array(tiles.prefix(showsAllConnections ? tiles.count : 6)),id:\.country) { tile in
                     Button {
                         if country != nil { selection.corridor = selection.corridor == tile.country ? "" : tile.country; selection.port = "" }
                         else if let destination = tile.country.components(separatedBy:" → ").last { onSelectCountry?(destination) }
                     } label: {
                         VStack(alignment:.leading,spacing:7) {
-                            Text(country == nil ? tile.country : Locale.current.localizedString(forRegionCode:tile.country) ?? tile.country).font(.caption2).lineLimit(1)
+                            Text((country == nil ? tile.country.components(separatedBy:" → ").map{Locale.current.localizedString(forRegionCode:$0) ?? $0}.joined(separator:" → ") : Locale.current.localizedString(forRegionCode:tile.country) ?? tile.country)+(tile.proxy ? " †" : "")).font(.caption2).lineLimit(2)
                             Text(tile.count.formatted()).font(.headline.monospacedDigit())
                             GeometryReader { geometry in HStack(spacing:0) { Rectangle().fill(ClaritasPalette.orange).frame(width:geometry.size.width*CGFloat(tile.sea)/CGFloat(max(1,tile.count))); Rectangle().fill(ClaritasPalette.dataBlue(for:colorScheme)) } }.frame(height:3)
                         }.padding(10).frame(maxWidth:.infinity,alignment:.leading)
@@ -1807,17 +1809,19 @@ struct ScopeTransportExplorer: View {
                     }.buttonStyle(.plain)
                 }
             }
-            Text(connectionDays > 0 ? "Daily peak samples · select to filter current positions. Includes flag links where labelled by source." : "Current country links · tap a country tile or map country to filter positions. Includes flag links.").font(.caption2).foregroundStyle(.secondary)
+            if tiles.count > 6 { Button(showsAllConnections ? "Show top six" : "See all \(tiles.count) connections") { showsAllConnections.toggle() }.font(.caption).frame(minHeight:36) }
+            Text(connectionDays > 0 ? "Daily peak samples · select to filter current positions. † Includes vessel flag links, not observed origins." : "Current country links · tap a country tile or map country to filter positions. † Flag link, not observed origin.").font(.caption2).foregroundStyle(.secondary)
         }
     }
-    private var corridorTiles: [(country:String,count:Int,sea:Int)] {
-        var totals:[String:(Int,Int)] = [:]
+    private var corridorTiles: [(country:String,count:Int,sea:Int,proxy:Bool)] {
+        var totals:[String:(Int,Int,Bool)] = [:]
         for route in connections {
             let other = country == nil ? "\(route.origin) → \(route.destination)" : route.origin == country ? route.destination : route.origin
-            let current = totals[other] ?? (0,0)
-            totals[other] = (current.0+route.weight,current.1+(route.mode == "maritime" ? route.weight : 0))
+            if other == country { continue }
+            let current = totals[other] ?? (0,0,false)
+            totals[other] = (current.0+route.weight,current.1+(route.mode == "maritime" ? route.weight : 0),current.2 || route.proxy)
         }
-        return totals.map{(country:$0.key,count:$0.value.0,sea:$0.value.1)}.sorted{$0.count > $1.count}.prefix(12).map{$0}
+        return totals.map{(country:$0.key,count:$0.value.0,sea:$0.value.1,proxy:$0.value.2)}.sorted{$0.count == $1.count ? $0.country < $1.country : $0.count > $1.count}
     }
     @ViewBuilder private func history(_ value:TransportOverview) -> some View {
         if let history = value.history {

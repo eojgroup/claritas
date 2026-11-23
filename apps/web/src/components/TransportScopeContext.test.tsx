@@ -70,3 +70,15 @@ it("cancels old scoped map reads and keeps explicitly linked reporting visible",
  view.rerender(<TransportScopeContext country="BE" events={[related]} relatedEventIds={[related.id]} onOpenEvent={open}/>);expect(signal?.aborted).toBe(true);
  fireEvent.click(await screen.findByRole("button",{name:/Port strike reported/}));expect(open).toHaveBeenCalledWith(related.id);
 });
+it("starts with six cross-border connections and preserves the rest for visual drill-down",async()=>{
+ const value=overview("NL");
+ value.routes=["NL","BE","BR","DE","ES","FR","IT","US"].map(destination=>({mode:"maritime" as const,origin_country:"NL",destination_country:destination,origin_name:"Netherlands",destination_name:destination,active_count:1,origin_basis:"observed" as const,examples:[]}));
+ api.overview.mockResolvedValue(value);render(<TransportScopeContext country="NL"/>);
+ await screen.findByRole("button",{name:/See all 7 connections/});
+ expect(screen.queryByRole("button",{name:/Filter connection Netherlands/})).toBeNull();
+ expect(screen.getAllByRole("button",{name:/Filter connection /})).toHaveLength(6);
+ expect(screen.queryByRole("button",{name:/Filter connection United States/})).toBeNull();
+ fireEvent.click(screen.getByRole("button",{name:/See all 7 connections/}));
+ fireEvent.click(screen.getByRole("button",{name:/Filter connection United States/}));
+ await waitFor(()=>expect(api.positions).toHaveBeenLastCalledWith("NL",expect.objectContaining({corridor:"US"}),expect.any(AbortSignal)));
+});
