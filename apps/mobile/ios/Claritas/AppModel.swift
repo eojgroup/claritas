@@ -566,13 +566,13 @@ final class AppModel: ObservableObject {
     }
 
     /// The World glance reads the saved country summary, never the quote universe.
-    func loadMarketGlance() async {
+    func loadMarketGlance(force: Bool = false) async {
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
         #endif
         guard authStatus == .authed, hasPaidAccess, !isLoadingMarketGlance else { return }
         let lastRead = marketGlanceLoadedAt ?? widgetFreshness.markets
-        if !countryMarkets.isEmpty, let lastRead, Date().timeIntervalSince(lastRead) < 600 { return }
+        if !force, !countryMarkets.isEmpty, let lastRead, Date().timeIntervalSince(lastRead) < 600 { return }
         let generation = dataGeneration
         isLoadingMarketGlance = true
         defer { isLoadingMarketGlance = false }

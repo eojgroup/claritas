@@ -300,7 +300,7 @@ struct CountryProfileView: View {
             guard selectedCountry != nil else { return }
             async let leadership: Void = model.loadOptionalContext("leadership")
             async let weather: Void = model.loadOptionalContext("weather")
-            async let markets: Void = model.loadOptionalContext("markets")
+            async let markets: Void = model.loadMarketGlance()
             _ = await (leadership, weather, markets)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -316,7 +316,7 @@ struct CountryProfileView: View {
         isRefreshingContext = true
         defer { isRefreshingContext = false }
         async let weather: Void = model.loadOptionalContext("weather", force: true)
-        async let markets: Void = model.loadOptionalContext("markets", force: true)
+        async let markets: Void = model.loadMarketGlance(force: true)
         async let leadership: Void = model.loadOptionalContext("leadership", force: true)
         _ = await (weather, markets, leadership)
     }
