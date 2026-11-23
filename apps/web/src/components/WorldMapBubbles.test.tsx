@@ -139,6 +139,7 @@ describe("WorldMapBubbles interaction", () => {
     const map=container.querySelector('svg');
     fireEvent.click(screen.getByRole("button",{name:"Preview image: Port activity reported"}));
     const preview=screen.getByRole("dialog",{name:"Map image preview"});
+    expect(screen.getByRole("button",{name:"Preview image: Port activity reported"}).getAttribute("aria-expanded")).toBe("true");
     expect(within(preview).getByRole("img",{name:point.title})).toBeTruthy();
     expect(within(preview).getByText("Strait of Hormuz")).toBeTruthy();
     expect(within(preview).getByText("Source newsroom")).toBeTruthy();expect(select).not.toHaveBeenCalled();

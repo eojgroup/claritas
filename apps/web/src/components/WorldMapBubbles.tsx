@@ -8,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useId,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -499,6 +500,7 @@ export default memo(function WorldMapBubbles({
       .slice(0, transportLayer ? 600 : 200),
     [points, transportLayer],
   );
+  const imagePreviewDialogId = useId();
   const [imagePreviewId,setImagePreviewId] = useState<string|null>(null);
   const imagePreview = eventPoints.find(point=>point.id===imagePreviewId) ?? null;
   useEffect(()=>{if(imagePreviewId&&!eventPoints.some(point=>point.id===imagePreviewId))setImagePreviewId(null);},[eventPoints,imagePreviewId]);
@@ -1255,7 +1257,7 @@ export default memo(function WorldMapBubbles({
                     strokeDasharray={`${2.4 / view.scale} ${1.8 / view.scale}`}
                   />
                 )}
-                {eventPoint.selected && (
+                {(eventPoint.selected || imagePreviewId===eventPoint.id) && (
                   <rect
                     x={-12 / view.scale} y={-12 / view.scale} width={24 / view.scale} height={24 / view.scale} rx={3 / view.scale}
                     fill="none"
@@ -1267,7 +1269,7 @@ export default memo(function WorldMapBubbles({
                   <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={isDark?"#0b1b28":"#ffffff"} strokeWidth={4} pointerEvents="none"/>
                   <EventIcon aria-hidden="true" x={-8/view.scale} y={-8/view.scale} width={16/view.scale} height={16/view.scale} stroke={color} strokeWidth={1.8} pointerEvents="none"/>
                 </>}
-                {hasImage && <g role="button" tabIndex={0} aria-label={`Preview image: ${eventPoint.title}`} onClick={event=>{event.stopPropagation();if(!gestureClickIsSuppressed())setImagePreviewId(eventPoint.id);}} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();setImagePreviewId(eventPoint.id);}}}>
+                {hasImage && <g role="button" tabIndex={0} aria-label={`Preview image: ${eventPoint.title}`} aria-expanded={imagePreviewId===eventPoint.id} aria-controls={imagePreviewId===eventPoint.id?imagePreviewDialogId:undefined} onClick={event=>{event.stopPropagation();if(!gestureClickIsSuppressed())setImagePreviewId(eventPoint.id);}} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();event.stopPropagation();setImagePreviewId(eventPoint.id);}}}>
                   <line x1={0} y1={-radius} x2={0} y2={-18/view.scale} stroke={color} strokeWidth={1.5/view.scale}/>
                   <rect x={-(photoWidth/2+2)/view.scale} y={-(20+photoHeight)/view.scale} width={(photoWidth+4)/view.scale} height={(photoHeight+4)/view.scale} rx={4/view.scale} fill={color}/>
                   <image href={eventPoint.imageUrl} x={-photoWidth/2/view.scale} y={-(18+photoHeight)/view.scale} width={photoWidth/view.scale} height={photoHeight/view.scale} preserveAspectRatio="xMidYMid slice" onError={()=>setFailedImageUrls(urls=>new Set(urls).add(eventPoint.imageUrl!))}/>
@@ -1342,7 +1344,7 @@ export default memo(function WorldMapBubbles({
         </div>
       )}
 
-      {imagePreview?.imageUrl && <section className="map-image-preview" role="dialog" aria-label="Map image preview" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setImagePreviewId(null);}}}>
+      {imagePreview?.imageUrl && <section id={imagePreviewDialogId} className="map-image-preview" role="dialog" aria-label="Map image preview" tabIndex={-1} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setImagePreviewId(null);}}}>
         <header><strong>{imagePreview.locationLabel||"Event imagery"}</strong><button type="button" aria-label="Close image preview" autoFocus onClick={()=>setImagePreviewId(null)}>×</button></header>
         <img src={imagePreview.imageUrl} alt={imagePreview.title} onError={()=>{setFailedImageUrls(urls=>new Set(urls).add(imagePreview.imageUrl!));setImagePreviewId(null);}}/>
         <div><strong>{imagePreview.title}</strong><p>{imagePreview.imageCapturedAt?`Image time · ${new Date(imagePreview.imageCapturedAt).toLocaleString()}`:imagePreview.subtitle}</p>{imagePreview.imageAttribution&&<small>{imagePreview.imageAttribution}</small>}

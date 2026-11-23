@@ -6069,6 +6069,7 @@ private struct InteractiveCountryBubbleMap: View {
                                 Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
                                 Text(event.title).font(.headline)
                                 if let captured = image.captured_at { Text("Image time · \(captured.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+                                else { Text("Report updated · \(event.last_activity_time.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
                                 Text(image.attribution).font(.caption2).foregroundStyle(.secondary)
                                 Button { imagePreview = nil; onSelectEvent(event) } label: { Label("Open event & imagery",systemImage:"arrow.up.right").frame(maxWidth:.infinity,minHeight:44) }.buttonStyle(.bordered)
                             }
