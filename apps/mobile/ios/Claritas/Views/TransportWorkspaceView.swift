@@ -1667,246 +1667,297 @@ private final class TransportEntityAnnotation: NSObject, MKAnnotation {
 /// Saved transport browsing stays in the World scope; no additional map or provider call.
 struct ScopeTransportExplorer: View {
     let country: String?
-    var onOverview: ((TransportOverview?) -> Void)? = nil
+    @Binding var selection: TransportVisualSelection
+    var onMapChange: ((TransportMapSnapshot) -> Void)? = nil
+    var onSelectVehicle: ((TransportEntity) -> Void)? = nil
+    var onSelectCountry: ((String) -> Void)? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @State private var overview: TransportOverview?
-    @State private var failed = false
-    @State private var retry = 0
-    @State private var mode: TransportMode?
+    @State private var positions: TransportPositions?
+    @State private var positionsKey = ""
+    @State private var portActivity: TransportPortActivity?
+    @State private var outlook: TransportOutlook?
+    @State private var connectionDays = 0
+    @State private var showsAllConnections = false
     @State private var days = 30
-    @State private var selectedEntity: TransportEntity?
+    @State private var retry = 0
+    @State private var failed = false
+    @State private var overviewFailed = false
     @State private var search = ""
+    @State private var showsVehicles = false
     @State private var topicOverview: IntelligenceOverview?
 
-    private var scopeKey: String { "\(country ?? "global")|\(mode?.rawValue ?? "all")|\(retry)" }
-    private var entities: [TransportEntity] {
-        let term = search.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        return (overview?.entities ?? []).filter {
-            term.isEmpty || [$0.display_name, $0.callsign, $0.flight_number, $0.entity_id, $0.route_label, $0.current_location_name]
-                .compactMap { $0 }.joined(separator: " ").lowercased().contains(term)
+    private var connections: [TransportVisualCorridor] {
+        let rows: [TransportVisualCorridor]
+        if connectionDays > 0 {
+            rows = (outlook?.corridors ?? []).map { TransportVisualCorridor(origin:$0.origin,destination:$0.destination,mode:$0.mode,weight:$0.sample_days,proxy:$0.flag_proxies > 0) }
+        } else {
+            rows = (overview?.routes ?? []).map { TransportVisualCorridor(origin:$0.origin_country,destination:$0.destination_country,mode:$0.mode.rawValue,weight:$0.active_count,proxy:$0.origin_basis != "observed") }
         }
+        return rows.filter { selection.mode == nil || $0.mode == selection.mode?.rawValue }
     }
-    private var relatedEvents: [IntelligenceEvent] {
-        scopeRelatedEvents(topic: "transport", country: country, overview: topicOverview, fallback: model.intelligenceOverview)
+    private var mapPositions: TransportPositions? { positionsKey == selection.key ? positions : nil }
+    private var entities: [TransportEntity] {
+        let term = search.lowercased()
+        return (mapPositions?.entities ?? []).filter { term.isEmpty || [$0.display_name,$0.flight_number,$0.callsign,$0.entity_id,$0.route_label].compactMap{$0}.joined(separator:" ").lowercased().contains(term) }
     }
-
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 14) {
-                Text(country.map { "\(Locale.current.localizedString(forRegionCode: $0) ?? $0) transport" } ?? "Global transport")
-                    .font(.title3.weight(.semibold))
-                Text("Live country tracking · select a vehicle on the map").font(.caption).foregroundStyle(.secondary)
-                Picker("Transport mode", selection: $mode) {
-                    Text("All").tag(Optional<TransportMode>.none)
-                    Text("Shipping").tag(Optional(TransportMode.maritime))
-                    Text("Flights").tag(Optional(TransportMode.aviation))
-                }.pickerStyle(.segmented)
+            LazyVStack(alignment:.leading,spacing:20) {
+                HStack { Text("Air & sea, at a glance").font(.headline); Spacer(); Button { retry += 1 } label: {Image(systemName:"arrow.clockwise").frame(width:44,height:44)}.accessibilityLabel("Refresh transport") }
+                modeCards
+                status
+                selectionChips
+                connectionHeatmap
                 if let overview {
-                    scopeMetrics(overview)
-                    if !overview.activity.isEmpty {
-                        Text("Tracked vehicles · past 24 hours").font(.headline)
-                        Chart(overview.activity) { point in
-                            if let date = point.bucketDate {
-                                BarMark(x: .value("Time", date), y: .value("Tracked vehicles", point.active_count))
-                                    .foregroundStyle(by: .value("Mode", point.mode == .aviation ? "Flights" : "Shipping"))
-                            }
-                        }.frame(height: 130)
-                            .chartForegroundStyleScale(["Shipping": ClaritasPalette.orange, "Flights": ClaritasPalette.dataBlue(for: colorScheme)])
-                    }
+                    Text("Activity · past 24 hours").font(.subheadline.weight(.semibold))
+                    TransportVisualPlot(rows:overview.activity.filter{selection.mode == nil || $0.mode == selection.mode}.compactMap { point in point.bucketDate.map{TransportPlotSample(date:$0,value:point.active_count,mode:point.mode.rawValue)} },stepHours:1,selected:selection.from) { selectWindow($0,hours:1) }
                     history(overview)
-                    ports(overview)
-                    routes(overview)
-                    DisclosureGroup("Browse individual vehicles") { entityBrowser }
-                    if !relatedEvents.isEmpty {
-                        DisclosureGroup("Related reporting") {
-                        Text("Related developments & reporting").font(.headline)
-                        Text("These developments have transport signals in the current country/time scope. Open one for its linked reporting; this is not an explanation of every movement change.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                        ForEach(relatedEvents.prefix(8)) { event in
-                            Button { model.selectIntelligenceEvent(event) } label: {
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text(event.title).font(.subheadline.weight(.semibold))
-                                    Text(event.summary).font(.caption).foregroundStyle(.secondary).lineLimit(3)
-                                }.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 7)
-                            }.buttonStyle(.plain)
+                }
+                if overviewFailed { Text("Historical charts unavailable. Map positions load independently.").font(.caption2).foregroundStyle(.secondary) }
+                portFrequency
+                vehicleStrip
+                reporting
+                Text("Partial AIS / ADS-B coverage · map positions stay current when historical activity is selected. Country connections are links, not observed tracks.").font(.caption2).foregroundStyle(.secondary)
+                if let history = overview?.history {
+                    DisclosureGroup("Data coverage & comparisons") {
+                        Text(history.methodology).font(.caption2)
+                        ForEach(history.comparisons ?? []) { comparison in
+                            Text("\(comparison.label): \(comparison.comparable ? comparison.change_percent.map{String(format:"%+.1f%%",$0)} ?? "No baseline" : "Insufficient retained coverage")").font(.caption2)
                         }
-                        }
-                    }
-                    Text("Updated \(overview.generatedDate?.formatted(date: .abbreviated, time: .shortened) ?? overview.generated_at). AIS and ADS-B reception is partial; counts are monitored samples, not complete national traffic or cargo tonnage.")
-                        .font(.caption2).foregroundStyle(.secondary)
-                } else if failed {
-                    Text("Transport context could not be loaded.").font(.caption)
-                    Button("Retry transport") { retry += 1 }.frame(minHeight: 44)
-                } else { ProgressView("Loading saved transport context") }
+                    }.font(.caption)
+                }
             }.padding(14)
         }
-        .task(id: scopeKey) {
-            overview = nil; onOverview?(nil); failed = false; selectedEntity = nil
+        .task(id:"\(country ?? "global")|\(retry)") { await loadOverview() }
+        .task(id:"\(country ?? "global")|\(selection.key)|\(retry)") { await loadPositions() }
+        .task(id:"\(country ?? "global")|ports|\(retry)") {
+            portActivity = nil
             #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") {
-                overview = model.mapReviewScopedTransport
-                onOverview?(overview)
-                return
-            }
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { portActivity = model.mapReviewPortActivity; publishMap(); return }
             #endif
-            while !Task.isCancelled {
-                do {
-                    let value = try await model.api.fetchTransportOverview(detail: "full", mode: mode, country: country, entityLimit: 240, historyDays: 400)
-                    guard !Task.isCancelled else { return }; overview = value; onOverview?(value)
-                } catch { guard !Task.isCancelled else { return }; failed = true; return }
-                do { try await Task.sleep(nanoseconds: 120_000_000_000) } catch { return }
-            }
+            if let value = try? await model.api.fetchTransportPortActivity(country:country), !Task.isCancelled { portActivity = value; publishMap() }
         }
-        .task(id: "\(country ?? "global")|\(model.overviewHours)") {
+        .task(id:"\(country ?? "global")|connections|\(connectionDays)|\(retry)") {
+            outlook = nil
+            guard let country, connectionDays > 0 else { publishMap(); return }
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
             #endif
-            topicOverview = nil
-            let scope = IntelligenceOverviewScope(hours: model.overviewHours, country: country, topic: "transport", priority: "all")
-            while !Task.isCancelled {
-                guard let value = try? await model.api.fetchIntelligenceOverview(scope: scope), !Task.isCancelled else { return }
-                topicOverview = value
-                guard value.snapshot?.isWarming == true else { return }
-                do { try await Task.sleep(nanoseconds: 15_000_000_000) } catch { return }
-            }
+            if let value = try? await model.api.fetchTransportOutlook(country:country,days:connectionDays), !Task.isCancelled { outlook = value; publishMap() }
         }
-        .sheet(item: $selectedEntity) { entity in
-            NavigationStack {
-                ScopeTransportEntityReader(entity: entity)
-                    .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { selectedEntity = nil } } }
-            }
+        .task(id:"\(country ?? "global")|reporting") {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
+            #endif
+            let scope = IntelligenceOverviewScope(hours:model.overviewHours,country:country,topic:"transport",priority:"all")
+            if let value = try? await model.api.fetchIntelligenceOverview(scope:scope), !Task.isCancelled { topicOverview = value }
         }
+        .onChange(of:selection) { _ in publishMap() }
+        .onChange(of:country) { _ in showsAllConnections = false }
     }
-
-    private func scopeMetrics(_ value: TransportOverview) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("\(value.summary.modes.maritime.active.formatted()) vessels", systemImage: "ferry")
-                Spacer()
-                Label("\(value.summary.modes.aviation.active.formatted()) flights", systemImage: "airplane")
-            }.font(.subheadline.weight(.semibold))
-            if let trends = value.trends {
-                metric("Monitored-port departures", trends.maritime.ship_departures)
-                metric("Monitored-port arrivals", trends.maritime.ship_arrivals)
-                metric("Tracked aircraft", trends.aviation.tracked_flights)
-                Text("24h vs previous 24h · partial AIS / ADS-B coverage")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-        }.padding(12).brandGlass(cornerRadius: 14)
-    }
-    private func metric(_ title: String, _ value: TransportTrendMetric) -> some View {
-        HStack {
-            Text(title).font(.caption)
-            Spacer()
-            Text("\(value.current.formatted()) · \(value.change_pct.map { String(format: "%+.1f%%", $0) } ?? "no comparison")")
-                .font(.caption.monospacedDigit())
+    private var modeCards: some View {
+        HStack(spacing:8) {
+            modeCard(nil,title:"All traffic",icon:"airplane.departure",value:overview?.summary.active)
+            modeCard(.maritime,title:"Vessels",icon:"ferry",value:overview?.summary.modes.maritime.active)
+            modeCard(.aviation,title:"Aircraft",icon:"airplane",value:overview?.summary.modes.aviation.active)
         }
     }
-    @ViewBuilder private func history(_ value: TransportOverview) -> some View {
+    private func modeCard(_ mode:TransportMode?,title:String,icon:String,value:Int?) -> some View {
+        Button { selection.mode = mode; selection.port = ""; selection.movement = nil } label: {
+            VStack(alignment:.leading,spacing:7) {
+                HStack { Image(systemName:icon).foregroundStyle(mode == .aviation ? ClaritasPalette.dataBlue(for:colorScheme) : ClaritasPalette.orange); Spacer(); Text(value?.formatted() ?? "—").font(.headline.monospacedDigit()) }
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+            }.padding(10).frame(maxWidth:.infinity).background(ClaritasPalette.shellSurface(for:colorScheme),in:RoundedRectangle(cornerRadius:12))
+                .overlay(RoundedRectangle(cornerRadius:12).stroke(selection.mode == mode ? ClaritasPalette.orange : ClaritasPalette.shellBorder(for:colorScheme),lineWidth:1))
+        }.buttonStyle(.plain).accessibilityAddTraits(selection.mode == mode ? .isSelected : [])
+    }
+    private var status: some View {
+        VStack(alignment:.leading,spacing:4) {
+            if failed { Text("Current positions unavailable · refresh to retry") }
+            else if mapPositions?.cohort?.available == false { Text("Vehicle identities for this historical period are no longer retained") }
+            else { Text(mapPositions.map{"\($0.entities.count)\($0.truncated ? " sampled" : "") current map positions"} ?? "Updating current positions…") }
+            HStack { Label("Vessels",systemImage:"circle.fill").foregroundStyle(ClaritasPalette.orange); Label("Aircraft",systemImage:"circle.fill").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }
+        }.font(.caption2).foregroundStyle(.secondary)
+    }
+    private var selectionChips: some View {
+        HStack(spacing:10) {
+            if !selection.corridor.isEmpty { Button("\(selection.corridor) ×") { selection.corridor = "" } }
+            if !selection.port.isEmpty { Button("\(selection.port) ×") { selection.port = "" } }
+            if selection.from != nil { Button("Selected activity ×") { selection.from = nil; selection.to = nil; selection.movement = nil } }
+        }.font(.caption).buttonStyle(.bordered)
+    }
+    private var connectionHeatmap: some View {
+        VStack(alignment:.leading,spacing:10) {
+            HStack { Text("Biggest corridors").font(.subheadline.weight(.semibold)); Spacer() }
+            if country != nil { Picker("Connection period",selection:$connectionDays) { Text("Now").tag(0); Text("7d").tag(7); Text("30d").tag(30); Text("90d").tag(90) }.pickerStyle(.segmented) }
+            let tiles = corridorTiles
+            LazyVGrid(columns:[GridItem(.flexible()),GridItem(.flexible()),GridItem(.flexible())],spacing:7) {
+                ForEach(Array(tiles.prefix(showsAllConnections ? tiles.count : 6)),id:\.country) { tile in
+                    Button {
+                        if country != nil { selection.corridor = selection.corridor == tile.country ? "" : tile.country; selection.port = "" }
+                        else if let destination = tile.country.components(separatedBy:" → ").last { onSelectCountry?(destination) }
+                    } label: {
+                        VStack(alignment:.leading,spacing:7) {
+                            Text((country == nil ? tile.country.components(separatedBy:" → ").map{Locale.current.localizedString(forRegionCode:$0) ?? $0}.joined(separator:" → ") : Locale.current.localizedString(forRegionCode:tile.country) ?? tile.country)+(tile.proxy ? " †" : "")).font(.caption2).lineLimit(2)
+                            Text(tile.count.formatted()).font(.headline.monospacedDigit())
+                            GeometryReader { geometry in HStack(spacing:0) { Rectangle().fill(ClaritasPalette.orange).frame(width:geometry.size.width*CGFloat(tile.sea)/CGFloat(max(1,tile.count))); Rectangle().fill(ClaritasPalette.dataBlue(for:colorScheme)) } }.frame(height:3)
+                        }.padding(10).frame(maxWidth:.infinity,alignment:.leading)
+                            .background(ClaritasPalette.orange.opacity(0.07+0.23*Double(tile.count)/Double(max(1,tiles.first?.count ?? 1))),in:RoundedRectangle(cornerRadius:10))
+                            .overlay(RoundedRectangle(cornerRadius:10).stroke(selection.corridor == tile.country ? ClaritasPalette.orange : ClaritasPalette.shellBorder(for:colorScheme),lineWidth:1))
+                    }.buttonStyle(.plain)
+                }
+            }
+            if tiles.count > 6 { Button(showsAllConnections ? "Show top six" : "See all \(tiles.count) connections") { showsAllConnections.toggle() }.font(.caption).frame(minHeight:36) }
+            Text(connectionDays > 0 ? "Daily peak samples · select to filter current positions. † Includes vessel flag links, not observed origins." : "Current country links · tap a country tile or map country to filter positions. † Flag link, not observed origin.").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+    private var corridorTiles: [(country:String,count:Int,sea:Int,proxy:Bool)] {
+        var totals:[String:(Int,Int,Bool)] = [:]
+        for route in connections {
+            let other = country == nil ? "\(route.origin) → \(route.destination)" : route.origin == country ? route.destination : route.origin
+            if other == country { continue }
+            let current = totals[other] ?? (0,0,false)
+            totals[other] = (current.0+route.weight,current.1+(route.mode == "maritime" ? route.weight : 0),current.2 || route.proxy)
+        }
+        return totals.map{(country:$0.key,count:$0.value.0,sea:$0.value.1,proxy:$0.value.2)}.sorted{$0.count == $1.count ? $0.country < $1.country : $0.count > $1.count}
+    }
+    @ViewBuilder private func history(_ value:TransportOverview) -> some View {
         if let history = value.history {
-            Text("Movement & activity over time").font(.headline)
-            Picker("Retained history window", selection: $days) {
-                Text("7 days").tag(7); Text("30 days").tag(30); Text("90 days").tag(90); Text("Year").tag(365)
-            }.pickerStyle(.segmented)
+            Text("Activity over time").font(.subheadline.weight(.semibold))
+            Picker("History window",selection:$days) { Text("7d").tag(7); Text("30d").tag(30); Text("90d").tag(90); Text("Year").tag(365) }.pickerStyle(.segmented)
             let points = Array(history.series.suffix(days))
-            Text("Daily peak sampled vehicles").font(.caption.weight(.semibold))
-            Chart(points) { point in
-                if let date = point.date, point.observed_hours > 0 {
-                    if let vessels = point.maritime_entities {
-                        BarMark(x: .value("Date", date, unit: .day), y: .value("Sampled vehicles", vessels)).foregroundStyle(by: .value("Mode", "Shipping"))
-                    }
-                    if let flights = point.aviation_entities {
-                        BarMark(x: .value("Date", date, unit: .day), y: .value("Sampled vehicles", flights)).foregroundStyle(by: .value("Mode", "Flights"))
-                    }
-                }
-            }.frame(height: 160)
-                .chartForegroundStyleScale(["Shipping": ClaritasPalette.orange, "Flights": ClaritasPalette.dataBlue(for: colorScheme)])
-            Text("\(points.filter { $0.observed_hours > 0 }.count) observed days in this window. Gaps indicate missing observations, not zero traffic.")
-                .font(.caption2).foregroundStyle(.secondary)
-            if points.contains(where: { $0.ship_departures != nil || $0.ship_arrivals != nil }) {
-                Text("Monitored-port arrivals & departures").font(.caption.weight(.semibold))
-                Chart(points) { point in
-                    if let date = point.date {
-                        if let arrivals = point.ship_arrivals {
-                            BarMark(x: .value("Date", date, unit: .day), y: .value("Movements", arrivals)).foregroundStyle(by: .value("Movement", "Arrivals"))
-                        }
-                        if let departures = point.ship_departures {
-                            BarMark(x: .value("Date", date, unit: .day), y: .value("Movements", departures)).foregroundStyle(by: .value("Movement", "Departures"))
-                        }
-                    }
-                }.frame(height: 140)
-            }
-            DisclosureGroup("Period comparisons & coverage") {
-            ForEach(history.comparisons ?? []) { comparison in
-                VStack(alignment: .leading, spacing: 5) {
-                    HStack {
-                        Text(comparison.label).font(.caption.weight(.semibold))
-                        Spacer()
-                        Text(comparison.comparable ? comparison.change_percent.map { String(format: "%+.1f%%", $0) } ?? "No percentage baseline" : "Insufficient coverage")
-                            .font(.caption.monospacedDigit())
-                    }
-                    Text(comparison.notice).font(.caption2).foregroundStyle(.secondary)
-                    Text("Observed days: \(comparison.current.observed_days)/30 current · \(comparison.previous.observed_days)/30 comparison. Source-observation hours: \(comparison.current.observation_hours) / \(comparison.previous.observation_hours).")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }.padding(.vertical, 5)
-            }
-            Text("Retained activity: \(history.available_from.map { String($0.prefix(10)) } ?? "not available") – \(history.available_to.map { String($0.prefix(10)) } ?? "not available"). Daily activity retention \(history.activity_retention_days ?? history.requested_days) days; monitored-port movements \(history.movement_retention_days ?? 100) days.")
-                .font(.caption2).foregroundStyle(.secondary)
-            DisclosureGroup("History coverage & methods") { Text(history.methodology).font(.caption2) }
-            }
-        } else if country == nil {
-            Text("Select a country on the world map to explore retained daily activity, port volumes and month/year comparisons where coverage exists.").font(.caption).foregroundStyle(.secondary)
-        }
-    }
-    @ViewBuilder private func ports(_ value: TransportOverview) -> some View {
-        if let ports = value.ports, !ports.isEmpty {
-            DisclosureGroup("Monitored ports · \(ports.count)") {
-                ForEach(ports) { port in
-                    HStack {
-                        Text("\(port.location_name) · \(port.country)").font(.caption.weight(.semibold))
-                        Spacer()
-                        Text("\(port.arrivals) in · \(port.departures) out").font(.caption.monospacedDigit())
-                    }.padding(.vertical, 6)
-                }
-                Text("Tracked transitions in the past 24 hours.").font(.caption2).foregroundStyle(.secondary)
+            TransportVisualPlot(rows:points.flatMap { point -> [TransportPlotSample] in
+                guard let date = point.date else { return [] }
+                var result:[TransportPlotSample] = []
+                if selection.mode != .aviation, let sea = point.maritime_entities { result.append(TransportPlotSample(date:date,value:sea,mode:"maritime")) }
+                if selection.mode != .maritime, let air = point.aviation_entities { result.append(TransportPlotSample(date:date,value:air,mode:"aviation")) }
+                return result
+            },stepHours:24,selected:selection.from) { selectWindow($0,hours:24) }
+            Text("Daily peak samples · gaps mean missing observations; the latest day may be partial. Tap a day to locate its vehicles now.").font(.caption2).foregroundStyle(.secondary)
+            if selection.mode != .aviation {
+            Text("Departures").font(.subheadline.weight(.semibold))
+            TransportVisualPlot(rows:points.compactMap { point in guard let date = point.date, let value = point.ship_departures else { return nil }; return TransportPlotSample(date:date,value:value,mode:"maritime") },stepHours:24,selected:selection.movement == "departure" ? selection.from : nil) { date in selection.mode = .maritime; selection.port = ""; selectWindow(date,hours:24,movement:"departure") }
+            Text("Recorded port exits · tap a day for those vessels’ current locations.").font(.caption2).foregroundStyle(.secondary)
             }
         }
     }
-    @ViewBuilder private func routes(_ value: TransportOverview) -> some View {
-        if !value.routes.isEmpty {
-            DisclosureGroup("Observed corridors · \(value.routes.count)") {
-                ForEach(value.routes.prefix(30)) { route in
-                    HStack {
-                        Image(systemName: route.mode == .aviation ? "airplane" : "ferry")
-                        Text("\(route.origin_name) → \(route.destination_name)").font(.caption)
-                        Spacer()
-                        Text("\(route.active_count)").font(.caption.monospacedDigit())
-                    }.padding(.vertical, 6)
-                }
+    @ViewBuilder private var portFrequency: some View {
+        if selection.mode != .aviation, let ports = portActivity?.ports, !ports.isEmpty {
+            HStack { Text("Ports & departures").font(.subheadline.weight(.semibold)); Spacer(); Text("Recorded · 24h").font(.caption2).foregroundStyle(.secondary) }
+            ForEach(ports.prefix(8)) { port in
+                Button { selection.mode = .maritime; selection.port = selection.port == port.name ? "" : port.name; selection.corridor = ""; selection.from = nil; selection.to = nil; selection.movement = nil } label: {
+                    HStack(spacing:10) {
+                        VStack(alignment:.leading,spacing:3) { Text(port.name).font(.caption.weight(.semibold)); Text("\(port.arrivals) arrivals").font(.caption2).foregroundStyle(.secondary) }.frame(maxWidth:.infinity,alignment:.leading)
+                        Chart(port.hours) { hour in if let date = hour.date { BarMark(x:.value("UTC hour",date),y:.value("Departures",hour.departures)).foregroundStyle(ClaritasPalette.orange) } }.chartXAxis(.hidden).chartYAxis(.hidden).frame(width:85,height:28)
+                        VStack(alignment:.trailing,spacing:3) { Text(port.departures.formatted()).font(.headline.monospacedDigit()); Text("departures / 24h").font(.system(size:9)).foregroundStyle(.secondary) }
+                    }.padding(.vertical,8).contentShape(Rectangle())
+                }.buttonStyle(.plain)
             }
+            Text("Hourly departure frequency · select a port to locate its current vessels. Geofence samples, not complete authority totals.").font(.caption2).foregroundStyle(.secondary)
         }
     }
-    private var entityBrowser: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Browse vessels & flights").font(.headline)
-            TextField("Name, flight, vessel or route", text: $search).textFieldStyle(.roundedBorder)
-            Text("\(entities.count) matching retained positions · bounded to 240 recent samples").font(.caption2).foregroundStyle(.secondary)
-            ForEach(entities.prefix(80)) { entity in
-                Button { selectedEntity = entity } label: {
-                    HStack {
-                        Image(systemName: entity.mode == .aviation ? "airplane" : "ferry")
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(entity.display_name ?? entity.flight_number ?? entity.callsign ?? entity.entity_id).font(.caption.weight(.semibold))
-                            Text(entity.route_label ?? entity.current_location_name ?? "Route unresolved").font(.caption2).foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Image(systemName: "chevron.right").font(.caption2)
-                    }.frame(minHeight: 44)
+    private var vehicleStrip: some View {
+        VStack(alignment:.leading,spacing:8) {
+            HStack { Text("On the map").font(.subheadline.weight(.semibold)); Spacer(); Button(showsVehicles ? "Show less" : "Find a vehicle") { showsVehicles.toggle() }.font(.caption) }
+            if showsVehicles { TextField("Vessel, flight or route",text:$search).textFieldStyle(.roundedBorder) }
+            ForEach(entities.prefix(showsVehicles ? 40 : 4)) { entity in
+                Button { onSelectVehicle?(entity) } label: {
+                    HStack { Image(systemName:entity.mode == .aviation ? "airplane" : "ferry"); VStack(alignment:.leading,spacing:3) { Text(entity.flight_number ?? entity.display_name ?? entity.entity_id).font(.caption.weight(.semibold)); Text(entity.route_label ?? entity.current_location_name ?? entity.entity_id).font(.caption2).foregroundStyle(.secondary).lineLimit(1) }; Spacer(); Image(systemName:"arrow.up.right").font(.caption2) }.frame(minHeight:44)
                 }.buttonStyle(.plain)
             }
         }
     }
+    @ViewBuilder private var reporting: some View {
+        let related = scopeRelatedEvents(topic:"transport",country:country,overview:topicOverview,fallback:model.intelligenceOverview)
+        if !related.isEmpty {
+            Text("In the news").font(.subheadline.weight(.semibold))
+            ForEach(related.prefix(3)) { event in Button { model.selectIntelligenceEvent(event) } label: { Text(event.title).font(.caption.weight(.semibold)).frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,6) }.buttonStyle(.plain) }
+        }
+    }
+    private func selectWindow(_ date:Date,hours:Int,movement:String? = nil) {
+        let from = Date(timeIntervalSince1970:floor(date.timeIntervalSince1970/Double(hours*3600))*Double(hours*3600))
+        if selection.from == from && selection.movement == movement { selection.from = nil; selection.to = nil; selection.movement = nil }
+        else { selection.from = from; selection.to = from.addingTimeInterval(Double(hours*3600)); selection.movement = movement }
+    }
+    private func publishMap() {
+        var countries:[String:Int] = [:]
+        let chosen = connections.filter{selection.corridor.isEmpty || $0.origin == selection.corridor || $0.destination == selection.corridor}
+        if selection.from != nil || !selection.port.isEmpty {
+            for entity in mapPositions?.entities ?? [] { for iso in Set(entity.country_links.map(\.country)) { countries[iso,default:0] += 1 } }
+        } else {
+            for row in chosen { for iso in Set([row.origin,row.destination]) { countries[iso,default:0] += row.weight } }
+            if countries.isEmpty { for row in overview?.countries ?? [] { countries[row.country] = selection.mode == .maritime ? row.maritime.active : selection.mode == .aviation ? row.aviation.active : row.active_count } }
+        }
+        onMapChange?(TransportMapSnapshot(country:country,selectionKey:selection.key,positions:positionsKey == selection.key ? positions : nil,countries:countries,corridors:selection.corridor.isEmpty ? [] : Array(chosen.prefix(2)),ports:portActivity?.ports ?? []))
+    }
+    private func loadOverview() async {
+        overview = nil; overviewFailed = false
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { overview = model.mapReviewScopedTransport; publishMap(); return }
+        #endif
+        do { let value = try await model.api.fetchTransportOverview(detail:country == nil ? "aggregate" : "full",country:country,entityLimit:25,historyDays:400); guard !Task.isCancelled else { return }; overview = value; publishMap() }
+        catch { if !Task.isCancelled { overviewFailed = true } }
+    }
+    private func loadPositions() async {
+        if positionsKey != selection.key { positions = nil }
+        positionsKey = selection.key; failed = false; publishMap()
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { positions = TransportPositions(generated_at:model.mapReviewScopedTransport?.generated_at ?? "",entities:model.mapReviewScopedTransport?.entities ?? [],limit:600,truncated:false,cohort:nil); publishMap(); return }
+        #endif
+        while !Task.isCancelled {
+            do { let value = try await model.api.fetchTransportPositions(country:country,selection:selection); guard !Task.isCancelled else { return }; positions = value; publishMap() }
+            catch { guard !Task.isCancelled else { return }; failed = true; return }
+            do { try await Task.sleep(nanoseconds:120_000_000_000) } catch { return }
+        }
+    }
+}
+
+private struct TransportPlotSample: Identifiable {
+    let date:Date; let value:Int; let mode:String
+    var id:String { "\(date.timeIntervalSince1970):\(mode)" }
+}
+private struct TransportVisualPlot: View {
+    let rows:[TransportPlotSample]; let stepHours:Int; let selected:Date?; let onSelect:(Date)->Void
+    @Environment(\.colorScheme) private var colorScheme
+    private var segments:[String:String] {
+        var result:[String:String] = [:]
+        for mode in ["maritime","aviation"] {
+            var previous = Date.distantPast; var segment = 0
+            for row in rows.filter({$0.mode == mode}).sorted(by:{$0.date < $1.date}) {
+                if row.date.timeIntervalSince(previous) > Double(stepHours*5400) { segment += 1 }
+                result[row.id] = "\(mode):\(segment)"; previous = row.date
+            }
+        }
+        return result
+    }
+    var body: some View {
+        if rows.isEmpty { Text("No retained samples").font(.caption2).foregroundStyle(.secondary) }
+        else {
+            let groups = segments
+            Chart {
+                ForEach(rows.sorted(by:{$0.date < $1.date})) { row in
+                    LineMark(x:.value("UTC",row.date),y:.value("Observed",row.value),series:.value("Segment",groups[row.id] ?? row.mode))
+                        .foregroundStyle(by:.value("Mode",row.mode == "maritime" ? "Vessels" : "Aircraft"))
+                    PointMark(x:.value("UTC",row.date),y:.value("Observed",row.value)).symbolSize(7)
+                        .foregroundStyle(by:.value("Mode",row.mode == "maritime" ? "Vessels" : "Aircraft"))
+                }
+                if let selected, let first = rows.map(\.date).min(), let last = rows.map(\.date).max(), selected >= first, selected <= last { RuleMark(x:.value("Selected",selected)).foregroundStyle(ClaritasPalette.shellInk(for:colorScheme)).lineStyle(StrokeStyle(lineWidth:1,dash:[3,3])) }
+            }
+            .chartForegroundStyleScale(["Vessels":ClaritasPalette.orange,"Aircraft":ClaritasPalette.dataBlue(for:colorScheme)])
+            .chartLegend(.hidden)
+            .chartXAxis { AxisMarks(values:.automatic(desiredCount:3)) { value in AxisGridLine(); AxisValueLabel { if let date = value.as(Date.self) { Text(label(date)) } } } }
+            .chartYAxis { AxisMarks(position:.leading,values:.automatic(desiredCount:3)) }
+            .chartOverlay { proxy in GeometryReader { geometry in Color.clear.contentShape(Rectangle()).gesture(SpatialTapGesture().onEnded { value in
+                let plot = geometry[proxy.plotAreaFrame]
+                guard plot.contains(value.location), let date:Date = proxy.value(atX:value.location.x-plot.minX) else { return }
+                let bucket = Date(timeIntervalSince1970:floor(date.timeIntervalSince1970/Double(stepHours*3600))*Double(stepHours*3600))
+                if rows.contains(where:{$0.date == bucket}) { onSelect(bucket) }
+            }) } }.frame(height:130)
+        }
+    }
+    private func label(_ date:Date)->String { let format = DateFormatter();format.timeZone = TimeZone(secondsFromGMT:0);format.dateFormat = stepHours == 1 ? "HH:mm" : "d MMM";return format.string(from:date) }
 }
 
 /// Topic membership includes news-led developments, which may have no transport-origin evidence.

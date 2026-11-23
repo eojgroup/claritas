@@ -94,17 +94,14 @@ it("leaves country focus to the profile instead of scheduling an overview scroll
   expect(onSelect).toHaveBeenCalledWith(null, { focus: false });
 });
 
-it("returns to developments when a country is selected and keeps transport available for that country", async () => {
+it("keeps explicit transport map browsing scoped while developments remains the default", async () => {
   render(<Workspace />);
   const map = screen.getByTestId("map-camera");
   expect(within(screen.getByRole("navigation", { name: "Explore selected scope" })).queryByRole("button", { name: "Markets" })).toBeNull();
   fireEvent.click(within(screen.getByRole("navigation", { name: "Explore selected scope" })).getByRole("button", { name: "Transport" }));
   expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("World transport history");
   fireEvent.click(screen.getByRole("button", { name: "Select Sweden" }));
-  expect(screen.queryByRole("region", { name: "Transport explorer" })).toBeNull();
-  expect(screen.getByRole("region", { name: "Latest developments" })).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Developments" }).getAttribute("aria-pressed")).toBe("true");
-  fireEvent.click(within(screen.getByRole("navigation", { name: "Explore selected scope" })).getByRole("button", { name: "Transport" }));
+  expect(screen.getByRole("button", { name: "Transport" }).getAttribute("aria-pressed")).toBe("true");
   expect((await screen.findByRole("region", { name: "Transport explorer" })).textContent).toContain("SE transport history");
   fireEvent.click(screen.getByRole("button", { name: "Developments" }));
   expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();

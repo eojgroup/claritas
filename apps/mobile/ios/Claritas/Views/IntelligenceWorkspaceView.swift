@@ -7,6 +7,7 @@ struct IntelligenceWorkspaceView: View {
     /// A selected story stays beside the world map instead of opening another workspace.
     var contextualEventID: String? = nil
     var onOpenEvent: ((IntelligenceEvent) -> Void)? = nil
+    var onDetailLoaded: ((IntelligenceEventDetail) -> Void)? = nil
     @EnvironmentObject private var model: AppModel
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -38,9 +39,10 @@ struct IntelligenceWorkspaceView: View {
     @State private var weatherRetry = 0
     @State private var showsMovements = false
 
-    init(contextualEventID: String? = nil, onOpenEvent: ((IntelligenceEvent) -> Void)? = nil) {
+    init(contextualEventID: String? = nil, onOpenEvent: ((IntelligenceEvent) -> Void)? = nil, onDetailLoaded: ((IntelligenceEventDetail) -> Void)? = nil) {
         self.contextualEventID = contextualEventID
         self.onOpenEvent = onOpenEvent
+        self.onDetailLoaded = onDetailLoaded
         #if DEBUG
         if ProcessInfo.processInfo.arguments.contains("-qa-event-snapshot") {
             _visualLayer = State(initialValue: "transport")
@@ -1034,6 +1036,7 @@ struct IntelligenceWorkspaceView: View {
             #endif
             guard !Task.isCancelled, self.selectedID == selectedID, detailRequestID == requestID else { return }
             detail = loaded
+            onDetailLoaded?(loaded)
             if contextualEventID != nil, model.selectedIntelligenceEventID == loaded.event.id {
                 model.selectIntelligenceEvent(loaded.event)
             }

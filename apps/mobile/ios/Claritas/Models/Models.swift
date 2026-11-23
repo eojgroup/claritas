@@ -2377,6 +2377,7 @@ struct TransportCountryAggregate: Codable, Identifiable {
 }
 
 struct TransportRouteAggregate: Codable, Identifiable {
+    var origin_basis: String? = nil
     let mode: TransportMode
     let origin_country: String
     let origin_name: String
@@ -4253,4 +4254,42 @@ struct IntelligenceOverview: Codable {
 struct TransportOutlook: Decodable {
  struct Corridor: Decodable, Identifiable { let origin:String; let destination:String; let mode:String; let observed_days:Int; let sample_days:Int; let flag_proxies:Int; var id:String { "\(origin):\(destination):\(mode)" } }
  let country:String; let days:Int; let start:String; let end:String; let notice:String; let corridors:[Corridor]
+}
+
+struct TransportVisualSelection: Equatable {
+    var mode: TransportMode? = nil
+    var corridor = ""
+    var port = ""
+    var from: Date? = nil
+    var to: Date? = nil
+    var movement: String? = nil
+    var key: String { "\(mode?.rawValue ?? "all")|\(corridor)|\(port)|\(from?.timeIntervalSince1970 ?? 0)|\(to?.timeIntervalSince1970 ?? 0)|\(movement ?? "")" }
+}
+struct TransportPositions: Decodable {
+    struct Cohort: Decodable { let from: String; let to: String; let available: Bool }
+    let generated_at: String
+    let entities: [TransportEntity]
+    let limit: Int
+    let truncated: Bool
+    let cohort: Cohort?
+}
+struct TransportPortActivity: Decodable {
+    struct Port: Decodable, Identifiable {
+        struct Hour: Decodable, Identifiable {
+            let bucket: String; let departures: Int; let arrivals: Int
+            var id: String { bucket }; var date: Date? { APIDateParser.parse(bucket) }
+        }
+        let country: String; let name: String; let latitude: Double; let longitude: Double
+        let departures: Int; let arrivals: Int; let hours: [Hour]
+        var id: String { "\(country):\(name)" }
+    }
+    let generated_at: String; let window_hours: Int; let ports: [Port]
+}
+struct TransportVisualCorridor: Identifiable {
+    let origin: String; let destination: String; let mode: String; let weight: Int; let proxy: Bool
+    var id: String { "\(origin):\(destination):\(mode)" }
+}
+struct TransportMapSnapshot {
+    let country: String?; let selectionKey: String; let positions: TransportPositions?
+    let countries: [String: Int]; let corridors: [TransportVisualCorridor]; let ports: [TransportPortActivity.Port]
 }

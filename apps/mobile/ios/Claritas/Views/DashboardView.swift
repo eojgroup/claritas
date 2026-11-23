@@ -5272,11 +5272,12 @@ struct WorldMapWorkspace: View {
     var refreshesAutomatically = true
     @State private var showsBriefing = false
     @State private var exploration = "developments"
-    @State private var outlook: TransportOutlook?
-    @State private var outlookDays = 7
-    @State private var outlookFailed = false
-    @State private var scopedTransport: TransportOverview?
+    @State private var transportMap: TransportMapSnapshot?
+    @State private var transportSelection = TransportVisualSelection()
     @State private var mappedTransportEntity: TransportEntity?
+    @State private var keepsTransportScope = false
+    @State private var eventCountries: [String] = []
+    private var currentTransport: TransportMapSnapshot? { transportMap?.country == model.selectedCountry && transportMap?.selectionKey == transportSelection.key ? transportMap : nil }
 
     init(refreshesAutomatically: Bool = true, briefingInitiallyOpen: Bool = false) {
         var briefing = briefingInitiallyOpen
@@ -5302,11 +5303,15 @@ struct WorldMapWorkspace: View {
 
     private var points: [CountryBubblePoint] {
         if exploration == "transport" {
-            return (scopedTransport?.countries ?? []).enumerated().compactMap { index, country in
-                guard let coordinate = CountryCentroidLookup.coordinate(for: country.country) else { return nil }
-                return CountryBubblePoint(id: "transport-\(country.country)", iso: country.country,
-                    valueLabel: "\(country.active_count) tracked links", detail: "\(country.maritime.active) vessels · \(country.aviation.active) aircraft",
-                    magnitude: Double(country.active_count), colorValue: Double(country.active_count), rank: index + 1, coordinate: coordinate)
+            return (currentTransport?.countries ?? [:]).sorted{$0.value > $1.value}.enumerated().compactMap { index, row in
+                guard let coordinate = CountryCentroidLookup.coordinate(for:row.key) else { return nil }
+                return CountryBubblePoint(id:"transport-\(row.key)",iso:row.key,valueLabel:"\(row.value) linked samples",detail:"Selected transport activity",magnitude:Double(row.value),colorValue:Double(row.value),rank:index+1,coordinate:coordinate)
+            }
+        }
+        if model.selectedIntelligenceEventID != nil, eventCountries.count > 1 {
+            return eventCountries.enumerated().compactMap { index, iso in
+                guard let coordinate = CountryCentroidLookup.coordinate(for:iso) else { return nil }
+                return CountryBubblePoint(id:"event-link-\(iso)",iso:iso,valueLabel:"Source-linked country",detail:"Event location link, not proof of causation",magnitude:100,colorValue:100,rank:index+1,coordinate:coordinate)
             }
         }
         return (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
@@ -5343,12 +5348,14 @@ struct WorldMapWorkspace: View {
             let panelHeight = min(stops[2], max(stops[0], stops[panelStop] - panelDrag))
             ZStack(alignment: wide ? .topLeading : .bottom) {
                 ClaritasPalette.mapBackground(for: colorScheme).ignoresSafeArea()
-                NativeSignalMap(points: points, events: events, mode: exploration == "transport" ? .transport : .signals, mapRegion: .global,
+                NativeSignalMap(points: points, events: exploration == "transport" ? [] : events, mode: exploration == "transport" ? .transport : .signals, mapRegion: .global,
                     compactPresentation: geometry.size.width < 600, selectedCountry: model.selectedCountry,
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: nil,
-                    transportEntities: exploration == "transport" ? scopedTransport?.entities ?? [] : [], resetToken: 0, onSelectCountry: selectCountry,
+                    transportEntities: exploration == "transport" ? currentTransport?.positions?.entities.filter { mappedTransportEntity == nil || $0.id == mappedTransportEntity?.id } ?? [] : [], resetToken: 0, onSelectCountry: { exploration == "transport" ? selectTransportCountry($0) : selectCountry($0) },
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
-                    immersive: true, corridors: exploration == "transport" ? outlook?.corridors ?? [] : [], onSelectTransportEntity: { mappedTransportEntity = $0 })
+                    immersive: true, corridors: exploration == "transport" ? currentTransport?.corridors ?? [] : model.selectedIntelligenceEventID != nil && eventCountries.count > 1 ? eventCountries.dropFirst().map{TransportVisualCorridor(origin:eventCountries[0],destination:$0,mode:"event",weight:1,proxy:false)} : [],
+                    onSelectTransportEntity: { mappedTransportEntity = $0 }, transportPorts: exploration == "transport" ? currentTransport?.ports ?? [] : [],
+                    onSelectPort: { port in transportSelection = TransportVisualSelection(mode:.maritime,port:port.name) }, focusedTransportID: mappedTransportEntity?.id, selectedPort:transportSelection.port)
                     // Fit the geography to the unobstructed area. Opening context
                     // leaves this map instance (and its camera) mounted.
                     .padding(.leading, wide && panelStop != 0 ? sideWidth + 16 : 0)
@@ -5386,12 +5393,14 @@ struct WorldMapWorkspace: View {
             }
         }
         .onChange(of: model.selectedIntelligenceEventID) { id in
-            if id != nil { showsBriefing = false; exploration = "developments"; profileCountry = nil; revealContext() }
+            if id != nil { eventCountries = []; showsBriefing = false; exploration = "developments"; profileCountry = nil; revealContext() }
         }
         .onChange(of: model.selectedCountry) { country in
-            scopedTransport = nil
+            transportMap = nil
+            transportSelection = TransportVisualSelection()
             countryContextExpanded = false
-            exploration = "developments"
+            if !keepsTransportScope { exploration = "developments" }
+            keepsTransportScope = false
             if model.selectedIntelligenceEventID == nil {
                 showsBriefing = false; profileCountry = country
                 if country != nil { revealContext() }
@@ -5404,15 +5413,6 @@ struct WorldMapWorkspace: View {
                 countryContextExpanded = destination == "markets"
                 showsBriefing = false; revealContext()
             }
-        }
-        .task(id: "\(exploration)|\(model.selectedCountry ?? "global")|\(outlookDays)") {
-            outlook = nil; outlookFailed = false
-            guard exploration == "transport", let country = model.selectedCountry else { return }
-            #if DEBUG
-            if ProcessInfo.processInfo.arguments.contains("-qa-map-snapshot") { return }
-            #endif
-            do { let value = try await model.api.fetchTransportOutlook(country: country, days: outlookDays); guard !Task.isCancelled else { return }; outlook = value }
-            catch { if !Task.isCancelled { outlookFailed = true } }
         }
         .sheet(item: $mappedTransportEntity) { entity in
             NavigationStack {
@@ -5489,26 +5489,12 @@ struct WorldMapWorkspace: View {
             if showsBriefing {
                 DailyBriefingWorkspaceView(embedded: true, automaticallyRefresh: refreshesAutomatically)
             } else if model.selectedIntelligenceEventID != nil, let id = model.selectedIntelligenceEventID {
-                IntelligenceWorkspaceView(contextualEventID: id)
+                IntelligenceWorkspaceView(contextualEventID:id,onDetailLoaded:{ detail in
+                    guard detail.event.id == model.selectedIntelligenceEventID else { return }
+                    eventCountries = Array(Set(([detail.event.primary_country_iso2]+detail.locations.filter{$0.confidence >= 0.5}.map(\.country_iso2)).compactMap{$0})).sorted()
+                })
             } else if exploration == "transport" {
-                VStack(alignment: .leading, spacing: 8) {
-                    if model.selectedCountry != nil {
-                        Picker("Country corridor outlook", selection: $outlookDays) { ForEach([7,30,90], id: \.self) { days in Text("\(days) days").tag(days) } }.pickerStyle(.segmented).padding(.horizontal,14)
-                        if let outlook {
-                            DisclosureGroup("Frequent destinations & corridors · \(outlook.days) completed days") {
-                                ScrollView { VStack(alignment: .leading, spacing: 8) {
-                                    Text(outlook.notice).font(.caption2).foregroundStyle(.secondary)
-                                    ForEach(outlook.corridors) { route in
-                                        Button { selectCountry(route.destination == outlook.country ? route.origin : route.destination) } label: {
-                                            Text("\(route.origin) → \(route.destination) · \(route.mode) · \(route.observed_days)/\(outlook.days) days\(route.flag_proxies > 0 ? " · flag estimates included" : "")").font(.caption).frame(maxWidth:.infinity,alignment:.leading).padding(.vertical,5)
-                                        }.buttonStyle(.plain)
-                                    }
-                                }}.frame(maxHeight:180)
-                            }.padding(.horizontal,14)
-                        } else { Text(outlookFailed ? "Saved corridor outlook unavailable" : "Loading saved corridor outlook…").font(.caption).padding(.horizontal,14) }
-                    }
-                    ScopeTransportExplorer(country: model.selectedCountry, onOverview: { scopedTransport = $0 })
-                }
+                ScopeTransportExplorer(country:model.selectedCountry,selection:$transportSelection,onMapChange:{transportMap = $0},onSelectVehicle:{mappedTransportEntity = $0},onSelectCountry:selectTransportCountry)
             } else {
                 ScrollViewReader { reader in
                     ScrollView {
@@ -5544,8 +5530,21 @@ struct WorldMapWorkspace: View {
     private func revealContext() {
         if panelStop == 0 { withAnimation(.easeInOut(duration: 0.22)) { panelStop = 1 } }
     }
+    private func selectTransportCountry(_ country:String) {
+        if let origin = model.selectedCountry {
+            transportSelection.corridor = origin == country || transportSelection.corridor == country ? "" : country
+            transportSelection.port = ""
+        } else {
+            keepsTransportScope = true
+            model.selectedCountry = country
+            profileCountry = country
+        }
+        revealContext()
+    }
     private func selectCountry(_ country: String) {
         exploration = "developments"
+        keepsTransportScope = false
+        transportSelection = TransportVisualSelection()
         countryContextExpanded = false
         showsBriefing = false
         model.selectedIntelligenceEventID = nil
@@ -5572,8 +5571,12 @@ private struct NativeSignalMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
     var immersive = false
-    var corridors: [TransportOutlook.Corridor] = []
+    var corridors: [TransportVisualCorridor] = []
     var onSelectTransportEntity: ((TransportEntity) -> Void)? = nil
+    var transportPorts: [TransportPortActivity.Port] = []
+    var onSelectPort: ((TransportPortActivity.Port) -> Void)? = nil
+    var focusedTransportID: String? = nil
+    var selectedPort: String = ""
 
     var body: some View {
         InteractiveCountryBubbleMap(
@@ -5592,10 +5595,18 @@ private struct NativeSignalMap: View {
             onSelectEvent: onSelectEvent,
             allowsSingleFingerPan: immersive,
             corridors: corridors,
-            onSelectTransportEntity: onSelectTransportEntity
+            onSelectTransportEntity: onSelectTransportEntity,
+            transportPorts:transportPorts,onSelectPort:onSelectPort,focusedTransportID:focusedTransportID,selectedPort:selectedPort
         )
         .overlay(alignment: .bottomLeading) {
-            Text("Natural Earth · Claritas signals")
+            VStack(alignment:.leading,spacing:4) {
+                if mode == .transport {
+                    Text("TRANSPORT COUNTRY LINKS").font(.system(size:9,weight:.semibold))
+                    Text("Warmer = more linked activity").font(.system(size:10))
+                    HStack(spacing:8) { Text("● Vessels").foregroundStyle(ClaritasPalette.orange); Text("● Aircraft").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)); Text("□ Ports") }.font(.system(size:10))
+                } else if points.first?.id.hasPrefix("event-link-") == true { Text("Source-linked event countries").font(.system(size:10,weight:.medium)) }
+                Text("Natural Earth · Claritas")
+            }
                 .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .padding(.horizontal, 7)
@@ -5914,10 +5925,15 @@ private struct InteractiveCountryBubbleMap: View {
     let onSelectCountry: (String) -> Void
     let onSelectEvent: (IntelligenceEvent) -> Void
     var allowsSingleFingerPan = false
-    var corridors: [TransportOutlook.Corridor] = []
+    var corridors: [TransportVisualCorridor] = []
     var onSelectTransportEntity: ((TransportEntity) -> Void)? = nil
+    var transportPorts: [TransportPortActivity.Port] = []
+    var onSelectPort: ((TransportPortActivity.Port) -> Void)? = nil
+    var focusedTransportID: String? = nil
+    var selectedPort: String = ""
 
     @State private var expandedGroup: SignalMapPinGroup?
+    @State private var imagePreview: IntelligenceEvent?
     @State private var userAdjustedViewport = false
     @State private var committedScale: CGFloat = 1
     @State private var committedOffset: CGSize = .zero
@@ -5944,12 +5960,15 @@ private struct InteractiveCountryBubbleMap: View {
                             if let from = CountryCentroidLookup.coordinate(for: route.origin), let to = CountryCentroidLookup.coordinate(for: route.destination) {
                                 let a = project(from, size: size), b = project(to, size: size)
                                 var line = Path(); line.move(to: a); line.addQuadCurve(to: b, control: CGPoint(x:(a.x+b.x)/2,y:min(a.y,b.y)-40))
-                                context.stroke(line, with: .color(ClaritasPalette.shellAccent(for: colorScheme)), lineWidth: min(5,1+log2(Double(route.observed_days+1))))
+                                context.stroke(line, with: .color((route.mode == "aviation" ? ClaritasPalette.dataBlue(for:colorScheme) : ClaritasPalette.orange).opacity(0.55)), style:StrokeStyle(lineWidth:1.3,dash:route.proxy ? [4,4] : []))
                             }
                         }
+                        drawTransport(context:context,size:size)
                     }.allowsHitTesting(false)
                     SignalMapTouchSurface(allowsSingleFingerPan: allowsSingleFingerPan, onTap: { location in
-                        if let country = country(at: location, size: proxy.size) { onSelectCountry(country) }
+                        if let entity = nearestVehicle(to:location,size:proxy.size) { onSelectTransportEntity?(entity) }
+                        else if let port = transportPorts.min(by:{ distance(location,project(CLLocationCoordinate2D(latitude:$0.latitude,longitude:$0.longitude),size:proxy.size)) < distance(location,project(CLLocationCoordinate2D(latitude:$1.latitude,longitude:$1.longitude),size:proxy.size)) }), distance(location,project(CLLocationCoordinate2D(latitude:port.latitude,longitude:port.longitude),size:proxy.size)) < 16 { onSelectPort?(port) }
+                        else if let country = country(at: location, size: proxy.size) { onSelectCountry(country) }
                     }, onPan: { delta in
                         userAdjustedViewport = true
                         committedOffset.width += delta.x; committedOffset.height += delta.y
@@ -5962,7 +5981,7 @@ private struct InteractiveCountryBubbleMap: View {
                         committedScale = next
                     })
 
-                    ForEach(labelledCountries(size: proxy.size)) { point in
+                    ForEach(mode == .transport || points.first?.id.hasPrefix("event-link-") == true ? [] : labelledCountries(size: proxy.size)) { point in
                         bubbleView(for: point)
                             .position(x: project(point.coordinate, size: proxy.size).x, y: project(point.coordinate, size: proxy.size).y - 24)
                     }
@@ -5979,24 +5998,12 @@ private struct InteractiveCountryBubbleMap: View {
                             }
                             .position(x: group.x, y: group.y)
                     }
-                    ForEach(transportEntities.prefix(40)) { entity in
-                        if let latitude = entity.latitude, let longitude = entity.longitude,
-                           contains(latitude: latitude, longitude: longitude) {
-                            Button { onSelectTransportEntity?(entity) } label: {
-                                Image(systemName: entity.mode == .aviation ? "airplane" : "ferry.fill")
-                                    .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(ClaritasPalette.shellAccentSecondary(for: colorScheme))
-                                    .frame(width: 32, height: 32).contentShape(Rectangle())
-                            }.buttonStyle(.plain)
-                                .position(project(CLLocationCoordinate2D(latitude: latitude, longitude: longitude), size: proxy.size))
-                                .accessibilityLabel(entity.display_name ?? "Tracked transport")
-                        }
-                    }
+
                 }
                 .contentShape(Rectangle())
 
                 viewportControls
-                if points.isEmpty {
+                if points.isEmpty && transportEntities.isEmpty && mode != .transport {
                     Text("No mapped \(mapRegion.label.lowercased()) data for this layer.")
                         .font(.footnote)
                         .foregroundStyle(ClaritasPalette.shellInk(for: colorScheme))
@@ -6017,6 +6024,12 @@ private struct InteractiveCountryBubbleMap: View {
                     committedOffset = CGSize(width: camera.offsetX, height: camera.offsetY)
                 }
                 previousViewportSize = next
+            }
+            .onChange(of:focusedTransportID) { id in
+                if let entity = transportEntities.first(where:{$0.id == id}), let latitude = entity.latitude, let longitude = entity.longitude { focusCoordinate(CLLocationCoordinate2D(latitude:latitude,longitude:longitude),size:proxy.size) }
+            }
+            .onChange(of:selectedPort) { name in
+                if let port = transportPorts.first(where:{$0.name == name}) { focusCoordinate(CLLocationCoordinate2D(latitude:port.latitude,longitude:port.longitude),size:proxy.size) }
             }
             .onChange(of: mapRegion) { _ in resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
             .onChange(of: resetToken) { _ in resetViewport(); focus(on: automaticFocusCountry, size: proxy.size) }
@@ -6046,6 +6059,24 @@ private struct InteractiveCountryBubbleMap: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { expandedGroup = nil } } }
                 }.presentationDetents([.medium, .large])
+            }
+            .sheet(item:$imagePreview) { event in
+                NavigationStack {
+                    ScrollView {
+                        VStack(alignment:.leading,spacing:14) {
+                            if let image = event.imagery {
+                                AuthenticatedEarthImage(path:image.preview_url,compact:false,contentMode:.fit).frame(height:300).clipped()
+                                Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                Text(event.title).font(.headline)
+                                if let captured = image.captured_at { Text("Image time · \(captured.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+                                else { Text("Report updated · \(event.last_activity_time.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+                                Text(image.attribution).font(.caption2).foregroundStyle(.secondary)
+                                Button { imagePreview = nil; onSelectEvent(event) } label: { Label("Open event & imagery",systemImage:"arrow.up.right").frame(maxWidth:.infinity,minHeight:44) }.buttonStyle(.bordered)
+                            }
+                        }.padding(18)
+                    }.navigationTitle("Map image").navigationBarTitleDisplayMode(.inline)
+                        .toolbar { ToolbarItem(placement:.confirmationAction) { Button("Done") { imagePreview = nil } } }
+                }.presentationDetents([.medium,.large])
             }
         }
     }
@@ -6170,12 +6201,13 @@ private struct InteractiveCountryBubbleMap: View {
             }.frame(width: 44, height: 44).contentShape(Circle())
         }.buttonStyle(.plain)
                 .overlay(alignment: .bottom) {
-                    if group.eventIDs.count == 1, let event = events.first(where: { $0.id == group.id }), let image = event.imagery {
-                        Button { onSelectEvent(event) } label: {
-                            VStack(spacing: 2) {
-                                AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width: 64, height: 42).clipped().cornerRadius(5)
+                    if let event = events.first(where: { group.eventIDs.contains($0.id) && $0.imagery != nil }), let image = event.imagery {
+                        let width = min(compactPresentation ? 116.0 : 148.0,52.0+Double(max(0,committedScale-1))*18.0)
+                        Button { imagePreview = event } label: {
+                            VStack(spacing: 3) {
+                                AuthenticatedEarthImage(path: image.preview_url, compact: true).frame(width:width,height:width*0.68).clipped().cornerRadius(5)
                                 Text(event.location_name ?? event.primary_country_iso2 ?? "Event location").font(.system(size: 8, weight: .semibold)).lineLimit(1)
-                            }.frame(width: 80).padding(3).background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
+                            }.frame(width:width+8).padding(3).background(ClaritasPalette.shellSurface(for: colorScheme), in: RoundedRectangle(cornerRadius: 7))
                         }.buttonStyle(.plain).offset(y: -36)
                         .accessibilityLabel("Image at \(event.location_name ?? "event location"), updated \(event.last_activity_time.formatted()): \(event.title)")
                     }
@@ -6263,6 +6295,37 @@ private struct InteractiveCountryBubbleMap: View {
                 width: -nextScale * (projected.x - center.x),
                 height: -nextScale * (projected.y - center.y)
             )
+        }
+    }
+
+    private func distance(_ a:CGPoint,_ b:CGPoint)->CGFloat { hypot(a.x-b.x,a.y-b.y) }
+    private func nearestVehicle(to point:CGPoint,size:CGSize)->TransportEntity? {
+        transportEntities.compactMap { entity -> (TransportEntity,CGFloat)? in
+            guard let lat = entity.latitude, let lon = entity.longitude else { return nil }
+            let d = distance(point,project(CLLocationCoordinate2D(latitude:lat,longitude:lon),size:size));return d < 16 ? (entity,d) : nil
+        }.min{$0.1 < $1.1}?.0
+    }
+    private func focusCoordinate(_ coordinate:CLLocationCoordinate2D,size:CGSize) {
+        let point = basePoint(coordinate,size:size),center = CGPoint(x:size.width/2,y:size.height/2)
+        withAnimation { committedScale = 5;committedOffset = CGSize(width:-5*(point.x-center.x),height:-5*(point.y-center.y)) }
+    }
+    private func drawTransport(context:GraphicsContext,size:CGSize) {
+        for entity in transportEntities.prefix(600) {
+            guard let latitude = entity.latitude, let longitude = entity.longitude, contains(latitude:latitude,longitude:longitude) else { continue }
+            let point = project(CLLocationCoordinate2D(latitude:latitude,longitude:longitude),size:size)
+            let color = entity.mode == .aviation ? ClaritasPalette.dataBlue(for:colorScheme) : ClaritasPalette.orange
+            if committedScale < 2 && focusedTransportID != entity.id { context.fill(Path(ellipseIn:CGRect(x:point.x-2.5,y:point.y-2.5,width:5,height:5)),with:.color(color)) }
+            else {
+                var local = context;local.translateBy(x:point.x,y:point.y);local.rotate(by:.degrees(entity.heading ?? 0))
+                let coordinates:[CGPoint] = entity.mode == .aviation ? [CGPoint(x:0,y:-8),CGPoint(x:2,y:-2),CGPoint(x:7,y:2),CGPoint(x:7,y:4),CGPoint(x:1,y:2),CGPoint(x:1,y:7),CGPoint(x:-1,y:7),CGPoint(x:-1,y:2),CGPoint(x:-7,y:4),CGPoint(x:-7,y:2),CGPoint(x:-2,y:-2)] : [CGPoint(x:0,y:-7),CGPoint(x:4,y:-1),CGPoint(x:4,y:5),CGPoint(x:0,y:7),CGPoint(x:-4,y:5),CGPoint(x:-4,y:-1)]
+                var glyph = Path();glyph.addLines(coordinates);glyph.closeSubpath();local.fill(glyph,with:.color(color));local.stroke(glyph,with:.color(ClaritasPalette.mapBackground(for:colorScheme)),lineWidth:0.7)
+            }
+        }
+        for port in transportPorts {
+            let point = project(CLLocationCoordinate2D(latitude:port.latitude,longitude:port.longitude),size:size)
+            let marker = Path(roundedRect:CGRect(x:point.x-4,y:point.y-4,width:8,height:8),cornerRadius:1)
+            context.fill(marker,with:.color(ClaritasPalette.mapBackground(for:colorScheme)));context.stroke(marker,with:.color(ClaritasPalette.shellInk(for:colorScheme)),lineWidth:1)
+            if selectedPort == port.name || (committedScale > 3 && transportPorts.count <= 6) { context.draw(Text(port.name).font(.system(size:10,weight:.medium)).foregroundColor(ClaritasPalette.shellInk(for:colorScheme)),at:CGPoint(x:point.x,y:point.y-12)) }
         }
     }
 
@@ -6473,6 +6536,7 @@ struct SignalMapSnapshotReview: View {
         let weather: [CountryWeather]
         let market: CountryMarketDetail
         let scoped_transport: TransportOverview?
+        let port_activity: TransportPortActivity?
     }
     @StateObject private var model: AppModel
     private let fixtureError: String?
@@ -6500,6 +6564,7 @@ struct SignalMapSnapshotReview: View {
                 review.mapReviewEvent = context.event
                 review.mapReviewTransport = context.transport
                 review.mapReviewScopedTransport = context.scoped_transport
+                review.mapReviewPortActivity = context.port_activity
                 review.mapReviewMarket = context.market
                 if ProcessInfo.processInfo.arguments.contains("-qa-transport-snapshot"), context.scoped_transport == nil {
                     throw CocoaError(.coderReadCorrupt)

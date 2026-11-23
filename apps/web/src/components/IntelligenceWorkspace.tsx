@@ -50,7 +50,7 @@ const severities: Array<IntelligenceSeverity | "all"> = ["all", "critical", "hig
 type Props = {
   embedded?: boolean;
   refreshVersion?: string | number;
-  onEventLoaded?: (event: IntelligenceEvent) => void;
+  onEventLoaded?: (event: IntelligenceEvent, detail?: IntelligenceEventDetail) => void;
   initialCountry?: string | null;
   initialEventId?: string | null;
   onSelectEvent?: (eventId: string | null) => void;
@@ -298,7 +298,7 @@ export default function IntelligenceWorkspace({
       .then((value) => {
         if (!active) return;
         setDetail(value);
-        onEventLoaded?.(value.event);
+        onEventLoaded?.(value.event, value);
         setEvents((current) => current.some((event) => event.id === value.event.id)
           ? current
           : [value.event, ...current]);
