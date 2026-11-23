@@ -113,7 +113,7 @@ export default function SituationDashboard(props: Props) {
     dark={props.dark} onSelect={selectCountry} fillMode="relevance" scale={mapMetric === "attention" ? "linear" : "log"} valueDomain={mapMetric === "attention" ? [0, 100] : undefined}
     focusOnActivity={Boolean(country)}
     featuredLabel={mapMetric === "attention" ? "Highest signal relevance" : mapMetric === "priority" ? "Most high-priority activity" : "Most reported activity"}
-    onSelectPoint={(point) => { if(point.id.startsWith("vehicle:")) { setMappedVehicle(liveTransport?.entities.find(vehicle=>`vehicle:${vehicle.id}`===point.id) ?? null); revealContext(); } else selectEvent(point.id); }} showBubbles={false} showLabels legend
+    onSelectPoint={(point) => { if(point.id.startsWith("vehicle:")) { const vehicle = liveTransport?.entities.find(vehicle=>`vehicle:${vehicle.id}`===point.id); onSelect(null); setMappedVehicle(vehicle ? {...vehicle} : null); revealContext(); } else selectEvent(point.id); }} showBubbles={false} showLabels legend
     legendLabel={!intervalMatches ? "Previous selection · updating" : mapMetric === "attention" ? "Signal relevance" : mapMetric === "priority" ? "High-priority updates" : "Number of updates"}
     legendDescription={mapMetric === "attention" ? "Importance, high-priority share and unusual increases. Not a danger rating." : "Warmer = more updates, not more danger."} />;
   const stops = ["peek", "half", "full"] as const;

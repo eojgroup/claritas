@@ -37,7 +37,6 @@ export default function TransportScopeContext({ country, events = [], relatedEve
   const [selected, setSelected] = useState<TransportEntity | null>(null);
   const [entityQuery, setEntityQuery] = useState("");
   const [shownEntities, setShownEntities] = useState(40);
-  useEffect(() => { if (selectedVehicle) setSelected(selectedVehicle); }, [selectedVehicle]);
   useEffect(() => { setCorridor(""); setSelected(null); setEntityQuery(""); setShownEntities(40); }, [iso]);
   useEffect(() => {
     const controller = new AbortController();
@@ -49,6 +48,7 @@ export default function TransportScopeContext({ country, events = [], relatedEve
       .catch(() => { if (!controller.signal.aborted) { setFailed(true); setLoading(false); } });
     return () => controller.abort();
   }, [iso, mode, corridor, retry, onOverview]);
+  useEffect(() => { if (selectedVehicle) setSelected(selectedVehicle); }, [selectedVehicle]);
   useEffect(() => {
     const timer = setInterval(() => { if (!document.hidden) setRetry(value => value + 1); }, 120_000);
     return () => clearInterval(timer);
