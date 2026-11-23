@@ -93,7 +93,20 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.ok(interval.countries.every((country) => Number.isInteger(country.attention_score)));
     assert.ok(interval.events.every((event) => event.last_activity_time >= interval.selection!.start && event.last_activity_time < interval.selection!.end));
     assert.ok(interval.map_events.some((event) => event.id === olderLocated.id));
+    const scopedTransport = records.find(row=>row.country === "SE" && row.type === "aviation_disruption")!;
+    const unrelatedTransport = records.find(row=>row.country === "NO" && row.type === "aviation_disruption")!;
+    for (const [index,iso,confidence,eventId] of [[0,"NO",0.9,scopedTransport.id],[1,"NO",0.8,scopedTransport.id],[2,"FI",0.3,scopedTransport.id],[3,"DE",0.9,unrelatedTransport.id]] as const) {
+      const locationId = randomUUID();
+      await client.query(`INSERT INTO intelligence_location(id,slug,location_type,canonical_name,country_iso2,latitude,longitude)
+        VALUES($1,$2,'city','Explicit report location',$3,59,18)`, [locationId,`linked-${fixture}-${index}`,iso]);
+      await client.query(`INSERT INTO intelligence_event_location(event_id,location_id,confidence,relationship)
+        VALUES($1,$2,$3,'affected')`,[eventId,locationId,confidence]);
+    }
     const scoped = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({ country: "SE", topic: "transport" }), measured);
+    assert.deepEqual(scoped.country_links?.map(link=>[link.country_iso2,link.event_count]).sort(),[["NO",1],["SE",1]],
+      "count distinct selected events, include explicit secondary countries, exclude weak/unrelated links");
+    const quietLinks = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({country:"SE",topic:"transport",bucket:11}),measured);
+    assert.deepEqual(quietLinks.country_links,[],"links must follow the selected interval rather than the full-window cohort");
     assert.equal(scoped.summary.event_count, 1);
     assert.equal(scoped.events.length, 1);
     assert.equal(scoped.events[0].event_type, "aviation_disruption");

@@ -29,7 +29,7 @@ beforeEach(() => {
 afterEach(cleanup);
 it("loads bounded positions independently while historical overview is still pending",async()=>{
  api.overview.mockImplementation(()=>new Promise(()=>{}));const publish=vi.fn();render(<TransportScopeContext country="NL" onMapChange={publish}/>);
- await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({positions:expect.objectContaining({entities:[expect.objectContaining({latitude:52,longitude:4})]})})));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({countries:[{country:"NL",count:1}],connections:[],positions:expect.objectContaining({entities:[expect.objectContaining({latitude:52,longitude:4})]})})));
  expect(api.positions).toHaveBeenCalledWith("NL",expect.objectContaining({mode:"all",window:null}),expect.any(AbortSignal));
  expect(await screen.findByRole("button",{name:/Example ship/})).toBeTruthy();
 });
@@ -40,8 +40,9 @@ it("filters current positions from mode cards without rerunning the historical a
 });
 it("makes corridor heat tiles and port frequency rows filter map positions",async()=>{
  const value=overview("NL");value.routes=[{mode:"maritime",origin_country:"NL",destination_country:"BE",origin_name:"Netherlands",destination_name:"Belgium",active_count:17,origin_basis:"observed",examples:[]}];api.overview.mockResolvedValue(value);
- render(<TransportScopeContext country="NL"/>);
+ const publish=vi.fn();render(<TransportScopeContext country="NL" onMapChange={publish}/>);
  fireEvent.click(await screen.findByRole("button",{name:/Filter connection Belgium/}));
+ await waitFor(()=>expect(publish).toHaveBeenCalledWith(expect.objectContaining({countries:expect.arrayContaining([{country:"NL",count:17},{country:"BE",count:17}]),connections:[]})));
  await waitFor(()=>expect(api.positions).toHaveBeenLastCalledWith("NL",expect.objectContaining({corridor:"BE"}),expect.any(AbortSignal)));
  fireEvent.click(screen.getByRole("button",{name:/Rotterdam.*12.*departures/}));
  await waitFor(()=>expect(api.positions).toHaveBeenLastCalledWith("NL",expect.objectContaining({port:"Rotterdam",mode:"maritime",corridor:""}),expect.any(AbortSignal)));

@@ -150,6 +150,20 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     FROM intelligence_overview_projection WHERE ${scopeSql} AND country_iso2 IS NOT NULL
       AND (${inInterval} OR ${previousInterval}) GROUP BY country_iso2
     HAVING count(*) FILTER(WHERE ${inInterval})>0`, [...params.slice(0, 6), interval.start, interval.end, interval.end === window.end, options.hours * 3600])).rows : aggregate.countries;
+  // Primary-country scope stays unchanged. Count the explicit location links
+  // of that full saved cohort, independently of the bounded card page.
+  const countryLinks = options.country ? (await read<{ country_iso2: string; event_count: number; high_priority_count: number }>(`
+    WITH scoped AS MATERIALIZED (
+      SELECT id,country_iso2,${highSql} AS high_priority FROM intelligence_overview_projection WHERE ${detailScope}
+    ), links AS (
+      SELECT id,country_iso2,high_priority FROM scoped
+      UNION
+      SELECT scoped.id,location.country_iso2,scoped.high_priority FROM scoped
+        JOIN intelligence_event_location linked ON linked.event_id=scoped.id AND linked.confidence>=0.5
+        JOIN intelligence_location location ON location.id=linked.location_id
+        WHERE location.country_iso2 IS NOT NULL
+    ) SELECT country_iso2,count(*)::int AS event_count,count(*) FILTER(WHERE high_priority)::int AS high_priority_count
+      FROM links WHERE country_iso2 IS NOT NULL GROUP BY country_iso2 ORDER BY event_count DESC,country_iso2`, detailParams)).rows : [];
   const now = new Date(state.generated_at);
   const samples = cards.map(({ sample }) => ({ ...sample, period: "current" as const }));
   const base = assembleIntelligenceOverview(samples, cards.map(({ event }) => event), options, now, cards.map(({ event }) => event.id));
@@ -163,7 +177,7 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     return { ...bucket, event_count: counts?.event_count ?? 0, previous_event_count: counts?.previous_event_count ?? 0, high_priority_count: counts?.high_priority_count ?? 0 };
   });
   return { ...base, summary: { ...aggregate.summary, ...change(aggregate.summary.event_count, aggregate.summary.previous_event_count) }, topics, locations,
-    selection: interval, countries: selectedCountries.map((country) => ({ ...country, previous_event_count: country.previous_event_count ?? 0,
+    selection: interval, country_links: countryLinks, countries: selectedCountries.map((country) => ({ ...country, previous_event_count: country.previous_event_count ?? 0,
       peak_priority_score: country.peak_priority_score ?? 0, attention_score: countryAttentionScore(country) })), map_events: mapped.map(({ event: { source_refs: _refs, ...event } }) => event),
     visual_events: visual.map(({ event: { source_refs: _refs, ...event } }) => event), buckets,
     coverage: { ...base.coverage, notice: "Key developments balance importance, recency and source/topic variety. Repeated updates are grouped in the list; chart totals cover every eligible saved investigation.", sample_limit: Math.max(aggregate.summary.event_count, aggregate.summary.previous_event_count),

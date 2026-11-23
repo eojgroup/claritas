@@ -64,12 +64,12 @@ export default function TransportScopeContext({country,events=[],relatedEventIds
   },[overview,outlook,selection.mode,connectionDays]);
   const heat=useMemo(()=>{
     const totals=new Map<string,number>();
-    if(selection.window||selection.port){for(const vehicle of positions?.entities??[])for(const key of new Set(vehicle.country_links.map(link=>link.country)))totals.set(key,(totals.get(key)??0)+1);return [...totals].map(([country,count])=>({country,count}));}
+    if(selection.window||selection.port||(!connectionDays&&!connections.length)){for(const vehicle of positions?.entities??[])for(const key of new Set(vehicle.country_links.map(link=>link.country)))totals.set(key,(totals.get(key)??0)+1);if(totals.size || selection.window || selection.port)return [...totals].map(([country,count])=>({country,count}));}
     for(const row of connections){if(selection.corridor && ![row.origin,row.destination].includes(selection.corridor))continue;for(const key of new Set([row.origin,row.destination]))totals.set(key,(totals.get(key)??0)+row.weight);}
     if(!totals.size && !iso)for(const row of overview?.countries??[])totals.set(row.country,selection.mode==="all"?row.active_count:row[selection.mode].active);
     return [...totals].map(([country,count])=>({country,count}));
-  },[connections,selection.corridor,selection.mode,selection.window,selection.port,positions,overview,iso]);
-  const mapState=useMemo<TransportMapState>(()=>({country:iso,selection,positions,countries:heat,heatLabel:connectionDays?`Connection intensity · ${connectionDays}d`:"Current vehicle country links",heatNotice:connectionDays?"Summed daily peak samples in completed UTC days. Positions remain current; connections are country links, not observed tracks.":"Warmer = more country-linked activity. Orange = vessel; blue = aircraft. Partial tracked coverage.",ports:portActivity?.ports??[],connections:selection.corridor?connections.filter(row=>[row.origin,row.destination].includes(selection.corridor)).slice(0,2):[],loading,failed}),[iso,selection,positions,heat,connections,loading,failed,portActivity,connectionDays]);
+  },[connections,selection.corridor,selection.mode,selection.window,selection.port,positions,overview,iso,connectionDays]);
+  const mapState=useMemo<TransportMapState>(()=>({country:iso,selection,positions,countries:heat,heatLabel:connectionDays?`Connection intensity · ${connectionDays}d`:"Current vehicle country links",heatNotice:connectionDays?"Summed daily peak samples in completed UTC days. Positions remain current; connections are country links, not observed tracks.":"Warmer = more country-linked activity. Orange = vessel; blue = aircraft. Partial tracked coverage.",ports:portActivity?.ports??[],connections:[],loading,failed}),[iso,selection,positions,heat,loading,failed,portActivity,connectionDays]);
   useEffect(()=>{onMapChange?.(mapState);},[mapState,onMapChange]);
   const tiles=useMemo(()=>{
     const rows=new Map<string,{country:string;maritime:number;aviation:number;proxy:boolean}>();

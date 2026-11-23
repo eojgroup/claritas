@@ -5314,6 +5314,14 @@ struct WorldMapWorkspace: View {
                 return CountryBubblePoint(id:"event-link-\(iso)",iso:iso,valueLabel:"Source-linked country",detail:"Event location link, not proof of causation",magnitude:100,colorValue:100,rank:index+1,coordinate:coordinate)
             }
         }
+        if model.selectedCountry != nil, model.intelligenceOverview?.matches(scope:model.overviewScope) == true,
+           let links = model.intelligenceOverview?.country_links, !links.isEmpty {
+            let peak = Double(links.map(\.event_count).max() ?? 1)
+            return links.enumerated().compactMap { index, link in
+                guard let coordinate = CountryCentroidLookup.coordinate(for:link.country_iso2) else { return nil }
+                return CountryBubblePoint(id:"scope-link-\(link.country_iso2)",iso:link.country_iso2,valueLabel:"\(link.event_count) linked developments",detail:"Explicit locations in selected developments, not proof of impact",magnitude:Double(link.event_count),colorValue:100 * CountryLinkHeatScale.intensity(value:Double(link.event_count),maximum:peak),rank:index+1,coordinate:coordinate)
+            }
+        }
         return (model.intelligenceOverview?.countries ?? []).sorted { ($0.attention_score ?? 0) > ($1.attention_score ?? 0) }.enumerated().compactMap { index, country in
             guard let coordinate = CountryCentroidLookup.coordinate(for: country.country_iso2) else { return nil }
             return CountryBubblePoint(id: "overview-\(country.country_iso2)", iso: country.country_iso2,
@@ -5353,7 +5361,7 @@ struct WorldMapWorkspace: View {
                     comparisonCountry: nil, pinnedCountry: nil, featuredCountry: nil,
                     transportEntities: exploration == "transport" ? currentTransport?.positions?.entities.filter { mappedTransportEntity == nil || $0.id == mappedTransportEntity?.id } ?? [] : [], resetToken: 0, onSelectCountry: { exploration == "transport" ? selectTransportCountry($0) : selectCountry($0) },
                     onSelectEvent: { model.selectIntelligenceEvent($0); revealContext() },
-                    immersive: true, corridors: exploration == "transport" ? currentTransport?.corridors ?? [] : model.selectedIntelligenceEventID != nil && eventCountries.count > 1 ? eventCountries.dropFirst().map{TransportVisualCorridor(origin:eventCountries[0],destination:$0,mode:"event",weight:1,proxy:false)} : [],
+                    immersive: true, corridors: [],
                     onSelectTransportEntity: { mappedTransportEntity = $0 }, transportPorts: exploration == "transport" ? currentTransport?.ports ?? [] : [],
                     onSelectPort: { port in transportSelection = TransportVisualSelection(mode:.maritime,port:port.name) }, focusedTransportID: mappedTransportEntity?.id, selectedPort:transportSelection.port)
                     // Fit the geography to the unobstructed area. Opening context
@@ -5599,14 +5607,7 @@ private struct NativeSignalMap: View {
             transportPorts:transportPorts,onSelectPort:onSelectPort,focusedTransportID:focusedTransportID,selectedPort:selectedPort
         )
         .overlay(alignment: .bottomLeading) {
-            VStack(alignment:.leading,spacing:4) {
-                if mode == .transport {
-                    Text("TRANSPORT COUNTRY LINKS").font(.system(size:9,weight:.semibold))
-                    Text("Warmer = more linked activity").font(.system(size:10))
-                    HStack(spacing:8) { Text("● Vessels").foregroundStyle(ClaritasPalette.orange); Text("● Aircraft").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)); Text("□ Ports") }.font(.system(size:10))
-                } else if points.first?.id.hasPrefix("event-link-") == true { Text("Source-linked event countries").font(.system(size:10,weight:.medium)) }
-                Text("Natural Earth · Claritas")
-            }
+            Text("Natural Earth · Claritas")
                 .font(.system(size: 8, weight: .medium))
                 .foregroundStyle(ClaritasPalette.shellMuted(for: colorScheme))
                 .padding(.horizontal, 7)
@@ -5680,14 +5681,15 @@ private struct SignalDensityLegend: View {
     var compact = false
 
     private var values: [Double] { points.map(\.colorValue) }
-    private var lower: Double { mode == .signals ? 0 : (values.min() ?? 0) }
+    private var lower: Double { mode == .signals || mode == .transport ? 0 : (values.min() ?? 0) }
     private var isOverview: Bool { points.first?.id.hasPrefix("overview-") == true }
-    private var upper: Double { mode == .signals ? 100 : (values.max() ?? 1) }
+    private var isScopedLinks: Bool { points.first?.id.hasPrefix("scope-link-") == true }
+    private var upper: Double { isScopedLinks ? points.map(\.magnitude).max() ?? 1 : mode == .signals ? 100 : (values.max() ?? 1) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             HStack {
-                Text(isOverview ? "SIGNAL RELEVANCE" : mode.legend.uppercased())
+                Text(isScopedLinks ? "LINKED DEVELOPMENTS" : mode == .transport ? "TRANSPORT COUNTRY LINKS" : isOverview ? "SIGNAL RELEVANCE" : mode.legend.uppercased())
                     .font(.system(size: 8, weight: .bold)).tracking(0.8)
                 if compact {
                     Spacer(minLength: 2)
@@ -5712,6 +5714,12 @@ private struct SignalDensityLegend: View {
                 Text(compact ? "Country: importance + change" : "Importance + unusual changes\nTap country for profile")
                     .font(.system(size: compact ? 8 : 10)).lineSpacing(compact ? 0 : 2)
             }
+            if mode == .transport {
+                Text("Warmer = more linked activity").font(.system(size:8))
+                HStack(spacing:5) { Text("● Vessels").foregroundStyle(ClaritasPalette.orange); Text("● Aircraft").foregroundStyle(ClaritasPalette.dataBlue(for:colorScheme)) }.font(.system(size:8))
+                Text("□ Monitored port · partial tracking").font(.system(size:8))
+            }
+            if isScopedLinks { Text("Warmer = more location-linked reports\nNot an impact rating").font(.system(size:8)) }
             if !events.isEmpty {
                 Divider().overlay(ClaritasPalette.shellBorderStrong(for: colorScheme))
                 if !compact { Text("EVENTS · TAP FOR STORY").font(.system(size: 9, weight: .bold)) }
@@ -5757,7 +5765,7 @@ private struct SignalDensityLegend: View {
     }
 
     private func format(_ value: Double) -> String {
-        if mode == .signals && !isOverview { return "\(Int(value))/100" }
+        if mode == .signals && !isOverview && !isScopedLinks { return "\(Int(value))/100" }
         if mode == .weather { return "\(Int(value))°" }
         return value >= 1_000
             ? String(format: "%.1fk", value / 1_000)
@@ -5827,7 +5835,7 @@ private enum SignalDensityColorScale {
         let values = points.map(\.colorValue)
         let minimum = mode == .signals ? 0 : (values.min() ?? 0)
         let maximum = mode == .signals ? 100 : (values.max() ?? 1)
-        let ratio = min(1, max(0, (point.colorValue - minimum) / max(0.0001, maximum - minimum)))
+        let ratio = mode == .transport ? CountryLinkHeatScale.intensity(value:point.colorValue,maximum:maximum) : min(1, max(0, (point.colorValue - minimum) / max(0.0001, maximum - minimum)))
 
         if mode == .weather {
             let cold = dark ? (43.0, 91.0, 135.0) : (55.0, 113.0, 166.0)
@@ -5981,7 +5989,7 @@ private struct InteractiveCountryBubbleMap: View {
                         committedScale = next
                     })
 
-                    ForEach(mode == .transport || points.first?.id.hasPrefix("event-link-") == true ? [] : labelledCountries(size: proxy.size)) { point in
+                    ForEach(mode == .transport || points.first?.id.hasPrefix("event-link-") == true || points.first?.id.hasPrefix("scope-link-") == true ? [] : labelledCountries(size: proxy.size)) { point in
                         bubbleView(for: point)
                             .position(x: project(point.coordinate, size: proxy.size).x, y: project(point.coordinate, size: proxy.size).y - 24)
                     }

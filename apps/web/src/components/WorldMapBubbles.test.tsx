@@ -451,3 +451,13 @@ it("keeps the event key visible without opening a disclosure", () => {
     );
   });
 });
+
+it("keeps equally weighted and weak linked countries visibly shaded in transport heatmaps", () => {
+  const view = render(<WorldMapBubbles data={[{country:"DE",count:7}]} fillMode="relevance" scale="log" dark />);
+  const linked = screen.getAllByRole("button",{name:"Germany: 7"}).find(node=>node.tagName.toLowerCase()==="path")!.getAttribute("fill");
+  const unlinked = screen.getByRole("button",{name:"Brazil: no mapped signal"}).getAttribute("fill");
+  expect(linked).not.toBe(unlinked);
+  expect(linked).toBe("rgb(213,126,70)");
+  view.rerender(<WorldMapBubbles data={[{country:"DE",count:10000},{country:"BR",count:1}]} fillMode="relevance" scale="log" dark />);
+  expect(screen.getAllByRole("button",{name:"Brazil: 1"}).find(node=>node.tagName.toLowerCase()==="path")!.getAttribute("fill")).not.toBe(unlinked);
+});

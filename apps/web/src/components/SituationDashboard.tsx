@@ -113,7 +113,9 @@ export default function SituationDashboard(props: Props) {
   const positionEntities = currentTransport?.positions?.entities ?? [];
   const displayedVehicles = mappedVehicle ? positionEntities.filter(row=>row.id===mappedVehicle.id) : positionEntities;
   const linkedCountries = selectedId && eventLinks?.id===selectedId ? eventLinks.countries : [];
-  const mapCountries = isTransport ? currentTransport?.countries ?? [] : linkedCountries.length>1 ? linkedCountries.map(country=>({country,count:100})) : countries;
+  const scopedLinks = country && scopeMatches ? overview?.country_links ?? [] : [];
+  const isScopedHeat = !isTransport && linkedCountries.length < 2 && scopedLinks.length > 0;
+  const mapCountries = isTransport ? currentTransport?.countries ?? [] : linkedCountries.length>1 ? linkedCountries.map(country=>({country,count:100})) : isScopedHeat ? scopedLinks.map(row=>({country:row.country_iso2,count:mapMetric === "priority" ? row.high_priority_count : row.event_count})) : countries;
   const selectTransportCountry = (iso:string) => {
     setMappedVehicle(null);
     if(country) setTransportSelection(value=>({...value,corridor:iso===country||value.corridor===iso?"":iso,port:""}));
@@ -127,13 +129,12 @@ export default function SituationDashboard(props: Props) {
   const map = <WorldMapBubbles variant="default" data={mapCountries} transportLayer={isTransport}
     points={isTransport ? [...displayedVehicles.map(vehicle=>({vehicleMode:vehicle.mode,vehicleHeading:vehicle.heading,id:`vehicle:${vehicle.id}`,latitude:vehicle.latitude!,longitude:vehicle.longitude!,title:vehicle.display_name||vehicle.flight_number||vehicle.entity_id,subtitle:`${vehicle.mode==='aviation'?'Aircraft':'Vessel'} · ${new Date(vehicle.observed_at).toLocaleString()}`,selected:vehicle.id===mappedVehicle?.id})),...(currentTransport?.ports??[]).map(port=>({id:`port:${port.country}:${port.name}`,latitude:port.latitude,longitude:port.longitude,title:port.name,label:port.name,portName:port.name,subtitle:`${port.departures} recorded departures · past 24h`,selected:port.name===transportSelection.port}))] : points}
     primaryCountry={country} allowsSingleFingerPan focusCoordinate={focus}
-    corridors={isTransport ? currentTransport?.connections??[] : linkedCountries.length>1 ? linkedCountries.slice(1).map(iso=>({origin:linkedCountries[0],destination:iso,label:`Event location link · ${linkedCountries[0]} ↔ ${iso}`,weight:1})) : []}
-    dark={props.dark} onSelect={isTransport?selectTransportCountry:selectCountry} fillMode="relevance" scale={isTransport?"log":mapMetric === "attention" ? "linear" : "log"} valueDomain={isTransport?undefined:mapMetric === "attention" ? [0,100] : undefined}
+    dark={props.dark} onSelect={isTransport?selectTransportCountry:selectCountry} fillMode="relevance" scale={isTransport||isScopedHeat?"log":mapMetric === "attention" ? "linear" : "log"} valueDomain={isTransport||isScopedHeat?undefined:mapMetric === "attention" ? [0,100] : undefined}
     focusOnActivity={!isTransport&&Boolean(country)}
     featuredLabel={mapMetric === "attention" ? "Highest signal relevance" : "Most reported activity"}
     onSelectPoint={point=>{if(point.portName){setMappedVehicle(null);setTransportSelection({mode:"maritime",port:point.portName,corridor:"",window:null});}else if(point.id.startsWith("vehicle:")){const vehicle=positionEntities.find(row=>`vehicle:${row.id}`===point.id);onSelect(null);setMappedVehicle(vehicle?{...vehicle}:null);revealContext();}else selectEvent(point.id);}} showBubbles={false} showLabels legend={linkedCountries.length<2 || isTransport}
-    legendLabel={isTransport?currentTransport?.heatLabel??"Transport country links":linkedCountries.length>1?"Countries linked to this event":!intervalMatches?"Previous selection · updating":mapMetric==="attention"?"Signal relevance":"Number of updates"}
-    legendDescription={isTransport?currentTransport?.heatNotice??"Select a transport visual to filter current positions.":linkedCountries.length>1?"Source-linked event locations. A connection does not establish cause or an observed route.":"Importance, high-priority share and unusual increases. Not a danger rating."}/>;
+    legendLabel={isScopedHeat?"Countries linked to these developments":isTransport?currentTransport?.heatLabel??"Transport country links":linkedCountries.length>1?"Countries linked to this event":!intervalMatches?"Previous selection · updating":mapMetric==="attention"?"Signal relevance":"Number of updates"}
+    legendDescription={isScopedHeat?"Warmer = more selected developments with an explicit location in that country. Location links do not establish impact or cause.":isTransport?currentTransport?.heatNotice??"Select a transport visual to filter current positions.":linkedCountries.length>1?"Source-linked event locations. A connection does not establish cause or an observed route.":"Importance, high-priority share and unusual increases. Not a danger rating."}/>;
   const stops = ["peek", "half", "full"] as const;
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
   const overviewControls = <>

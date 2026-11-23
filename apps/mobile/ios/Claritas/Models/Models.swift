@@ -4229,6 +4229,8 @@ struct IntelligenceOverview: Codable {
         var previous_event_count: Int? = nil
         var peak_priority_score: Int? = nil
     }
+    struct CountryLink: Codable { let country_iso2: String; let event_count: Int; let high_priority_count: Int }
+    var country_links: [CountryLink]? = nil
     var countries: [Country]? = nil
     var map_events: [IntelligenceEvent]? = nil
     var visual_events: [IntelligenceEvent]? = nil
@@ -4292,4 +4294,13 @@ struct TransportVisualCorridor: Identifiable {
 struct TransportMapSnapshot {
     let country: String?; let selectionKey: String; let positions: TransportPositions?
     let countries: [String: Int]; let corridors: [TransportVisualCorridor]; let ports: [TransportPortActivity.Port]
+}
+
+/// Country-link samples need a zero baseline: an equal/single link must not
+/// disappear into the unlinked-country fill. Log scaling preserves weak links.
+enum CountryLinkHeatScale {
+    static func intensity(value: Double, maximum: Double) -> Double {
+        guard value.isFinite, maximum.isFinite, value > 0, maximum > 0 else { return 0 }
+        return 0.18 + 0.82 * min(1, log1p(value) / log1p(maximum))
+    }
 }

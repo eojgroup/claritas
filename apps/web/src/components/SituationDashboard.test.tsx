@@ -5,7 +5,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import SituationDashboard from "./SituationDashboard";
 import { event, overviewFixture } from "../test/situationFixture";
 
-vi.mock("./WorldMapBubbles", () => ({ default: ({ onSelect, onSelectPoint }: { onSelect: (iso: string) => void; onSelectPoint: (point: { id: string }) => void }) => <div data-testid="map-camera"><button onClick={() => onSelect("SE")}>Select Sweden</button><button onClick={() => onSelectPoint({ id: event.id })}>Select port event</button></div> }));
+vi.mock("./WorldMapBubbles", () => ({ default: ({ onSelect, onSelectPoint, data, corridors=[] }: { data:unknown; corridors?:unknown[]; onSelect: (iso: string) => void; onSelectPoint: (point: { id: string }) => void }) => <div data-testid="map-camera" data-countries={JSON.stringify(data)} data-corridors={JSON.stringify(corridors)}><button onClick={() => onSelect("SE")}>Select Sweden</button><button onClick={() => onSelectPoint({ id: event.id })}>Select port event</button></div> }));
 vi.mock("./OverviewCountryProfile", () => ({ default: () => <section aria-label="Country profile">Sweden profile</section> }));
 vi.mock("./IntelligenceWorkspace", () => ({ default: () => <h3>Selected event evidence</h3> }));
 vi.mock("./MarketScopeContext", () => ({ default: ({ country, expanded }: { country?: string; expanded: boolean }) => <section aria-label="Market glance">{country || "World"} markets{expanded && <h3>Market explorer</h3>}</section> }));
@@ -106,4 +106,13 @@ it("keeps explicit transport map browsing scoped while developments remains the 
   fireEvent.click(screen.getByRole("button", { name: "Developments" }));
   expect(screen.getByRole("region", { name: "Activity over time" })).toBeTruthy();
   expect(screen.getByTestId("map-camera")).toBe(map);
+});
+
+it("shades secondary countries from the selected developments without drawing country arcs", () => {
+  const overview=overviewFixture("all","SE");
+  overview.country_links=[{country_iso2:"SE",event_count:8,high_priority_count:3},{country_iso2:"NO",event_count:2,high_priority_count:1}];
+  render(<SituationDashboard overview={overview} loading={false} error={null} hours={24} topic={null} priority="all" country="SE" selectedId={null} dark briefing={null} briefingError={null} onHoursChange={vi.fn()} onTopicChange={vi.fn()} onPriorityChange={vi.fn()} onCountryChange={vi.fn()} onSelect={vi.fn()} onOpenImagery={vi.fn()} onRefresh={vi.fn()} onRefreshBriefing={async()=>{}} />);
+  const map=screen.getByTestId("map-camera");
+  expect(JSON.parse(map.getAttribute("data-countries")!)).toEqual([{country:"SE",count:8},{country:"NO",count:2}]);
+  expect(map.getAttribute("data-corridors")).toBe("[]");
 });

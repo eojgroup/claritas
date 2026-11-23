@@ -14,6 +14,18 @@ final class OverviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(SignalMapEventKind(eventType: "severe_storm").label, "Storm")
         XCTAssertEqual(SignalMapEventKind(eventType: "reported_development").label, "News report")
     }
+    func testLinkedCountryHeatRetainsSingleEqualAndWeakConnections() throws {
+        XCTAssertEqual(CountryLinkHeatScale.intensity(value:7,maximum:7),1,accuracy:0.001)
+        XCTAssertGreaterThan(CountryLinkHeatScale.intensity(value:1,maximum:10000),0.18)
+        XCTAssertLessThan(CountryLinkHeatScale.intensity(value:1,maximum:10000),CountryLinkHeatScale.intensity(value:100,maximum:10000))
+        XCTAssertEqual(CountryLinkHeatScale.intensity(value:0,maximum:7),0)
+        var raw = payload()
+        raw["country_links"] = [["country_iso2":"SE","event_count":8,"high_priority_count":3],["country_iso2":"NO","event_count":2,"high_priority_count":1]]
+        let view = try decode(raw)
+        XCTAssertEqual(view.country_links?.last?.country_iso2,"NO")
+        XCTAssertEqual(view.country_links?.last?.event_count,2)
+        XCTAssertNil(try decode(payload()).country_links)
+    }
     func testTimeIntervalScopesHaveDistinctRequestsAndRejectOutOfWindowBuckets() throws {
         let full = IntelligenceOverviewScope()
         let selected = IntelligenceOverviewScope(bucket: 0)

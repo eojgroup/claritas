@@ -313,6 +313,7 @@ function choroplethColor(
   mode: "temperature" | "diverging" | "sequential" | "relevance",
   domain: [number, number],
   dark: boolean,
+  logarithmic = false,
 ) {
   const [rawMin, rawMax] = domain;
   const min = Math.min(rawMin, rawMax);
@@ -333,7 +334,7 @@ function choroplethColor(
     );
   }
   if (mode === "relevance") {
-    const ratio = clamp((value - min) / Math.max(max - min, 0.0001), 0, 1);
+    const ratio = logarithmic ? value > 0 && max > 0 ? 0.18 + 0.82 * clamp(Math.log1p(value) / Math.log1p(max),0,1) : 0 : clamp((value - min) / Math.max(max - min, 0.0001), 0, 1);
     const low: [number, number, number] = dark ? [32, 55, 44] : [226, 229, 210];
     const middle: [number, number, number] = dark ? [74, 110, 82] : [133, 162, 128];
     const high: [number, number, number] = dark ? [213, 126, 70] : [182, 82, 39];
@@ -537,10 +538,10 @@ export default memo(function WorldMapBubbles({
     if (valueDomain) return valueDomain;
     if (markers.length === 0) return [0, 1];
     return [
-      Math.min(...markers.map((marker) => marker.value)),
+      fillMode === "relevance" && scale === "log" ? 0 : Math.min(...markers.map((marker) => marker.value)),
       Math.max(...markers.map((marker) => marker.value)),
     ];
-  }, [markers, valueDomain]);
+  }, [markers, valueDomain, fillMode, scale]);
 
   const intensityFor = useCallback(
     (value: number) =>
@@ -971,7 +972,7 @@ export default memo(function WorldMapBubbles({
             const isFeatured = featuredIso === iso;
             const isHovered = hoveredCountry === iso;
             const fill = fillMode !== "default" && marker
-              ? choroplethColor(marker.value, fillMode, dataValueDomain, isDark)
+              ? choroplethColor(marker.value, fillMode, dataValueDomain, isDark, scale === "log")
               : isPrimary
                 ? isDark
                   ? "#d47b47"

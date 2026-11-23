@@ -1884,13 +1884,15 @@ struct ScopeTransportExplorer: View {
     private func publishMap() {
         var countries:[String:Int] = [:]
         let chosen = connections.filter{selection.corridor.isEmpty || $0.origin == selection.corridor || $0.destination == selection.corridor}
-        if selection.from != nil || !selection.port.isEmpty {
+        if selection.from != nil || !selection.port.isEmpty || (connectionDays == 0 && chosen.isEmpty) {
             for entity in mapPositions?.entities ?? [] { for iso in Set(entity.country_links.map(\.country)) { countries[iso,default:0] += 1 } }
         } else {
             for row in chosen { for iso in Set([row.origin,row.destination]) { countries[iso,default:0] += row.weight } }
-            if countries.isEmpty { for row in overview?.countries ?? [] { countries[row.country] = selection.mode == .maritime ? row.maritime.active : selection.mode == .aviation ? row.aviation.active : row.active_count } }
         }
-        onMapChange?(TransportMapSnapshot(country:country,selectionKey:selection.key,positions:positionsKey == selection.key ? positions : nil,countries:countries,corridors:selection.corridor.isEmpty ? [] : Array(chosen.prefix(2)),ports:portActivity?.ports ?? []))
+        if countries.isEmpty && country == nil && connectionDays == 0 && selection.from == nil && selection.port.isEmpty {
+            for row in overview?.countries ?? [] { countries[row.country] = selection.mode == .maritime ? row.maritime.active : selection.mode == .aviation ? row.aviation.active : row.active_count }
+        }
+        onMapChange?(TransportMapSnapshot(country:country,selectionKey:selection.key,positions:positionsKey == selection.key ? positions : nil,countries:countries,corridors:[],ports:portActivity?.ports ?? []))
     }
     private func loadOverview() async {
         overview = nil; overviewFailed = false
