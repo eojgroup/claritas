@@ -1,3 +1,4 @@
+import { CLAIM_OUTBOX_SQL } from "./event-outbox-claim";
 import { PubSub, type Message } from "@google-cloud/pubsub";
 import { query, withTransaction, withWorkerLease } from "../db";
 import { consumeDomainEvent } from "./consumer";
@@ -42,19 +43,7 @@ function toEnvelope(row: OutboxRow): DomainEventEnvelope {
 async function claimOutboxBatch(limit: number) {
   return withTransaction(async (client) => {
     const { rows } = await client.query<OutboxRow>(
-      `WITH candidates AS (
-         SELECT id FROM event_outbox
-         WHERE (
-           status IN ('pending','failed') OR
-           (status='publishing' AND locked_at<now()-interval '5 minutes')
-         ) AND available_at<=now() AND attempts<$1
-         ORDER BY occurred_at,id FOR UPDATE SKIP LOCKED LIMIT $2
-       )
-       UPDATE event_outbox outbox SET status='publishing',attempts=attempts+1,
-              locked_at=now(),last_error=NULL,updated_at=now()
-       FROM candidates WHERE outbox.id=candidates.id
-       RETURNING outbox.id,outbox.event_type,outbox.aggregate_type,outbox.aggregate_id,
-                 outbox.payload,outbox.occurred_at,outbox.attempts`,
+      CLAIM_OUTBOX_SQL,
       [integerEnv("EVENT_OUTBOX_MAX_ATTEMPTS", 8, 1, 30), limit],
     );
     return rows;
