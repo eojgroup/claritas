@@ -13,7 +13,7 @@ test("ordered outbox claims retain retry, lease, attempt and due-time boundaries
   for(let i=0;i<cases.length;i++){
    const [status,attempts,minutes,locked]=cases[i];
    await c.query(`INSERT INTO event_outbox(id,event_type,aggregate_type,aggregate_id,dedupe_key,payload,status,attempts,occurred_at,available_at,locked_at)
-    VALUES($1,'news.story.updated','item','1',$1::text,'{}',$2,$3,now()+make_interval(mins=>$4),now()+make_interval(mins=>$4),CASE WHEN $5::int IS NULL THEN NULL ELSE now()+make_interval(mins=>$5) END)`,[ids[i],status,attempts,minutes,locked]);
+    VALUES($1::uuid,'news.story.updated','item','1',$1::text,'{}',$2,$3,now()+make_interval(mins=>$4),now()+make_interval(mins=>$4),CASE WHEN $5::int IS NULL THEN NULL ELSE now()+make_interval(mins=>$5) END)`,[ids[i],status,attempts,minutes,locked]);
   }
   const rows=(await c.query(CLAIM_OUTBOX_SQL,[8,2])).rows;
   assert.deepEqual(rows.map(r=>r.id).sort(),[ids[1],ids[2]].sort());
