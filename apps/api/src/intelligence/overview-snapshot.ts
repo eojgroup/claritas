@@ -30,7 +30,7 @@ const highSql = `(severity IN ('high','critical') OR COALESCE((sample->>'news_pr
 const scopeSql = `generation_id=$1::uuid AND last_activity_time>=$3::timestamptz AND last_activity_time<=$2::timestamptz
   AND ($4::text IS NULL OR country_iso2=$4) AND ($5::text IS NULL OR topic=$5) AND ($6::text='all' OR ${highSql})`;
 const searchSql = (parameter: string) => ` AND (${parameter}::text IS NULL OR
-  to_tsvector('simple',COALESCE(event->>'title','')||' '||COALESCE(event->>'summary','')||' '||COALESCE(event->>'location_name',''))
+  to_tsvector('simple',COALESCE(event->>'title','')||' '||COALESCE(event->>'summary','')||' '||COALESCE(event->>'location_name','')||' '||COALESCE(topic,'')||' '||replace(COALESCE(event->>'event_type',''),'_',' ')||' '||COALESCE(event->>'origin_domain','')||' '||COALESCE(event->>'signal_domains','')||' '||COALESCE(event->>'primary_country_iso2','')||' '||COALESCE(sample->>'country_name',''))
   @@ websearch_to_tsquery('simple',${parameter}::text))`;
 const scopeParams = (state: State, options: Required<OverviewOptions>) => {
   const window = overviewWindow(options.hours, new Date(state.generated_at));

@@ -95,6 +95,12 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.ok(interval.countries.every((country) => Number.isInteger(country.attention_score)));
     assert.ok(interval.events.every((event) => event.last_activity_time >= interval.selection!.start && event.last_activity_time < interval.selection!.end));
     assert.ok(interval.map_events.some((event) => event.id === olderLocated.id));
+    const typeSearch = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'security'}),measured);
+    assert.equal(typeSearch.summary.event_count,high.topics.find(topic=>topic.key==='security')?.event_count,
+      "topic names match event types even when headlines do not spell out the category");
+    const countrySearch = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'Sweden'}),measured);
+    assert.ok(countrySearch.summary.event_count>0,"country-name search uses saved geography metadata");
+    assert.ok(countrySearch.countries.every(country=>country.country_iso2==='SE'));
     const search = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'"Outlook outage"'}),measured);
     assert.equal(search.summary.event_count,1,"search the entire projection, including events outside initial cards");
     assert.equal(search.summary.previous_event_count,1);
