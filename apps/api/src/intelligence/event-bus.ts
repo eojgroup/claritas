@@ -1,4 +1,4 @@
-import { CLAIM_OUTBOX_SQL } from "./event-outbox-claim";
+import { CLAIM_OUTBOX_SQL, CLAIM_FRESH_OUTBOX_SQL } from "./event-outbox-claim";
 import { PubSub, type Message } from "@google-cloud/pubsub";
 import { query, withTransaction, withWorkerLease } from "../db";
 import { consumeDomainEvent } from "./consumer";
@@ -42,11 +42,11 @@ function toEnvelope(row: OutboxRow): DomainEventEnvelope {
 
 async function claimOutboxBatch(limit: number) {
   return withTransaction(async (client) => {
-    const { rows } = await client.query<OutboxRow>(
-      CLAIM_OUTBOX_SQL,
-      [integerEnv("EVENT_OUTBOX_MAX_ATTEMPTS", 8, 1, 30), limit],
-    );
-    return rows;
+    const attempts = integerEnv("EVENT_OUTBOX_MAX_ATTEMPTS",8,1,30);
+    const freshLimit = Math.min(Math.max(0,limit-1),integerEnv("EVENT_OUTBOX_FRESH_SLOTS",8,0,100));
+    const fresh = freshLimit ? (await client.query<OutboxRow>(CLAIM_FRESH_OUTBOX_SQL,[attempts,freshLimit])).rows : [];
+    const { rows } = await client.query<OutboxRow>(CLAIM_OUTBOX_SQL,[attempts,limit-fresh.length]);
+    return [...fresh,...rows];
   });
 }
 

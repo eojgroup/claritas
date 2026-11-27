@@ -17,6 +17,7 @@ const OVERVIEW_TOPICS: Array<{ key: OverviewTopic; label: string }> = [
 type Props = {
   variant?: "all" | "summary" | "timeline" | "history" | "developments";
   compact?: boolean;
+  searchQuery?: string;
   filterExtras?: ReactNode;
   overview: IntelligenceOverview | null;
   loading: boolean;
@@ -42,12 +43,13 @@ function timeLabel(value: string, day = true) {
 function periodLabel(hours: number) { return hours === 24 ? "24 hours" : `${hours / 24} days`; }
 function changeLabel(change: number) { return change === 0 ? "the same as" : `${Math.abs(change)} ${change > 0 ? "more" : "fewer"} than`; }
 
-export default function SituationOverview({ variant = "all", compact = false, filterExtras, overview, loading, error, hours, topic, bucket = null, onBucketChange, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
+export default function SituationOverview({ variant = "all", compact = false, searchQuery = "", filterExtras, overview, loading, error, hours, topic, bucket = null, onBucketChange, priority = "high", onPriorityChange, country, selectedId, onHoursChange, onTopicChange, onCountryChange, onSelect, onRefresh }: Props) {
   const [expanded, setExpanded] = useState(false);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const filterId = useId();
   const filterButton = useRef<HTMLButtonElement>(null);
   const scopeMatches = overview?.window.hours === hours && (overview.filters.topic ?? null) === topic
+    && (overview.filters.q ?? "") === searchQuery
     && (overview.filters.priority ?? priority) === priority
     && (overview.filters.country ?? "").toUpperCase() === (country ?? "").toUpperCase();
   const data = scopeMatches ? overview : null;

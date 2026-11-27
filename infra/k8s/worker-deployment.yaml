@@ -59,6 +59,12 @@ spec:
               value: "5432"
             - name: DB_POOL_MAX
               value: "5"
+            # Drain the durable backlog without starving current news/hazards.
+            # Subscriber concurrency stays bounded independently.
+            - name: EVENT_OUTBOX_BATCH_SIZE
+              value: "100"
+            - name: EVENT_OUTBOX_FRESH_SLOTS
+              value: "25"
           ports: [{ name: http, containerPort: 8080 }]
           readinessProbe:
             httpGet: { path: /readyz, port: http }

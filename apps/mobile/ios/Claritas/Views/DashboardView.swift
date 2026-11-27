@@ -5277,6 +5277,7 @@ struct WorldMapWorkspace: View {
     @State private var mappedTransportEntity: TransportEntity?
     @State private var keepsTransportScope = false
     @State private var eventCountries: [String] = []
+    @State private var topicSearch = ""
     private var currentTransport: TransportMapSnapshot? { transportMap?.country == model.selectedCountry && transportMap?.selectionKey == transportSelection.key ? transportMap : nil }
 
     init(refreshesAutomatically: Bool = true, briefingInitiallyOpen: Bool = false) {
@@ -5415,7 +5416,8 @@ struct WorldMapWorkspace: View {
                 if country != nil { revealContext() }
             }
         }
-        .onAppear { if model.selectedIntelligenceEventID == nil { profileCountry = model.selectedCountry } }
+        .onAppear { topicSearch = model.overviewQuery; if model.selectedIntelligenceEventID == nil { profileCountry = model.selectedCountry } }
+        .onChange(of:model.overviewQuery) { topicSearch = $0 }
         .onReceive(NotificationCenter.default.publisher(for: .claritasWatchOpenDestination)) { note in
             if let destination = note.object as? String, ["transport", "markets"].contains(destination) {
                 exploration = destination == "transport" ? "transport" : "developments"
@@ -5488,6 +5490,15 @@ struct WorldMapWorkspace: View {
             .padding(.horizontal, 18).padding(.top, wide ? 12 : 28).padding(.bottom, 10)
             Divider()
             if !showsBriefing && model.selectedIntelligenceEventID == nil {
+                HStack(spacing:8) {
+                    Image(systemName:"magnifyingglass").foregroundStyle(.secondary)
+                    TextField("Search topics, events or places",text:$topicSearch).submitLabel(.search)
+                        .onSubmit { model.overviewQuery = String(topicSearch.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200)) }
+                    if !topicSearch.isEmpty || !model.overviewQuery.isEmpty {
+                        Button { topicSearch = ""; model.overviewQuery = "" } label: { Image(systemName:"xmark.circle.fill").frame(width:36,height:40) }.accessibilityLabel("Clear topic search")
+                    }
+                    Button("Search") { model.overviewQuery = String(topicSearch.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200)) }.font(.caption).frame(minHeight:40)
+                }.padding(.horizontal,14).padding(.vertical,6)
                 Picker("Explore the selected scope", selection: $exploration) {
                     Text("Developments").tag("developments")
                     Text("Transport").tag("transport")

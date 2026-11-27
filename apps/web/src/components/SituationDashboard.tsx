@@ -17,6 +17,7 @@ const IntelligenceWorkspace = lazy(() => import("./IntelligenceWorkspace"));
 const TransportScopeContext = lazy(() => import("./TransportScopeContext"));
 type Props = {
   overview: IntelligenceOverview | null; loading: boolean; error: string | null;
+  searchQuery?: string; onSearchChange?: (query:string)=>void;
   hours: 24 | 72 | 168; topic: OverviewTopic | null; priority: "high" | "all";
   bucket?: number | null; onBucketChange?: (bucket: number | null) => void;
   country: string | null; selectedId: string | null; dark: boolean;
@@ -29,6 +30,8 @@ type Props = {
 
 export default function SituationDashboard(props: Props) {
   const { overview, country, selectedId, onSelect } = props;
+  const [searchDraft,setSearchDraft] = useState(props.searchQuery ?? "");
+  useEffect(()=>setSearchDraft(props.searchQuery ?? ""),[props.searchQuery]);
   const [selectedEvent, setSelectedEvent] = useState<IntelligenceEvent | null>(null);
   const [profileCountry, setProfileCountry] = useState<string | null>(null);
   const [countryContextOpen, setCountryContextOpen] = useState(false);
@@ -74,7 +77,8 @@ export default function SituationDashboard(props: Props) {
   const [mapMetric, setMapMetric] = useState<"attention" | "activity" | "priority">("attention");
   const scopeMatches = overview?.window.hours === props.hours && (overview.filters.topic ?? null) === props.topic
     && (overview.filters.country ?? "").toUpperCase() === (country ?? "").toUpperCase()
-    && (overview.filters.priority ?? props.priority) === props.priority;
+    && (overview.filters.priority ?? props.priority) === props.priority
+    && (overview.filters.q ?? "") === (props.searchQuery ?? "");
   const intervalMatches = (overview?.filters.bucket ?? null) === (props.bucket ?? null);
   const events = useMemo(() => {
     if (!scopeMatches || !overview) return [];
@@ -137,6 +141,7 @@ export default function SituationDashboard(props: Props) {
   const movePanel = (index: number) => setPanelStop(stops[Math.min(2, Math.max(0, index))]);
   const overviewControls = <>
         <p className="situation-map-key"><span><i />Pin = located event · colour = severity</span><span><i />Ring = image available</span></p>
+          {props.onSearchChange && <form className="situation-topic-search" role="search" aria-label="Search developments" onSubmit={event=>{event.preventDefault();props.onSearchChange?.(searchDraft.trim());}}><input aria-label="Search developments" placeholder="Search topics, events or places" maxLength={200} value={searchDraft} onChange={event=>setSearchDraft(event.target.value)}/><button type="submit">Search</button>{props.searchQuery && <button type="button" onClick={()=>{setSearchDraft("");props.onSearchChange?.("");}}>Clear search</button>}<small>Search the current map scope and period · use quotes for an exact phrase</small></form>}
           <div id="world-event-stream" tabIndex={-1}>
             <SituationOverview variant="summary" compact {...props} selectedId={selectedId}
               filterExtras={<label>Country shading<select aria-label="Country shading" value={mapMetric} onChange={(event) => setMapMetric(event.target.value as "attention" | "activity" | "priority")}><option value="attention">{isScopedHeat ? "Linked developments" : "Signal relevance"}</option><option value="activity">Number of updates</option><option value="priority">High-priority updates</option></select></label>}

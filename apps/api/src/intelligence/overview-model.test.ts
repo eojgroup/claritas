@@ -12,8 +12,8 @@ const event = (id: string, hoursAgo: number, overrides: Partial<OverviewSample> 
 });
 
 test("overview filters reject unbounded windows and unknown topic input", () => {
-  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { hours: 72, country: "SE", topic: "transport", priority: "high", bucket: -1, displayLanguage: "en" });
-  assert.deepEqual(normalizeOverviewOptions(), { hours: 24, country: "", topic: "", priority: "high", bucket: -1, displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions({ hours: "72", country: " se ", topic: "TRANSPORT" }), { q: "", hours: 72, country: "SE", topic: "transport", priority: "high", bucket: -1, displayLanguage: "en" });
+  assert.deepEqual(normalizeOverviewOptions(), { q: "", hours: 24, country: "", topic: "", priority: "high", bucket: -1, displayLanguage: "en" });
   assert.equal(normalizeOverviewOptions({ bucket: "0" }).bucket, 0);
   assert.equal(normalizeOverviewOptions({ hours: 168, bucket: 13 }).bucket, 13);
   for (const bucket of [-2, 1.5, 12, "unlimited"]) assert.throws(() => normalizeOverviewOptions({ bucket }), /interval/);
@@ -115,4 +115,10 @@ test("financial publisher categories connect reporting to the market overview", 
   assert.equal(result.summary.event_count, 1);
   assert.equal(result.topics[0].key, "markets");
   assert.equal(overviewTopic("earthquake", "markets").key, "disasters");
+});
+
+test("topic search is bounded and keeps phrase/operator syntax for saved-query execution",()=>{
+ assert.equal(normalizeOverviewOptions({q:'  "Outlook outage" OR Microsoft -rumour  '}).q,'"Outlook outage" OR Microsoft -rumour');
+ assert.throws(()=>normalizeOverviewOptions({q:'x'.repeat(201)}),/200/);
+ assert.throws(()=>normalizeOverviewOptions({q:['outage']}),/text/);
 });

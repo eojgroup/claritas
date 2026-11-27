@@ -26,6 +26,16 @@ final class OverviewAnalyticsTests: XCTestCase {
         XCTAssertEqual(view.country_links?.last?.event_count,2)
         XCTAssertNil(try decode(payload()).country_links)
     }
+    func testSearchScopeQueriesRejectStaleUnsearchedResponses() throws {
+        let query = IntelligenceOverviewScope(query:"  Outlook outage  ")
+        XCTAssertEqual(query.query,"Outlook outage")
+        XCTAssertTrue(query.queryItems.contains(URLQueryItem(name:"q",value:"Outlook outage")))
+        XCTAssertNotEqual(query.requestKey,IntelligenceOverviewScope().requestKey)
+        XCTAssertFalse(try decode(payload()).matches(scope:query))
+        var raw = payload(); raw["filters"] = ["country":NSNull(),"topic":NSNull(),"q":"Outlook outage"]
+        XCTAssertTrue(try decode(raw).matches(scope:query))
+        XCTAssertEqual(IntelligenceOverviewScope(query:String(repeating:"x",count:250)).query.count,200)
+    }
     func testTimeIntervalScopesHaveDistinctRequestsAndRejectOutOfWindowBuckets() throws {
         let full = IntelligenceOverviewScope()
         let selected = IntelligenceOverviewScope(bucket: 0)

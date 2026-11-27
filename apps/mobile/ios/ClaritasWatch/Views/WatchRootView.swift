@@ -407,6 +407,7 @@ private struct WatchSignalGlanceView: View {
                     HStack {
                         WatchSectionLabel(title: "World overview", icon: "globe.europe.africa.fill")
                         Spacer()
+                        NavigationLink { WatchTopicSearch() } label: { Image(systemName:"magnifyingglass") }.accessibilityLabel("Search developments")
                         WatchRefreshStatus()
                     }
 
@@ -433,6 +434,9 @@ private struct WatchSignalGlanceView: View {
                     }
                     .buttonStyle(.bordered)
 
+                    if !model.overviewQuery.isEmpty {
+                        HStack { Text(model.overviewQuery).font(.caption2).lineLimit(1); Spacer(); Button { model.overviewQuery = ""; Task { await model.refreshOverview() } } label: { Image(systemName:"xmark.circle") }.accessibilityLabel("Clear topic search") }
+                    }
                     WatchSignalMap(
                         points: points,
                         region: region,
@@ -2225,5 +2229,23 @@ private struct WatchScopedTransportBrowser: View {
             do { let result = try await model.readScopedTransport(country: country); guard !Task.isCancelled else { return }; value = result }
             catch { guard !Task.isCancelled else { return }; failed = true }
         }
+    }
+}
+
+private struct WatchTopicSearch: View {
+    @EnvironmentObject private var model: WatchAppModel
+    @Environment(\.dismiss) private var dismiss
+    @State private var query = ""
+    var body: some View {
+        Form {
+            TextField("Topic or place",text:$query).onSubmit { apply() }
+            Button("Search developments") { apply() }
+            if !model.overviewQuery.isEmpty { Button("Clear search") { query = ""; apply() } }
+            Text("Search the selected country and period.").font(.caption2)
+        }.navigationTitle("Search").onAppear { query = model.overviewQuery }
+    }
+    private func apply() {
+        model.overviewQuery = String(query.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200))
+        Task { await model.refreshOverview() }; dismiss()
     }
 }

@@ -4047,8 +4047,10 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
     let topic: String?
     let priority: String
     let bucket: Int?
+    let query: String
 
-    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "all", bucket: Int? = nil) {
+    init(hours: Int = 24, country: String? = nil, topic: String? = nil, priority: String = "all", bucket: Int? = nil, query: String = "") {
+        self.query = String(query.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200))
         self.hours = Self.windows.contains(hours) ? hours : 24
         let code = country?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         self.country = code?.range(of: "^[A-Z]{2}$", options: .regularExpression) != nil ? (code == "UK" ? "GB" : code) : nil
@@ -4058,13 +4060,14 @@ struct IntelligenceOverviewScope: Hashable, Sendable {
         self.bucket = bucket.flatMap { (0..<bucketCount).contains($0) ? $0 : nil }
     }
 
-    var baseRequestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")|\(priority)" }
+    var baseRequestKey: String { "\(hours)|\(country ?? "global")|\(topic ?? "all")|\(priority)|\(query)" }
     var requestKey: String { "\(baseRequestKey)|\(bucket.map(String.init) ?? "all")" }
     var windowLabel: String { hours == 24 ? "24 hours" : hours == 72 ? "3 days" : "7 days" }
     var queryItems: [URLQueryItem] {
         var items = [URLQueryItem(name: "hours", value: String(hours)), URLQueryItem(name: "priority", value: priority)]
         if let country { items.append(URLQueryItem(name: "country", value: country)) }
         if let topic { items.append(URLQueryItem(name: "topic", value: topic)) }
+        if !query.isEmpty { items.append(URLQueryItem(name:"q",value:query)) }
         if let bucket { items.append(URLQueryItem(name: "bucket", value: String(bucket))) }
         return items
     }
@@ -4090,7 +4093,7 @@ struct IntelligenceOverview: Codable {
         let previous_end: Date
         let bucket_hours: Int
     }
-    struct Filters: Codable { let country: String?; let topic: String?; var priority: String? = nil; var bucket: Int? = nil }
+    struct Filters: Codable { var q: String? = nil; let country: String?; let topic: String?; var priority: String? = nil; var bucket: Int? = nil }
     struct Selection: Codable { let bucket: Int; let start: Date; let end: Date; let event_count: Int; let high_priority_count: Int }
     struct Snapshot: Codable {
         let status: String
@@ -4249,6 +4252,7 @@ struct IntelligenceOverview: Codable {
     /// Missing priority metadata remains compatible with older servers/caches.
     func matches(scope: IntelligenceOverviewScope) -> Bool {
         window.hours == scope.hours && filters.country == scope.country && filters.topic == scope.topic
+            && (filters.q ?? "") == scope.query
             && (filters.priority == nil || filters.priority == scope.priority) && filters.bucket == scope.bucket
     }
 }

@@ -854,6 +854,7 @@ export default function ClaritasDashboard() {
   const [overviewEventsError, setOverviewEventsError] = useState<string | null>(null);
   const [overviewEventsLoading, setOverviewEventsLoading] = useState(true);
   const [overview, setOverview] = useState<IntelligenceOverview | null>(null);
+  const [overviewQuery, setOverviewQuery] = useState("");
   const [overviewHours, setOverviewHours] = useState<24 | 72 | 168>(24);
   const [overviewBucket, setOverviewBucket] = useState<number | null>(null);
   const [overviewPriority, setOverviewPriority] = useState<"high" | "all">("all");
@@ -1209,11 +1210,11 @@ export default function ClaritasDashboard() {
     setOverview(null);
     setOverviewEvents([]);
     setOverviewEventsError(null);
-  }, [overviewHours, overviewTopic, overviewPriority, selectedCountry]);
-  useVisiblePolling(authStatus === "authed" && hasPaidAccess && activeView === "dashboard", 60_000, `${authUser?.id ?? ""}:${overviewHours}:${overviewTopic ?? ""}:${overviewPriority}:${selectedCountry ?? ""}:${overviewBucket ?? "all"}:${overviewEventRefresh}`, async (signal) => {
+  }, [overviewHours, overviewTopic, overviewPriority, selectedCountry, overviewQuery]);
+  useVisiblePolling(authStatus === "authed" && hasPaidAccess && activeView === "dashboard", 60_000, `${authUser?.id ?? ""}:${overviewHours}:${overviewTopic ?? ""}:${overviewPriority}:${selectedCountry ?? ""}:${overviewBucket ?? "all"}:${overviewQuery}:${overviewEventRefresh}`, async (signal) => {
     setOverviewEventsLoading(true);
     try {
-      const result = await fetchIntelligenceOverview({ hours: overviewHours, topic: overviewTopic ?? undefined, country: selectedCountry ?? undefined, priority: overviewPriority, bucket: overviewBucket }, signal);
+      const result = await fetchIntelligenceOverview({ hours: overviewHours, topic: overviewTopic ?? undefined, country: selectedCountry ?? undefined, priority: overviewPriority, bucket: overviewBucket, q:overviewQuery }, signal);
       if (signal.aborted) return;
       setOverview(result);
       setOverviewEvents(result.events);
@@ -4603,6 +4604,7 @@ export default function ClaritasDashboard() {
                   </button>
                 </div>
 
+                {stripDashboardSearchTopicTokens(query).trim() && <button className="m-3 rounded-lg border border-[color:var(--shell-border)] px-3 py-3 text-left text-sm" onClick={()=>{setOverviewQuery(stripDashboardSearchTopicTokens(query).trim().slice(0,200));setOverviewBucket(null);setOverviewHours(168);setOverviewPriority("all");setActiveView("dashboard");setSearchOpen(false);}}>Explore “{stripDashboardSearchTopicTokens(query).trim()}” on the map & timeline · past 7 days</button>}
                 <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-3">
                   {SEARCH_TOPIC_OPTIONS.map((option) => {
                     const active = effectiveSearchTopic === option.id;
@@ -4904,6 +4906,7 @@ export default function ClaritasDashboard() {
               <SituationDashboard
                 overview={overview} loading={overviewEventsLoading} error={overviewEventsError}
                 hours={overviewHours} topic={overviewTopic} priority={overviewPriority}
+                searchQuery={overviewQuery} onSearchChange={(value)=>{setOverviewBucket(null);setOverviewQuery(value);}}
                 bucket={overviewBucket} onBucketChange={setOverviewBucket}
                 country={selectedCountry} selectedId={selectedIntelligenceEventId} dark={dark}
                 briefing={dailyBriefing} briefingError={dailyBriefingError}

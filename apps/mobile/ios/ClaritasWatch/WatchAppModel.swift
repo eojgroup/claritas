@@ -25,6 +25,7 @@ final class WatchAppModel: ObservableObject {
     @Published private(set) var intelligenceOverview: IntelligenceOverview?
     @Published private(set) var overviewError: String?
     @Published private(set) var isRefreshingOverview = false
+    @Published var overviewQuery = ""
     @Published var overviewHours = 24
     @Published var overviewTopic: String? = nil
     @Published var overviewPriority = "high"
@@ -32,7 +33,7 @@ final class WatchAppModel: ObservableObject {
     private var overviewPendingScope: IntelligenceOverviewScope?
 
     var overviewScope: IntelligenceOverviewScope {
-        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority)
+        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority, query: overviewQuery)
     }
     @Published private(set) var briefingSchedule: DailyBriefingSchedule?
     @Published private(set) var isSavingBriefingSchedule: Bool = false
@@ -489,6 +490,7 @@ final class WatchAppModel: ObservableObject {
         isRefreshingOverview = true
         overviewError = nil
         if intelligenceOverview?.filters.country != scope.country || intelligenceOverview?.filters.topic != scope.topic
+            || (intelligenceOverview?.filters.q ?? "") != scope.query
             || intelligenceOverview?.window.hours != scope.hours
             || (intelligenceOverview?.filters.priority ?? "high") != scope.priority {
             intelligenceOverview = nil

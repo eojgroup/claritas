@@ -29,6 +29,9 @@ const prioritySql = `round((LEAST(priority_cap,priority_base+0.1*GREATEST(0,1-GR
 const highSql = `(severity IN ('high','critical') OR COALESCE((sample->>'news_priority')::numeric,0)>=0.6 OR ${prioritySql}>=70)`;
 const scopeSql = `generation_id=$1::uuid AND last_activity_time>=$3::timestamptz AND last_activity_time<=$2::timestamptz
   AND ($4::text IS NULL OR country_iso2=$4) AND ($5::text IS NULL OR topic=$5) AND ($6::text='all' OR ${highSql})`;
+const searchSql = (parameter: string) => ` AND (${parameter}::text IS NULL OR
+  to_tsvector('simple',COALESCE(event->>'title','')||' '||COALESCE(event->>'summary','')||' '||COALESCE(event->>'location_name',''))
+  @@ websearch_to_tsquery('simple',${parameter}::text))`;
 const scopeParams = (state: State, options: Required<OverviewOptions>) => {
   const window = overviewWindow(options.hours, new Date(state.generated_at));
   return [state.generation_id, window.end, window.previous_start, options.country || null, options.topic || null, options.priority, window.start,
@@ -40,7 +43,7 @@ export function buildSavedOverviewAggregateQuery(state: State, options: Required
   return { sql: `WITH eligible AS MATERIALIZED (
       SELECT id,last_activity_time,country_iso2,topic,location_key,location_name,
         last_activity_time>=$7::timestamptz AS current_period,${prioritySql} AS priority_score,${highSql} AS high_priority
-      FROM intelligence_overview_projection WHERE ${scopeSql}
+      FROM intelligence_overview_projection WHERE ${scopeSql}${searchSql("$10")}
     ), topic_counts AS (
       SELECT topic AS key,count(*) FILTER (WHERE current_period)::int AS event_count,
         count(*) FILTER (WHERE NOT current_period)::int AS previous_event_count,
@@ -75,7 +78,7 @@ export function buildSavedOverviewAggregateQuery(state: State, options: Required
       'locations',COALESCE((SELECT jsonb_agg(to_jsonb(location_counts) ORDER BY event_count DESC,priority_score DESC,key) FROM location_counts),'[]'::jsonb),
       'countries',COALESCE((SELECT jsonb_agg(to_jsonb(country_counts) ORDER BY event_count DESC,country_iso2) FROM country_counts),'[]'::jsonb),
       'buckets',COALESCE((SELECT jsonb_agg(to_jsonb(bucket_counts)) FROM bucket_counts),'[]'::jsonb)) AS aggregate
-      FROM eligible`, params: scopeParams(state, options) };
+      FROM eligible`, params: [...scopeParams(state, options), options.q || null] };
 }
 
 export async function buildSavedIntelligenceOverview(state: State, options: Required<OverviewOptions>, read: OverviewQuery = query, prepared?: IntelligenceOverview): Promise<IntelligenceOverview> {
@@ -99,8 +102,8 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
     event_count: aggregate.buckets.find((row) => row.index === options.bucket)?.event_count ?? 0,
     high_priority_count: aggregate.buckets.find((row) => row.index === options.bucket)?.high_priority_count ?? 0,
   } : null;
-  const detailParams = [...params.slice(0, 7), interval?.start ?? null, interval?.end ?? null, interval?.end === window.end];
-  const detailScope = `${scopeSql} AND last_activity_time>=$7::timestamptz
+  const detailParams = [...params.slice(0, 7), interval?.start ?? null, interval?.end ?? null, interval?.end === window.end, options.q || null];
+  const detailScope = `${scopeSql}${searchSql("$11")} AND last_activity_time>=$7::timestamptz
     AND ($8::timestamptz IS NULL OR (last_activity_time>=$8::timestamptz
       AND (last_activity_time<$9::timestamptz OR ($10::boolean AND last_activity_time=$9::timestamptz))))`;
   // Bound JSON/title processing independently for each topic. Full-period
@@ -147,9 +150,9 @@ export async function buildSavedIntelligenceOverview(state: State, options: Requ
       count(*) FILTER(WHERE ${inInterval} AND ${highSql})::int AS high_priority_count,
       count(*) FILTER(WHERE ${previousInterval})::int AS previous_event_count,
       COALESCE(max(${prioritySql}) FILTER(WHERE ${inInterval}),0)::int AS peak_priority_score
-    FROM intelligence_overview_projection WHERE ${scopeSql} AND country_iso2 IS NOT NULL
+    FROM intelligence_overview_projection WHERE ${scopeSql}${searchSql("$11")} AND country_iso2 IS NOT NULL
       AND (${inInterval} OR ${previousInterval}) GROUP BY country_iso2
-    HAVING count(*) FILTER(WHERE ${inInterval})>0`, [...params.slice(0, 6), interval.start, interval.end, interval.end === window.end, options.hours * 3600])).rows : aggregate.countries;
+    HAVING count(*) FILTER(WHERE ${inInterval})>0`, [...params.slice(0, 6), interval.start, interval.end, interval.end === window.end, options.hours * 3600, options.q || null])).rows : aggregate.countries;
   // Primary-country scope stays unchanged. Count the explicit location links
   // of that full saved cohort, independently of the bounded card page.
   const countryLinks = options.country ? (await read<{ country_iso2: string; event_count: number; high_priority_count: number }>(`
@@ -209,7 +212,7 @@ async function readUncached(options: Required<OverviewOptions>, read: OverviewQu
     const { current: _current, ...empty } = buildOverviewAnalytics([], options, new Date());
     return { ...empty, events: [], timeline: [], map_events: [], visual_events: [], snapshot: { status: "warming", generated_at: null, age_seconds: null } };
   }
-  const globalScope = !options.country && !options.topic;
+  const globalScope = !options.country && !options.topic && !options.q;
   const savedGlobal = globalScope && options.bucket < 0 && state.payload;
   const overview = savedGlobal || await buildSavedIntelligenceOverview(state, options, read, globalScope ? state.payload ?? undefined : undefined);
   // Global English presentation is prepared by the worker. Scoped views and

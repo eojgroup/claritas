@@ -87,6 +87,7 @@ final class AppModel: ObservableObject {
     @Published private(set) var intelligenceOverviewError: String?
     @Published private(set) var isRefreshingIntelligenceOverview = false
     @Published var overviewHours = 24 { didSet { if oldValue != overviewHours { overviewBucket = nil } } }
+    @Published var overviewQuery = "" { didSet { if oldValue != overviewQuery { overviewBucket = nil } } }
     @Published var overviewBucket: Int? = nil
     @Published var overviewTopic: String? = nil
     @Published var overviewPriority = "all"
@@ -96,7 +97,7 @@ final class AppModel: ObservableObject {
     private var overviewLoadedAt: Date?
 
     var overviewScope: IntelligenceOverviewScope {
-        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority, bucket: overviewBucket)
+        IntelligenceOverviewScope(hours: overviewHours, country: selectedCountry, topic: overviewTopic, priority: overviewPriority, bucket: overviewBucket, query: overviewQuery)
     }
 
     @Published var dailyBriefing: DailySignalBriefing? = nil
@@ -631,6 +632,7 @@ final class AppModel: ObservableObject {
         intelligenceOverview = overview
         overviewPriority = overview.filters.priority ?? "all"
         overviewHours = overview.window.hours
+        overviewQuery = overview.filters.q ?? ""
         overviewTopic = overview.filters.topic
         overviewBucket = overview.filters.bucket
     }
@@ -727,6 +729,7 @@ final class AppModel: ObservableObject {
         overviewHours = 24
         overviewBucket = nil
         overviewTopic = nil
+        overviewQuery = ""
         overviewPriority = "all"
         dailyBriefing = nil
         briefingRequestID = nil

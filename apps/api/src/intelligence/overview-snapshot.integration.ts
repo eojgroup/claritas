@@ -43,6 +43,8 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     const generation = randomUUID();
     const olderLocated = records.find((row) => row.age === 23)!;
     await client.query("UPDATE intelligence_event SET geography=ST_SetSRID(ST_MakePoint(18,59),4326) WHERE id=$1", [olderLocated.id]);
+    await client.query("UPDATE intelligence_event SET title='Microsoft Outlook outage restored' WHERE id=$1",[olderLocated.id]);
+    await client.query("UPDATE intelligence_event SET title='Microsoft Outlook outage' WHERE id=$1",[records.find(row=>row.age === 25)!.id]);
     const projection = buildOverviewProjectionQuery(now);
     const rows = (await client.query(projection.sql, projection.params)).rows.filter((row) => records.some((record) => record.id === row.id));
     assert.equal(rows.length, records.length);
@@ -93,6 +95,21 @@ test("durable overview counts entire windows, scopes the same cohort, and keeps 
     assert.ok(interval.countries.every((country) => Number.isInteger(country.attention_score)));
     assert.ok(interval.events.every((event) => event.last_activity_time >= interval.selection!.start && event.last_activity_time < interval.selection!.end));
     assert.ok(interval.map_events.some((event) => event.id === olderLocated.id));
+    const search = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'"Outlook outage"'}),measured);
+    assert.equal(search.summary.event_count,1,"search the entire projection, including events outside initial cards");
+    assert.equal(search.summary.previous_event_count,1);
+    assert.equal(search.buckets.reduce((sum,bucket)=>sum+bucket.event_count,0),1);
+    assert.deepEqual(search.events.map(event=>event.id),[olderLocated.id]);
+    assert.ok(search.map_events.some(event=>event.id===olderLocated.id));
+    assert.equal(search.filters.q,'"Outlook outage"');
+    const searchInterval = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'Outlook',bucket:0}),measured);
+    assert.equal(searchInterval.selection?.event_count,1);
+    assert.equal(searchInterval.events[0]?.id,olderLocated.id);
+    const excluded = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'Outlook -restored'}),measured);
+    assert.equal(excluded.summary.event_count,0);
+    assert.equal(excluded.summary.previous_event_count,1);
+    const differentCountry = await readIntelligenceOverviewSnapshot(normalizeOverviewOptions({q:'Outlook',country:'NO'}),measured);
+    assert.equal(differentCountry.summary.event_count,0);
     const scopedTransport = records.find(row=>row.country === "SE" && row.type === "aviation_disruption")!;
     const unrelatedTransport = records.find(row=>row.country === "NO" && row.type === "aviation_disruption")!;
     for (const [index,iso,confidence,eventId] of [[0,"NO",0.9,scopedTransport.id],[1,"NO",0.8,scopedTransport.id],[2,"FI",0.3,scopedTransport.id],[3,"DE",0.9,unrelatedTransport.id]] as const) {

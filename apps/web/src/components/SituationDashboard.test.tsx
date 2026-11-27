@@ -130,3 +130,17 @@ it("switches directly between map countries in developments without clearing the
   expect(screen.queryByRole("button",{name:"Clear SE ×"})).toBeNull();
   expect(screen.getByRole("button",{name:"Clear NO ×"})).toBeTruthy();
 });
+
+it("submits a topic search for the shared map/timeline scope and clears it explicitly", () => {
+ const change=vi.fn();
+ const props={overview:overviewFixture("all"),loading:false,error:null,hours:24 as const,topic:null,priority:"all" as const,country:null,selectedId:null,dark:true,briefing:null,briefingError:null,onHoursChange:vi.fn(),onTopicChange:vi.fn(),onPriorityChange:vi.fn(),onCountryChange:vi.fn(),onSelect:vi.fn(),onOpenImagery:vi.fn(),onRefresh:vi.fn(),onRefreshBriefing:async()=>{},onSearchChange:change};
+ const view=render(<SituationDashboard {...props}/>);
+ const input=screen.getByRole("textbox",{name:"Search developments"});
+ fireEvent.change(input,{target:{value:'"Outlook outage"'}});
+ expect(change).not.toHaveBeenCalled();
+ fireEvent.submit(screen.getByRole("search",{name:"Search developments"}));
+ expect(change).toHaveBeenLastCalledWith('"Outlook outage"');
+ view.rerender(<SituationDashboard {...props} searchQuery='"Outlook outage"'/>);
+ fireEvent.click(screen.getByRole("button",{name:"Clear search"}));
+ expect(change).toHaveBeenLastCalledWith("");
+});

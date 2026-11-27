@@ -11,3 +11,9 @@ export const CLAIM_OUTBOX_SQL = `WITH candidates AS (
        FROM candidates WHERE outbox.id=candidates.id
        RETURNING outbox.id,outbox.event_type,outbox.aggregate_type,outbox.aggregate_id,
                  outbox.payload,outbox.occurred_at,outbox.attempts`;
+
+/** Reserve part of each batch for current non-transport signals while the
+ * older queue catches up. Lease changes exclude these IDs from the FIFO read. */
+export const CLAIM_FRESH_OUTBOX_SQL = CLAIM_OUTBOX_SQL
+ .replace("AND available_at<=now()", "AND occurred_at>=now()-interval '2 hours' AND event_type<>'transport.movement.recorded' AND available_at<=now()")
+ .replace("ORDER BY occurred_at,id", "ORDER BY occurred_at DESC,id DESC");
