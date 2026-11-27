@@ -407,7 +407,7 @@ private struct WatchSignalGlanceView: View {
                     HStack {
                         WatchSectionLabel(title: "World overview", icon: "globe.europe.africa.fill")
                         Spacer()
-                        NavigationLink { WatchTopicSearch() } label: { Image(systemName:"magnifyingglass") }.accessibilityLabel("Search developments")
+                        NavigationLink { WatchTopicSearch(onApply:{layer = .signals}) } label: { Image(systemName:"magnifyingglass") }.accessibilityLabel("Search developments")
                         WatchRefreshStatus()
                     }
 
@@ -2233,6 +2233,7 @@ private struct WatchScopedTransportBrowser: View {
 }
 
 private struct WatchTopicSearch: View {
+    let onApply: () -> Void
     @EnvironmentObject private var model: WatchAppModel
     @Environment(\.dismiss) private var dismiss
     @State private var query = ""
@@ -2245,6 +2246,7 @@ private struct WatchTopicSearch: View {
         }.navigationTitle("Search").onAppear { query = model.overviewQuery }
     }
     private func apply() {
+        onApply()
         model.overviewQuery = String(query.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200))
         Task { await model.refreshOverview() }; dismiss()
     }

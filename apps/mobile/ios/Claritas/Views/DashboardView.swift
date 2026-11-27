@@ -5493,11 +5493,11 @@ struct WorldMapWorkspace: View {
                 HStack(spacing:8) {
                     Image(systemName:"magnifyingglass").foregroundStyle(.secondary)
                     TextField("Search topics, events or places",text:$topicSearch).submitLabel(.search)
-                        .onSubmit { model.overviewQuery = String(topicSearch.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200)) }
+                        .onSubmit { applyTopicSearch() }
                     if !topicSearch.isEmpty || !model.overviewQuery.isEmpty {
                         Button { topicSearch = ""; model.overviewQuery = "" } label: { Image(systemName:"xmark.circle.fill").frame(width:36,height:40) }.accessibilityLabel("Clear topic search")
                     }
-                    Button("Search") { model.overviewQuery = String(topicSearch.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200)) }.font(.caption).frame(minHeight:40)
+                    Button("Search") { applyTopicSearch() }.font(.caption).frame(minHeight:40)
                 }.padding(.horizontal,14).padding(.vertical,6)
                 Picker("Explore the selected scope", selection: $exploration) {
                     Text("Developments").tag("developments")
@@ -5541,6 +5541,13 @@ struct WorldMapWorkspace: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    private func applyTopicSearch() {
+        exploration = "developments"
+        countryContextExpanded = false
+        mappedTransportEntity = nil
+        model.overviewQuery = String(topicSearch.trimmingCharacters(in:.whitespacesAndNewlines).prefix(200))
+        revealContext()
+    }
     private func openBriefing() {
         model.selectedIntelligenceEventID = nil; profileCountry = nil; exploration = "developments"
         withAnimation(.easeInOut(duration: 0.22)) {

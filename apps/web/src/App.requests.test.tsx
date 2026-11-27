@@ -28,6 +28,7 @@ it("loads the overview and briefing without an optional-feed request burst and s
     else if (url.pathname === "/api/auth/providers") data = { providers: [] };
     else if (url.pathname === "/api/intelligence/overview") {
       const overview = overviewFixture(url.searchParams.get("priority") as "high" | "all", url.searchParams.get("country"));
+      overview.filters.q = url.searchParams.get("q");
       overview.events.push({ ...event, id: "outside-latest-cohort" });
       overview.map_events = [event, { ...event, id: "older-located-event" }];
       overview.countries = [{ country_iso2: "SE", event_count: 1000, high_priority_count: 20, attention_score: 72, previous_event_count: 900, peak_priority_score: 90 }];
@@ -85,6 +86,12 @@ it("loads the overview and briefing without an optional-feed request burst and s
   expect(screen.queryByRole("region", { name: "Country profile" })).toBeNull();
   expect(await screen.findByRole("region", { name: "Latest developments" })).toBeTruthy();
   expect(requests).not.toContain("/api/weather/country-latest");
+  fireEvent.change(screen.getByRole("textbox",{name:"Search developments"}),{target:{value:"Outlook"}});
+  fireEvent.submit(screen.getByRole("search",{name:"Search developments"}));
+  await waitFor(()=>expect(requests).toContain("/api/intelligence/overview?hours=24&country=SE&q=Outlook&priority=high"));
+  await waitFor(()=>expect(screen.getByTestId("overview-map").getAttribute("data-point-count")).toBe("3"));
+  fireEvent.click(screen.getByRole("button",{name:"Clear search"}));
+  await screen.findByRole("region",{name:"Latest developments"});
   fireEvent.click(screen.getByRole("button", { name: /Weather, markets & country profile/ }));
   expect(screen.getByRole("region", { name: "Country profile" })).toBeTruthy();
   const navigation = within(screen.getByRole("navigation", { name: "Main navigation" }));

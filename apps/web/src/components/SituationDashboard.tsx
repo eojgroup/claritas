@@ -17,7 +17,7 @@ const IntelligenceWorkspace = lazy(() => import("./IntelligenceWorkspace"));
 const TransportScopeContext = lazy(() => import("./TransportScopeContext"));
 type Props = {
   overview: IntelligenceOverview | null; loading: boolean; error: string | null;
-  searchQuery?: string; onSearchChange?: (query:string)=>void;
+  searchRevision?: number; searchQuery?: string; onSearchChange?: (query:string)=>void;
   hours: 24 | 72 | 168; topic: OverviewTopic | null; priority: "high" | "all";
   bucket?: number | null; onBucketChange?: (bucket: number | null) => void;
   country: string | null; selectedId: string | null; dark: boolean;
@@ -72,6 +72,7 @@ export default function SituationDashboard(props: Props) {
   const [wideContext, setWideContext] = useState(false);
   const contextScroll = useRef<HTMLDivElement>(null);
   const [panelStop, setPanelStop] = useState<"peek" | "half" | "full">("half");
+  useEffect(()=>{if(props.searchQuery){setScopeView("developments");setMappedVehicle(null);setCountryContextOpen(false);setPanelStop(stop=>stop === "peek" ? "half" : stop);}},[props.searchQuery,props.searchRevision]);
   const panelDrag = useRef<{ y: number; stop: number } | null>(null);
   const suppressPanelClick = useRef(false);
   const [mapMetric, setMapMetric] = useState<"attention" | "activity" | "priority">("attention");

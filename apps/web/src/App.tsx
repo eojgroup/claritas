@@ -854,6 +854,7 @@ export default function ClaritasDashboard() {
   const [overviewEventsError, setOverviewEventsError] = useState<string | null>(null);
   const [overviewEventsLoading, setOverviewEventsLoading] = useState(true);
   const [overview, setOverview] = useState<IntelligenceOverview | null>(null);
+  const [overviewSearchRevision,setOverviewSearchRevision] = useState(0);
   const [overviewQuery, setOverviewQuery] = useState("");
   const [overviewHours, setOverviewHours] = useState<24 | 72 | 168>(24);
   const [overviewBucket, setOverviewBucket] = useState<number | null>(null);
@@ -3834,6 +3835,13 @@ export default function ClaritasDashboard() {
     selectedCountry || comparisonCountry || pinnedCountry || selectedSymbol || selectedIntelligenceEventId,
   );
 
+  const openTopicSearch = () => {
+    const topicQuery = stripDashboardSearchTopicTokens(query).trim().slice(0,200);
+    if (!topicQuery) return;
+    handleOpenIntelligence(null,{focus:false});
+    setOverviewSearchRevision(value=>value+1); setOverviewQuery(topicQuery); setOverviewBucket(null); setOverviewHours(168); setOverviewPriority("all"); setSearchOpen(false);
+  };
+
   const handleSearchTopicChange = useCallback((topic: SearchTopic) => {
     setSearchTopic(topic);
     setQuery((value) => stripDashboardSearchTopicTokens(value));
@@ -4578,6 +4586,7 @@ export default function ClaritasDashboard() {
                   <Search className="h-5 w-5 shrink-0 text-[color:var(--shell-muted)]" />
                   <input
                     aria-label="Search signals"
+                    onKeyDown={event=>{if(event.key === "Enter"){event.preventDefault();openTopicSearch();}}}
                     maxLength={400}
                     className="min-w-0 flex-1 bg-transparent text-base text-[color:var(--shell-ink)] outline-none placeholder:text-[color:var(--shell-muted)]"
                     placeholder={searchInputPlaceholder}
@@ -4604,7 +4613,7 @@ export default function ClaritasDashboard() {
                   </button>
                 </div>
 
-                {stripDashboardSearchTopicTokens(query).trim() && <button className="m-3 rounded-lg border border-[color:var(--shell-border)] px-3 py-3 text-left text-sm" onClick={()=>{setOverviewQuery(stripDashboardSearchTopicTokens(query).trim().slice(0,200));setOverviewBucket(null);setOverviewHours(168);setOverviewPriority("all");setActiveView("dashboard");setSearchOpen(false);}}>Explore “{stripDashboardSearchTopicTokens(query).trim()}” on the map & timeline · past 7 days</button>}
+                {stripDashboardSearchTopicTokens(query).trim() && <button className="m-3 rounded-lg border border-[color:var(--shell-border)] px-3 py-3 text-left text-sm" onClick={openTopicSearch}>Explore “{stripDashboardSearchTopicTokens(query).trim()}” on the map & timeline · past 7 days</button>}
                 <div className="flex flex-wrap items-center gap-2 border-b border-[color:var(--shell-border)] px-4 py-3">
                   {SEARCH_TOPIC_OPTIONS.map((option) => {
                     const active = effectiveSearchTopic === option.id;
@@ -4906,7 +4915,7 @@ export default function ClaritasDashboard() {
               <SituationDashboard
                 overview={overview} loading={overviewEventsLoading} error={overviewEventsError}
                 hours={overviewHours} topic={overviewTopic} priority={overviewPriority}
-                searchQuery={overviewQuery} onSearchChange={(value)=>{setOverviewBucket(null);setOverviewQuery(value);}}
+                searchQuery={overviewQuery} searchRevision={overviewSearchRevision} onSearchChange={(value)=>{setOverviewSearchRevision(revision=>revision+1);setOverviewBucket(null);setOverviewQuery(value);}}
                 bucket={overviewBucket} onBucketChange={setOverviewBucket}
                 country={selectedCountry} selectedId={selectedIntelligenceEventId} dark={dark}
                 briefing={dailyBriefing} briefingError={dailyBriefingError}
